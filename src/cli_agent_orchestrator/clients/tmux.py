@@ -103,8 +103,14 @@ class TmuxClient:
             logger.error(f"Failed to send keys to {session_name}:{window_name}: {e}")
             raise
 
-    def get_history(self, session_name: str, window_name: str) -> str:
-        """Get window history."""
+    def get_history(self, session_name: str, window_name: str, tail_lines: int = TMUX_HISTORY_LINES) -> str:
+        """Get window history.
+        
+        Args:
+            session_name: Name of tmux session
+            window_name: Name of window in session
+            tail_lines: Number of lines to capture from end (default: TMUX_HISTORY_LINES)
+        """
         try:
             session = self.server.sessions.get(session_name=session_name)
             if not session:
@@ -116,7 +122,7 @@ class TmuxClient:
             
             # Use cmd to run capture-pane with -e (escape sequences) and -p (print) flags
             pane = window.panes[0]
-            result = pane.cmd('capture-pane', '-e', '-p', '-S', f'-{TMUX_HISTORY_LINES}')
+            result = pane.cmd('capture-pane', '-e', '-p', '-S', f'-{tail_lines}')
             # Join all lines with newlines to get complete output
             return '\n'.join(result.stdout) if result.stdout else ""
         except Exception as e:
