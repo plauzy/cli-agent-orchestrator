@@ -22,6 +22,10 @@ CAO_HOME_DIR = Path.home() / ".aws" / "cli-agent-orchestrator"
 DB_DIR = CAO_HOME_DIR / "db"
 LOG_DIR = CAO_HOME_DIR / "logs"
 TERMINAL_LOG_DIR = LOG_DIR / "terminal"
+TERMINAL_LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+# Terminal log configuration
+TERMINAL_LOG_TAIL_LINES = 5  # Lines to check for IDLE patterns in inbox service
 AGENT_CONTEXT_DIR = CAO_HOME_DIR / "agent-context"
 
 # Q CLI directories
@@ -35,4 +39,5 @@ DATABASE_URL = f"sqlite:///{DATABASE_FILE}"
 SERVER_HOST = "localhost"
 SERVER_PORT = 8080
 SERVER_VERSION = "0.1.0"
+API_BASE_URL = f"http://{SERVER_HOST}:{SERVER_PORT}"
 CORS_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
