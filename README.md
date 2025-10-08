@@ -2,22 +2,20 @@
 
 A lightweight orchestration system for managing multiple AI agent sessions in tmux terminals. Enables Multi-agent collaboration via MCP server.
 
+For project structure and architecture details, see [CODEBASE.md](CODEBASE.md).
+
 ## Installation
 
-1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
+1. Install [tmux](https://github.com/tmux/tmux/wiki/Installing)
 
-2. Install CLI Agent Orchestrator:
+2. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
+
+3. Install CLI Agent Orchestrator:
 ```bash
-uv tool install git+https://github.com/awslabs/cli-agent-orchestrator.git@launch --upgrade
+uv tool install git+https://github.com/awslabs/cli-agent-orchestrator.git@main --upgrade
 ```
 
 ## Quick Start
-
-Initialize the database:
-```bash
-cao init
-```
-
 Install agents from agent store to Q CLI:
 ```bash
 cao install code_supervisor
@@ -25,7 +23,12 @@ cao install developer
 cao install reviewer
 ```
 
-Launch a terminal with an agent profile:
+Start the cao server
+```
+cao-server
+```
+
+In another terminal, launch a terminal with an agent profile:
 ```bash
 cao launch --agents code_supervisor
 ```
@@ -73,7 +76,7 @@ cao install developer
 The example flow asks a simple world trivia question every morning at 7:30 AM.
 
 ```bash
-# 1. Start the server (required for daemon)
+# 1. Start the cao server
 cao-server
 
 # 2. In another terminal, add a flow
