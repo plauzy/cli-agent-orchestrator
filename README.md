@@ -1,8 +1,35 @@
 # CLI Agent Orchestrator
 
-A lightweight orchestration system for managing multiple AI agent sessions in tmux terminals. Enables Multi-agent collaboration via MCP server.
+CLI Agent Orchestrator(CAO, pronounced as "kay-oh"), is a lightweight orchestration system for managing multiple AI agent sessions in tmux terminals. Enables Multi-agent collaboration via MCP server.
 
-For project structure and architecture details, see [CODEBASE.md](CODEBASE.md).
+## Hierarchical Multi-Agent System
+
+CLI Agent Orchestrator (CAO) implements a hierarchical multi-agent system that enables complex problem-solving through specialized division of CLI Developer Agents.
+
+![CAO Architecture](./docs/assets/cao_architecture.png)
+
+### Key Features
+
+* **Hierarchical orchestration** – CAO's supervisor agent coordinates workflow management and task delegation to specialized worker agents. The supervisor maintains overall project context while agents focus on their domains of expertise.
+
+* **Session-based isolation** – Each agent operates in isolated tmux sessions, ensuring proper context separation while enabling seamless communication through Model Context Protocol (MCP) servers. This provides both coordination and parallel processing capabilities.
+
+* **Intelligent task delegation** – CAO automatically routes tasks to appropriate specialists based on project requirements, expertise matching, and workflow dependencies. The system adapts between individual agent work and coordinated team efforts through three orchestration patterns:
+  - **Handoff** - Synchronous task transfer with wait-for-completion
+  - **Delegate** - Asynchronous task spawning for parallel execution  
+  - **Send Message** - Direct communication with existing agents
+
+* **Flexible workflow patterns** – CAO supports both sequential coordination for dependent tasks and parallel processing for independent work streams. This allows optimization of both development speed and quality assurance processes.
+
+* **Flow - Scheduled runs** – Automated execution of workflows at specified intervals using cron-like scheduling, enabling routine tasks and monitoring workflows to run unattended.
+
+* **Context preservation** – The supervisor agent provides only necessary context to each worker agent, avoiding context pollution while maintaining workflow coherence.
+
+* **Direct worker interaction and steering** – Users can interact directly with worker agents to provide additional steering, distinguishing from sub-agents features by allowing real-time guidance and course correction.
+
+* **Advanced CLI integration** – CAO agents have full access to advanced features of the developer CLI, such as the [sub-agents](https://docs.claude.com/en/docs/claude-code/sub-agents) feature of Claude Code, [Custom Agent](https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/command-line-custom-agents.html) of Amazon Q Developer for CLI and so on.
+
+For detailed project structure and architecture, see [CODEBASE.md](CODEBASE.md).
 
 ## Installation
 
@@ -116,19 +143,8 @@ CAO supports three orchestration patterns:
 - Use when you need **synchronous** task execution with results
 
 Example: Sequential code review workflow
-```
-Supervisor → handoff(developer, "Implement login feature") → waits
-                                                              ↓
-                                                    Developer completes
-                                                              ↓
-Supervisor ← receives code ← Developer exits
-          ↓
-          → handoff(reviewer, "Review login code") → waits
-                                                      ↓
-                                              Reviewer completes
-                                                      ↓
-Supervisor ← receives review ← Reviewer exits
-```
+
+![Handoff Workflow](./docs/assets/handoff-workflow.png)
 
 **2. Delegate** - Spawn an agent to work independently (async)
 - Creates a new terminal with the specified agent profile
@@ -140,15 +156,8 @@ Supervisor ← receives review ← Reviewer exits
 - Use for **asynchronous** task execution or fire-and-forget operations
 
 Example: Parallel test execution
-```
-Supervisor → delegate(tester, "Run unit tests") → continues immediately
-          → delegate(tester, "Run integration tests") → continues immediately
-          → delegate(tester, "Run e2e tests") → continues immediately
-                                                        ↓
-Supervisor ← send_message("Unit tests passed") ← Tester 1
-          ← send_message("Integration tests passed") ← Tester 2
-          ← send_message("E2E tests passed") ← Tester 3
-```
+
+![Parallel Test Execution](./docs/assets/parallel-test-execution.png)
 
 **3. Send Message** - Communicate with an existing agent
 - Sends a message to a specific terminal's inbox
@@ -158,15 +167,7 @@ Supervisor ← send_message("Unit tests passed") ← Tester 1
 - Use for iterative feedback or multi-turn conversations
 
 Example: Multi-role feature development
-```
-PM → send_message(developer_id, "Build payment API per spec")
-Developer → send_message(pm_id, "Clarify refund flow?")
-PM → send_message(developer_id, "Refunds go to original payment method")
-Developer → send_message(reviewer_id, "Ready for review")
-Reviewer → send_message(developer_id, "Add error handling for timeouts")
-Developer → send_message(reviewer_id, "Updated")
-Reviewer → send_message(pm_id, "Payment API approved")
-```
+![Multi-role Feature Development](./docs/assets/multi-role-feature-development.png)
 
 ### Custom Orchestration
 
