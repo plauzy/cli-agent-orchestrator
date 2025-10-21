@@ -1,0 +1,32 @@
+{
+  "name": "cao-infrastructure",
+  "version": "0.1.0",
+  "description": "CDK Infrastructure for CLI Agent Orchestrator",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "test": "jest",
+    "cdk": "cdk",
+    "deploy": "cdk deploy --all",
+    "deploy:dev": "cdk deploy --all --context environment=dev",
+    "deploy:prod": "cdk deploy --all --context environment=prod",
+    "synth": "cdk synth",
+    "diff": "cdk diff",
+    "destroy": "cdk destroy --all"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.14.9",
+    "aws-cdk": "^2.147.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.3"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.147.0",
+    "constructs": "^10.3.0",
+    "dotenv": "^16.4.5",
+    "source-map-support": "^0.5.21"
+  }
+}
