@@ -346,6 +346,86 @@ The UI showcases three key multi-agent patterns:
 For detailed information about the Cloudscape UX:
 - [Frontend README](frontend/README.md) - Complete setup and feature guide
 - [Best Practices](frontend/src/pages/BestPractices.tsx) - The 10 Commandments implementation
+- [UX Implementation Guide](CLOUDSCAPE_UX_GUIDE.md) - Comprehensive implementation details
+
+## AWS Serverless Deployment
+
+Deploy the entire application to AWS using CDK infrastructure following serverless best practices.
+
+### Infrastructure Components
+
+**Frontend:**
+- **S3** - Static website hosting
+- **CloudFront** - CDN with edge caching, HTTPS, and security headers
+- **Route53** (optional) - Custom domain DNS
+- **ACM** (optional) - SSL/TLS certificates
+
+**Backend:**
+- **API Gateway** - RESTful API endpoints
+- **Lambda** - Serverless compute for API handlers
+- **DynamoDB** - NoSQL database for sessions and terminals
+- **CloudWatch** - Logging and monitoring
+- **X-Ray** - Distributed tracing
+
+**CI/CD:**
+- **CodePipeline** - Automated deployment pipeline
+- **CodeBuild** - Build and test automation
+- **SNS** - Pipeline notifications
+
+### Quick Deploy
+
+```bash
+# 1. Install CDK
+npm install -g aws-cdk
+
+# 2. Configure AWS credentials
+aws configure
+
+# 3. Bootstrap CDK (first time only)
+cdk bootstrap aws://ACCOUNT-ID/REGION
+
+# 4. Deploy to development
+cd infrastructure
+npm install
+npm run deploy:dev
+
+# 5. Deploy to production
+npm run deploy:prod
+```
+
+### Architecture
+
+```
+Users → Route53 → CloudFront → S3 (Frontend)
+                            ↓
+                    API Gateway → Lambda → DynamoDB
+                            ↓
+                     CloudWatch Logs
+                     X-Ray Traces
+```
+
+### Cost Estimates
+
+- **Dev Environment:** $5-20/month
+- **Prod Environment (10K users/day):** $125-150/month
+
+### Features
+
+✅ Multi-environment support (dev/prod)
+✅ Infrastructure as Code with CDK
+✅ Serverless architecture for cost optimization
+✅ Security best practices (encryption, HTTPS, IAM)
+✅ Automated CI/CD pipeline
+✅ CloudWatch monitoring and alarms
+✅ X-Ray distributed tracing
+✅ Custom domain support
+✅ Comprehensive documentation
+
+### Documentation
+
+- [Infrastructure README](infrastructure/README.md) - Complete CDK setup guide
+- [Deployment Guide](infrastructure/DEPLOYMENT.md) - Quick reference for deployments
+- [Cost Optimization](infrastructure/README.md#cost-optimization) - Tips to reduce AWS costs
 
 ## Security
 
