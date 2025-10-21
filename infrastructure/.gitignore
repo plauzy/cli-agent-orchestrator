@@ -49,7 +49,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -58,6 +57,12 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# TypeScript compiled output (but not lib/ source directory)
+/lib/*.js
+/lib/*.d.ts
+/lib/**/*.js
+/lib/**/*.d.ts
 
 # Coverage
 .nyc_output
