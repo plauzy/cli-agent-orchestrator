@@ -286,6 +286,67 @@ cao flow run daily-standup
 cao flow remove daily-standup
 ```
 
+## Cloudscape Multi-Agent Workflow UX
+
+A comprehensive web interface built with AWS Cloudscape Design System that demonstrates multi-agent workflow best practices.
+
+### Features
+
+The Cloudscape UX provides an interactive environment for:
+
+- **Real-time Dashboard**: Monitor active agent sessions, terminals, and system health
+- **Agent Orchestration**: Visualize coordinator and specialist agent hierarchies
+- **Task Delegation**: Create tasks with complete context transfer templates
+- **Workflow Patterns**: Explore Handoff, Assign, and Send Message orchestration modes
+- **Tool Design Analyzer**: Compare API-centric vs UI-centric tool designs
+- **Best Practices Guide**: Comprehensive reference for multi-agent development
+
+### The Three Commandments
+
+The UI demonstrates the core principles of effective agent systems:
+
+1. **Start Simple, Add Complexity Only When Needed**
+   - Decision trees for architecture selection
+   - Clear guidance on when to use single vs multi-agent
+
+2. **Think From the Agent's Point of View**
+   - Visualizations of agent context and perspective
+   - Tools to verify complete information transfer
+
+3. **Tools Should Mirror UI, Not API**
+   - Tool design analyzer with efficiency calculations
+   - Real examples showing tool call reduction
+
+### Quick Start
+
+```bash
+# 1. Start the CAO server
+cao-server
+
+# 2. In another terminal, start the frontend
+cd frontend
+npm install
+npm run dev
+
+# 3. Open browser to http://localhost:3000
+```
+
+The frontend connects to the CAO server API at `http://localhost:9889`.
+
+### Architecture Patterns Demonstrated
+
+The UI showcases three key multi-agent patterns:
+
+1. **Coordinator-Specialist**: Coordinator delegates to domain specialists
+2. **Parallel MapReduce**: Split work, process in parallel, combine results
+3. **Test-Time Compute**: Multiple approaches evaluated for best result
+
+### Documentation
+
+For detailed information about the Cloudscape UX:
+- [Frontend README](frontend/README.md) - Complete setup and feature guide
+- [Best Practices](frontend/src/pages/BestPractices.tsx) - The 10 Commandments implementation
+
 ## Security
 
 See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
