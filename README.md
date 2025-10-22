@@ -31,6 +31,33 @@ CLI Agent Orchestrator (CAO) implements a hierarchical multi-agent system that e
 
 For detailed project structure and architecture, see [CODEBASE.md](CODEBASE.md).
 
+## VSCode Extension
+
+A visual interface for managing multi-agent orchestration is available as a VSCode extension. The extension provides:
+
+- **Session & Terminal Management**: Create and manage CAO sessions and agent terminals through a graphical interface
+- **Real-time Monitoring**: View agent status and terminal output with auto-refresh
+- **Interactive Interface**: Send messages to agents and view responses directly in VSCode
+- **Flow Management**: View, enable/disable, and run scheduled flows
+- **Multi-Provider Support**: Works with both Q CLI and Claude Code providers
+
+### Quick Setup
+
+1. Install and start the CAO server:
+   ```bash
+   cao-server
+   ```
+
+2. Open the `vscode-extension` folder in VSCode:
+   ```bash
+   cd vscode-extension
+   npm install
+   ```
+
+3. Press `F5` to launch the Extension Development Host
+
+For detailed setup and usage instructions, see [vscode-extension/README.md](vscode-extension/README.md).
+
 ## Installation
 
 1. Install tmux (version 3.3 or higher required)
