@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "lib": ["ES2020"]
+  },
+  "include": ["src/extension/**/*"],
+  "exclude": ["node_modules", "src/webview"]
+}

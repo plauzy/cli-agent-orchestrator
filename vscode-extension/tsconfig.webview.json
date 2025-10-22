@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "lib": ["ES2020", "DOM"],
+    "jsx": "react"
+  },
+  "include": ["src/webview/**/*"],
+  "exclude": ["node_modules", "src/extension"]
+}

@@ -1,0 +1,76 @@
+{
+  "name": "cao-vscode",
+  "displayName": "CLI Agent Orchestrator",
+  "description": "Visual interface for managing CLI Agent Orchestrator sessions",
+  "version": "0.1.0",
+  "publisher": "cao",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:cao.openDashboard"
+  ],
+  "main": "./out/extension/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "cao.openDashboard",
+        "title": "CAO: Open Dashboard",
+        "category": "CAO"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cao-sidebar",
+          "title": "CLI Agent Orchestrator",
+          "icon": "media/cao-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "cao-sidebar": [
+        {
+          "type": "webview",
+          "id": "cao.dashboard",
+          "name": "Dashboard"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "npm run build:extension && npm run build:webview",
+    "build:extension": "tsc -p ./tsconfig.extension.json",
+    "build:webview": "webpack --mode production",
+    "watch": "npm run watch:extension & npm run watch:webview",
+    "watch:extension": "tsc -watch -p ./tsconfig.extension.json",
+    "watch:webview": "webpack --mode development --watch",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@types/vscode": "^1.75.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "css-loader": "^6.8.0",
+    "eslint": "^8.40.0",
+    "html-webpack-plugin": "^5.5.0",
+    "style-loader": "^3.3.0",
+    "ts-loader": "^9.4.0",
+    "typescript": "^5.0.0",
+    "vsce": "^2.15.0",
+    "webpack": "^5.80.0",
+    "webpack-cli": "^5.0.0"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "axios": "^1.4.0"
+  }
+}
