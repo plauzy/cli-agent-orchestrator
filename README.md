@@ -113,9 +113,19 @@ tmux attach -t <session-name>
 # Detach from session (inside tmux)
 Ctrl+b, then d
 
+# Switch between windows (inside tmux)
+Ctrl+b, then n          # Next window
+Ctrl+b, then p          # Previous window
+Ctrl+b, then <number>   # Go to window number (0-9)
+Ctrl+b, then w          # List all windows (interactive selector)
+
 # Delete a session
 cao shutdown --session <session-name>
 ```
+
+**List all windows (Ctrl+b, w):**
+
+![Tmux Window Selector](./docs/assets/tmux_all_windows.png)
 
 ## MCP Server Tools and Orchestration Modes
 
@@ -155,9 +165,11 @@ Example: Sequential code review workflow
 - Messages are queued for delivery if the supervisor is busy (common in parallel workflows)
 - Use for **asynchronous** task execution or fire-and-forget operations
 
-Example: Parallel test execution
+Example: A supervisor assigns parallel data analysis tasks to multiple analysts while using handoff to sequentially generate a report template, then combines all results.
 
-![Parallel Test Execution](./docs/assets/parallel-test-execution.png)
+See [examples/assign](examples/assign) for the complete working example.
+
+![Parallel Data Analysis](./docs/assets/parallel-data-analysis.png)
 
 **3. Send Message** - Communicate with an existing agent
 - Sends a message to a specific terminal's inbox
