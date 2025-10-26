@@ -31,6 +31,34 @@ CLI Agent Orchestrator (CAO) implements a hierarchical multi-agent system that e
 
 For detailed project structure and architecture, see [CODEBASE.md](CODEBASE.md).
 
+## VSCode Extension
+
+CAO now includes a comprehensive VSCode extension with a visual dashboard for managing multi-agent workflows.
+
+**Features**:
+- 🎨 Modern UI with AWS Cloudscape components
+- 📊 Real-time monitoring of agent sessions
+- 🖥️ Split-panel terminal viewer
+- 🚀 One-click agent launching
+- ⏰ Flow management interface
+- 🔄 Auto-refreshing status updates
+
+**Quick Start**:
+```bash
+# Build the extension
+./scripts/build-extension.sh
+
+# Open in VSCode
+cd vscode-extension
+code .
+# Press F5 to launch Extension Development Host
+```
+
+**See detailed documentation**:
+- [VSCode Extension Guide](VSCODE_EXTENSION.md) - Complete setup and usage
+- [Cloud Deployment Guide](DEPLOYMENT.md) - Deploy to AWS with CDK
+- [Implementation Summary](WEBVIEW_SUMMARY.md) - Architecture and features
+
 ## Installation
 
 1. Install tmux (version 3.3 or higher required)
