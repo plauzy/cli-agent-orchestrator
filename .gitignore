@@ -6,6 +6,15 @@ build/
 dist/
 *.egg-info/
 .venv/
+venv/
+ENV/
+.uv/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
 # Testing
 .coverage
@@ -17,9 +26,17 @@ dist/
 # IDEs
 .vscode/
 .idea/
+*.swp
+*.swo
 
 # OS
 .DS_Store
+Thumbs.db
+
+# Build outputs
+out/
+dist/
+cdk.out/
 
 # Project specific
 *.log
@@ -29,3 +46,8 @@ dist/
 
 # Memory
 context/
+
+# Environment
+.env
+.env.local
+*.local
