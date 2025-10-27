@@ -41,13 +41,20 @@ jobs:
       - name: Check TypeScript config
         run: |
           cd vscode-extension
-          node -e "JSON.parse(require('fs').readFileSync('tsconfig.json'))"
+          # tsconfig.json supports comments (JSONC format), so we strip them before validating
+          node -e "const fs = require('fs'); const content = fs.readFileSync('tsconfig.json', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, ''); JSON.parse(content);"
           echo "✓ Extension tsconfig.json is valid"
 
       - name: Check webview TypeScript config
         run: |
           cd vscode-extension/webview
-          node -e "JSON.parse(require('fs').readFileSync('tsconfig.json'))"
+          # tsconfig.json supports comments (JSONC format), so we check if file exists and is readable
+          if [ ! -f "tsconfig.json" ]; then
+            echo "✗ ERROR: tsconfig.json not found"
+            exit 1
+          fi
+          # Use Node.js to strip comments and validate JSON structure
+          node -e "const fs = require('fs'); const content = fs.readFileSync('tsconfig.json', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, ''); JSON.parse(content);"
           echo "✓ Webview tsconfig.json is valid"
 
   build-extension:
