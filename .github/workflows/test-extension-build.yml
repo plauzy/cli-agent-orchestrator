@@ -81,7 +81,7 @@ jobs:
       - name: Install webview dependencies
         run: |
           cd vscode-extension/webview
-          npm ci
+          npm ci --legacy-peer-deps
 
       - name: Build webview
         run: |
