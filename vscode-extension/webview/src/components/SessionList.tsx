@@ -51,6 +51,10 @@ export function SessionList({
     };
   });
 
+  const selectedTerminals = selectedTerminalId ?
+    terminalsWithSession.filter(t => t.id === selectedTerminalId) :
+    selectedItems;
+
   return (
     <Table
       onSelectionChange={({ detail }) => {
@@ -59,17 +63,14 @@ export function SessionList({
           onTerminalSelect(detail.selectedItems[0]);
         }
       }}
-      selectedItems={selectedTerminalId ?
-        terminalsWithSession.filter(t => t.id === selectedTerminalId) :
-        selectedItems
-      }
+      selectedItems={selectedTerminals}
       ariaLabels={{
         selectionGroupLabel: 'Items selection',
-        allItemsSelectionLabel: ({ selectedItems }) =>
-          `${selectedItems.length} ${
-            selectedItems.length === 1 ? 'item' : 'items'
+        allItemsSelectionLabel: ({ selectedItems: selected }) =>
+          `${selected.length} ${
+            selected.length === 1 ? 'item' : 'items'
           } selected`,
-        itemSelectionLabel: ({ selectedItems }, item) => item.id
+        itemSelectionLabel: (_state, item) => item.id
       }}
       columnDefinitions={[
         {

@@ -11,6 +11,7 @@ export interface Terminal {
   status: 'IDLE' | 'BUSY' | 'COMPLETED' | 'ERROR';
   created_at: string;
   updated_at: string;
+  session_name?: string; // Optional field added by SessionList
 }
 
 export interface InboxMessage {

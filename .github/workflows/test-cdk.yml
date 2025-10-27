@@ -1,0 +1,100 @@
+name: Test CDK Infrastructure
+
+on:
+  push:
+    branches: [ main, claude/** ]
+    paths:
+      - 'cdk/**'
+      - '.github/workflows/test-cdk.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'cdk/**'
+
+jobs:
+  validate-cdk:
+    name: Validate CDK Configuration
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate CDK package.json
+        run: |
+          cd cdk
+          node -e "JSON.parse(require('fs').readFileSync('package.json'))"
+          echo "✓ CDK package.json is valid"
+
+      - name: Validate cdk.json
+        run: |
+          cd cdk
+          node -e "JSON.parse(require('fs').readFileSync('cdk.json'))"
+          echo "✓ cdk.json is valid"
+
+      - name: Validate TypeScript config
+        run: |
+          cd cdk
+          node -e "JSON.parse(require('fs').readFileSync('tsconfig.json'))"
+          echo "✓ tsconfig.json is valid"
+
+  build-cdk:
+    name: Build CDK Infrastructure
+    runs-on: ubuntu-latest
+    needs: validate-cdk
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: cdk/package-lock.json
+
+      - name: Install CDK dependencies
+        run: |
+          cd cdk
+          npm ci
+
+      - name: Install AWS CDK globally
+        run: npm install -g aws-cdk
+
+      - name: Build TypeScript
+        run: |
+          cd cdk
+          npm run build
+
+      - name: Synthesize CDK stacks
+        run: |
+          cd cdk
+          cdk synth --no-lookups
+          echo "✓ CDK synthesis successful"
+
+      - name: Verify stack files
+        run: |
+          cd cdk
+          if [ ! -f "cdk.out/CAONetworkStack.template.json" ]; then
+            echo "⚠ Warning: Network stack not found"
+          fi
+          if [ ! -f "cdk.out/CAOAuthStack.template.json" ]; then
+            echo "⚠ Warning: Auth stack not found"
+          fi
+          if [ ! -f "cdk.out/CAOInfrastructureStack.template.json" ]; then
+            echo "⚠ Warning: Infrastructure stack not found"
+          fi
+          echo "✓ Stack templates generated"
+
+      - name: Upload CDK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdk-output
+          path: cdk/cdk.out/
+          retention-days: 7

@@ -56,8 +56,8 @@ export function TerminalViewer({ terminal, onSendInput }: TerminalViewerProps) {
     }
   };
 
-  const handleKeyPress = (event: React.KeyboardEvent) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
+  const handleKeyPress = (event: any) => {
+    if (event.detail?.key === 'Enter') {
       event.preventDefault();
       handleSendInput();
     }

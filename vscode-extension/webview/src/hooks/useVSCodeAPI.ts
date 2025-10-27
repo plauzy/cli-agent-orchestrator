@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react';
+import { useCallback } from 'react';
 import { VSCodeMessage } from '../types';
 
 // Acquire VS Code API
@@ -12,7 +12,7 @@ const vscode = window.acquireVsCodeApi?.() || {
   postMessage: (message: any) => {
     console.log('Mock VSCode API:', message);
   },
-  setState: (state: any) => {},
+  setState: (_state: any) => {},
   getState: () => ({})
 };
 
@@ -31,18 +31,17 @@ export function useVSCodeAPI() {
     return () => window.removeEventListener('message', messageHandler);
   }, []);
 
-  const setState = useCallback((state: any) => {
-    vscode.setState(state);
-  }, []);
+  // Note: setState and getState available but not currently used
+  // const setState = useCallback((state: any) => {
+  //   vscode.setState(state);
+  // }, []);
 
-  const getState = useCallback(() => {
-    return vscode.getState();
-  }, []);
+  // const getState = useCallback(() => {
+  //   return vscode.getState();
+  // }, []);
 
   return {
     sendMessage,
-    onMessage,
-    setState,
-    getState
+    onMessage
   };
 }
