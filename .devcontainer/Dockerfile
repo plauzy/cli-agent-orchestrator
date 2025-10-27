@@ -1,5 +1,5 @@
 # Multi-stage build for optimized dev container
-FROM mcr.microsoft.com/devcontainers/python:3.11 as base
+FROM mcr.microsoft.com/devcontainers/python:3.11-bookworm as base
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
