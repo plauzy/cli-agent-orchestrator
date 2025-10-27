@@ -7,11 +7,11 @@ echo "🔨 Building CLI Agent Orchestrator VSCode Extension..."
 cd "$(dirname "$0")/../vscode-extension"
 
 echo "📦 Installing extension dependencies..."
-npm install
+npm ci
 
 echo "📦 Installing webview dependencies..."
 cd webview
-npm install
+npm ci --legacy-peer-deps
 
 echo "🔨 Building webview..."
 npm run build
