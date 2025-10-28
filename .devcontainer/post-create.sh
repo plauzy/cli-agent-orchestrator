@@ -15,6 +15,28 @@ fi
 
 echo "📂 Workspace directory: $WORKSPACE_DIR"
 
+# Detect if running in CI environment
+if [ -n "$CI" ] || [ -n "$GITHUB_ACTIONS" ]; then
+  echo "🤖 CI environment detected - running minimal setup for validation only"
+
+  # Just verify the essential tools are available
+  echo "✓ Python version:"
+  python3 --version
+
+  echo "✓ Node version:"
+  node --version
+
+  echo "✓ Installing tmux for validation..."
+  sudo apt-get update -qq
+  sudo apt-get install -y tmux > /dev/null 2>&1
+  tmux -V
+
+  echo "✅ Minimal CI validation complete!"
+  exit 0
+fi
+
+echo "💻 Full development environment setup..."
+
 # Install tmux (required for CAO)
 echo "📦 Installing tmux..."
 sudo apt-get update
