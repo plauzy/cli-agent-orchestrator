@@ -3,6 +3,18 @@ set -e
 
 echo "🚀 Setting up CLI Agent Orchestrator development environment..."
 
+# Determine workspace directory (handles different container environments)
+if [ -d "/workspaces/cli-agent-orchestrator" ]; then
+  WORKSPACE_DIR="/workspaces/cli-agent-orchestrator"
+elif [ -d "/workspace" ]; then
+  WORKSPACE_DIR="/workspace"
+else
+  # Fallback: use the directory where this script is located
+  WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
+
+echo "📂 Workspace directory: $WORKSPACE_DIR"
+
 # Install tmux (required for CAO)
 echo "📦 Installing tmux..."
 sudo apt-get update
@@ -18,7 +30,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 
 # Install Python dependencies
 echo "📦 Installing Python dependencies..."
-cd /workspaces/cli-agent-orchestrator
+cd "$WORKSPACE_DIR"
 uv sync
 
 # Install CAO
@@ -37,12 +49,12 @@ cao init
 
 # Install VSCode extension dependencies
 echo "📦 Installing VSCode extension dependencies..."
-cd /workspaces/cli-agent-orchestrator/vscode-extension
+cd "$WORKSPACE_DIR/vscode-extension"
 npm ci
 
 # Install webview dependencies
 echo "📦 Installing webview dependencies..."
-cd /workspaces/cli-agent-orchestrator/vscode-extension/webview
+cd "$WORKSPACE_DIR/vscode-extension/webview"
 npm ci --legacy-peer-deps
 
 # Build webview
@@ -50,7 +62,7 @@ echo "🔨 Building webview..."
 npm run build
 
 # Go back to root
-cd /workspaces/cli-agent-orchestrator
+cd "$WORKSPACE_DIR"
 
 echo "✅ Development environment setup complete!"
 echo ""
