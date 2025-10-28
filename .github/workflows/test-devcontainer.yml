@@ -71,11 +71,18 @@ jobs:
       - name: Build dev container
         uses: devcontainers/ci@v0.3
         with:
+          configFile: .devcontainer/devcontainer-ci.json
           imageName: ghcr.io/${{ github.repository }}/devcontainer
           cacheFrom: ghcr.io/${{ github.repository }}/devcontainer
           push: never
           runCmd: |
+            echo "=== Validating Dev Container ==="
+            echo "✓ Python version:"
             python3 --version
+            echo "✓ Node version:"
             node --version
+            echo "✓ Installing and verifying tmux..."
+            sudo apt-get update -qq
+            sudo apt-get install -y tmux
             tmux -V
-            echo "✓ Dev container built successfully"
+            echo "✅ Dev container validation successful!"
