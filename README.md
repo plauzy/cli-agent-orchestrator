@@ -1,5 +1,7 @@
 # CLI Agent Orchestrator
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/awslabs/cli-agent-orchestrator)
+
 CLI Agent Orchestrator(CAO, pronounced as "kay-oh"), is a lightweight orchestration system for managing multiple AI agent sessions in tmux terminals. Enables Multi-agent collaboration via MCP server.
 
 ## Hierarchical Multi-Agent System
@@ -11,22 +13,15 @@ CLI Agent Orchestrator (CAO) implements a hierarchical multi-agent system that e
 ### Key Features
 
 * **Hierarchical orchestration** – CAO's supervisor agent coordinates workflow management and task delegation to specialized worker agents. The supervisor maintains overall project context while agents focus on their domains of expertise.
-
 * **Session-based isolation** – Each agent operates in isolated tmux sessions, ensuring proper context separation while enabling seamless communication through Model Context Protocol (MCP) servers. This provides both coordination and parallel processing capabilities.
-
 * **Intelligent task delegation** – CAO automatically routes tasks to appropriate specialists based on project requirements, expertise matching, and workflow dependencies. The system adapts between individual agent work and coordinated team efforts through three orchestration patterns:
-  - **Handoff** - Synchronous task transfer with wait-for-completion
-  - **Assign** - Asynchronous task spawning for parallel execution  
-  - **Send Message** - Direct communication with existing agents
-
+    - **Handoff** - Synchronous task transfer with wait-for-completion
+    - **Assign** - Asynchronous task spawning for parallel execution  
+    - **Send Message** - Direct communication with existing agents
 * **Flexible workflow patterns** – CAO supports both sequential coordination for dependent tasks and parallel processing for independent work streams. This allows optimization of both development speed and quality assurance processes.
-
 * **Flow - Scheduled runs** – Automated execution of workflows at specified intervals using cron-like scheduling, enabling routine tasks and monitoring workflows to run unattended.
-
 * **Context preservation** – The supervisor agent provides only necessary context to each worker agent, avoiding context pollution while maintaining workflow coherence.
-
 * **Direct worker interaction and steering** – Users can interact directly with worker agents to provide additional steering, distinguishing from sub-agents features by allowing real-time guidance and course correction.
-
 * **Advanced CLI integration** – CAO agents have full access to advanced features of the developer CLI, such as the [sub-agents](https://docs.claude.com/en/docs/claude-code/sub-agents) feature of Claude Code, [Custom Agent](https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/command-line-custom-agents.html) of Amazon Q Developer for CLI and so on.
 
 For detailed project structure and architecture, see [CODEBASE.md](CODEBASE.md).
@@ -74,6 +69,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 3. Install CLI Agent Orchestrator:
+
 ```bash
 uv tool install git+https://github.com/awslabs/cli-agent-orchestrator.git@main --upgrade
 ```
@@ -85,6 +81,7 @@ uv tool install git+https://github.com/awslabs/cli-agent-orchestrator.git@main -
 CAO supports installing agents from multiple sources:
 
 **1. Install built-in agents (bundled with CAO):**
+
 ```bash
 cao install code_supervisor
 cao install developer
@@ -92,12 +89,14 @@ cao install reviewer
 ```
 
 **2. Install from a local file:**
+
 ```bash
 cao install ./my-custom-agent.md
 cao install /absolute/path/to/agent.md
 ```
 
 **3. Install from a URL:**
+
 ```bash
 cao install https://example.com/agents/custom-agent.md
 ```
@@ -109,16 +108,19 @@ For details on creating custom agent profiles, see [docs/agent-profile.md](docs/
 ### Launching Agents
 
 Start the cao server:
+
 ```bash
 cao-server
 ```
 
 In another terminal, launch a terminal with an agent profile:
+
 ```bash
 cao launch --agents code_supervisor
 ```
 
 Shutdown sessions:
+
 ```bash
 # Shutdown all cao sessions
 cao shutdown --all
@@ -141,9 +143,19 @@ tmux attach -t <session-name>
 # Detach from session (inside tmux)
 Ctrl+b, then d
 
+# Switch between windows (inside tmux)
+Ctrl+b, then n          # Next window
+Ctrl+b, then p          # Previous window
+Ctrl+b, then <number>   # Go to window number (0-9)
+Ctrl+b, then w          # List all windows (interactive selector)
+
 # Delete a session
 cao shutdown --session <session-name>
 ```
+
+**List all windows (Ctrl+b, w):**
+
+![Tmux Window Selector](./docs/assets/tmux_all_windows.png)
 
 ## MCP Server Tools and Orchestration Modes
 
@@ -152,6 +164,7 @@ CAO provides a local HTTP server that processes orchestration requests. CLI agen
 ### How It Works
 
 Each agent terminal is assigned a unique `CAO_TERMINAL_ID` environment variable. The server uses this ID to:
+
 - Route messages between agents
 - Track terminal status (IDLE, BUSY, COMPLETED, ERROR)
 - Manage terminal-to-terminal communication via inbox
@@ -164,6 +177,7 @@ When an agent calls an MCP tool, the server identifies the caller by their `CAO_
 CAO supports three orchestration patterns:
 
 **1. Handoff** - Transfer control to another agent and wait for completion
+
 - Creates a new terminal with the specified agent profile
 - Sends the task message and waits for the agent to finish
 - Returns the agent's output to the caller
@@ -175,6 +189,7 @@ Example: Sequential code review workflow
 ![Handoff Workflow](./docs/assets/handoff-workflow.png)
 
 **2. Assign** - Spawn an agent to work independently (async)
+
 - Creates a new terminal with the specified agent profile
 - Sends the task message with callback instructions
 - Returns immediately with the terminal ID
@@ -183,11 +198,14 @@ Example: Sequential code review workflow
 - Messages are queued for delivery if the supervisor is busy (common in parallel workflows)
 - Use for **asynchronous** task execution or fire-and-forget operations
 
-Example: Parallel test execution
+Example: A supervisor assigns parallel data analysis tasks to multiple analysts while using handoff to sequentially generate a report template, then combines all results.
 
-![Parallel Test Execution](./docs/assets/parallel-test-execution.png)
+See [examples/assign](examples/assign) for the complete working example.
+
+![Parallel Data Analysis](./docs/assets/parallel-data-analysis.png)
 
 **3. Send Message** - Communicate with an existing agent
+
 - Sends a message to a specific terminal's inbox
 - Messages are queued and delivered when the terminal is idle
 - Enables ongoing collaboration between agents
@@ -195,6 +213,7 @@ Example: Parallel test execution
 - Use for iterative feedback or multi-turn conversations
 
 Example: Multi-role feature development
+
 ![Multi-role Feature Development](./docs/assets/multi-role-feature-development.png)
 
 ### Custom Orchestration
@@ -212,6 +231,7 @@ Flows allow you to schedule agent sessions to run automatically based on cron ex
 ### Prerequisites
 
 Install the agent profile you want to use:
+
 ```bash
 cao install developer
 ```
@@ -248,6 +268,7 @@ cao shutdown --session <session-name>
 A flow that runs at regular intervals with a static prompt (no script needed):
 
 **File: `daily-standup.md`**
+
 ```yaml
 ---
 name: daily-standup
@@ -263,6 +284,7 @@ Review yesterday's commits and create a standup summary.
 A flow that monitors a service and only executes when there's an issue:
 
 **File: `monitor-service.md`**
+
 ```yaml
 ---
 name: monitor-service
@@ -280,6 +302,7 @@ Please investigate and triage the issue:
 ```
 
 **Script: `health-check.sh`**
+
 ```bash
 #!/bin/bash
 URL="https://api.example.com/health"
@@ -321,4 +344,3 @@ See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more inform
 ## License
 
 This project is licensed under the Apache-2.0 License.
-
