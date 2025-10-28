@@ -38,12 +38,12 @@ cao init
 # Install VSCode extension dependencies
 echo "📦 Installing VSCode extension dependencies..."
 cd /workspaces/cli-agent-orchestrator/vscode-extension
-npm install
+npm ci
 
 # Install webview dependencies
 echo "📦 Installing webview dependencies..."
 cd /workspaces/cli-agent-orchestrator/vscode-extension/webview
-npm install
+npm ci --legacy-peer-deps
 
 # Build webview
 echo "🔨 Building webview..."
