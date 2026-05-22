@@ -42,6 +42,7 @@ from cli_agent_orchestrator.plugins import (
     PostSendMessageEvent,
 )
 from cli_agent_orchestrator.providers.manager import provider_manager
+from cli_agent_orchestrator.services.memory_service import MemoryService
 from cli_agent_orchestrator.services.plugin_dispatch import dispatch_plugin_event
 from cli_agent_orchestrator.utils.agent_profiles import load_agent_profile
 from cli_agent_orchestrator.utils.skills import build_skill_catalog
@@ -52,6 +53,34 @@ from cli_agent_orchestrator.utils.terminal import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Track terminals that have already received memory injection (first message only).
+_memory_injected_terminals: set = set()
+
+
+def inject_memory_context(first_message: str, terminal_id: str) -> str:
+    """Prepend <cao-memory> context block to the first user message.
+
+    Tracks which terminals have already been injected so that only the very
+    first user message after init receives the memory block.
+
+    Calls MemoryService.get_memory_context_for_terminal() which returns
+    a formatted <cao-memory>...</cao-memory> block (or empty string if
+    no memories exist). Stateless — no file mutation, no backup/restore.
+    """
+    if terminal_id in _memory_injected_terminals:
+        return first_message
+
+    _memory_injected_terminals.add(terminal_id)
+
+    try:
+        svc = MemoryService()
+        context = svc.get_memory_context_for_terminal(terminal_id)
+        if context:
+            return context + "\n\n" + first_message
+    except Exception as e:
+        logger.warning(f"Failed to inject memory context for terminal {terminal_id}: {e}")
+    return first_message
 
 
 class OutputMode(str, Enum):
@@ -318,6 +347,17 @@ def send_input(
         if not metadata:
             raise ValueError(f"Terminal '{terminal_id}' not found")
 
+        # Inject memory context into the very first user message after init.
+        # Phase 1 wires injection inline for every provider. The Kiro
+        # AgentSpawn hook will replace this path once the plugin
+        # migration PR lands; until then, inline injection is the only
+        # delivery path.
+        # Keep the original message for the PostSendMessageEvent so
+        # plugins/webhooks see what the caller sent — not the
+        # internal <cao-memory> block that we paste into the TUI.
+        original_message = message
+        message = inject_memory_context(message, terminal_id)
+
         # Check how many Enter keys the provider needs after paste
         provider = provider_manager.get_provider(terminal_id)
         enter_count = provider.paste_enter_count if provider else 1
@@ -347,7 +387,7 @@ def send_input(
                     session_id=metadata["tmux_session"],
                     sender=sender_id,
                     receiver=terminal_id,
-                    message=message,
+                    message=original_message,
                     orchestration_type=orchestration_type,
                 ),
             )
@@ -504,6 +544,7 @@ def delete_terminal(terminal_id: str, registry: PluginRegistry | None = None) ->
 
         # Cleanup provider state and database record
         provider_manager.cleanup_provider(terminal_id)
+        _memory_injected_terminals.discard(terminal_id)
         deleted = db_delete_terminal(terminal_id)
         logger.info(f"Deleted terminal: {terminal_id}")
         if deleted and metadata:
