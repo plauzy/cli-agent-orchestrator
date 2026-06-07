@@ -31,6 +31,9 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, Field, field_validator
 from watchdog.observers.polling import PollingObserver
 
+from cli_agent_orchestrator.backends import TerminalNotFoundError
+from cli_agent_orchestrator.backends.herdr_backend import HerdrBackend
+from cli_agent_orchestrator.backends.registry import get_backend
 from cli_agent_orchestrator.clients.database import (
     create_inbox_message,
     get_inbox_messages,
@@ -66,7 +69,12 @@ from cli_agent_orchestrator.services.cleanup_service import (
     cleanup_expired_memories,
     cleanup_old_data,
 )
-from cli_agent_orchestrator.services.inbox_service import LogFileHandler
+from cli_agent_orchestrator.services.herdr_inbox_registry import set_herdr_inbox_service
+from cli_agent_orchestrator.services.herdr_inbox_service import HerdrInboxService
+from cli_agent_orchestrator.services.inbox_service import (
+    LogFileHandler,
+    check_and_send_pending_messages,
+)
 from cli_agent_orchestrator.services.install_service import InstallResult, install_agent
 from cli_agent_orchestrator.services.terminal_service import OutputMode, TerminalInputBlockedError
 from cli_agent_orchestrator.utils.agent_profiles import load_agent_profile, resolve_provider
@@ -211,18 +219,44 @@ async def lifespan(app: FastAPI):
     # messages the immediate and watchdog paths missed (issue #131).
     inbox_reconcile_task = asyncio.create_task(inbox_reconciliation_daemon(registry))
 
-    # Start inbox watcher
-    inbox_observer = PollingObserver(timeout=INBOX_POLLING_INTERVAL)
-    inbox_observer.schedule(LogFileHandler(registry), str(TERMINAL_LOG_DIR), recursive=False)
-    inbox_observer.start()
-    logger.info("Inbox watcher started (PollingObserver)")
+    # Start inbox watcher — herdr uses socket events, tmux uses file polling
+    herdr_inbox_task: Optional[asyncio.Task] = None
+    inbox_observer: Optional[PollingObserver] = None
+
+    backend = get_backend()
+    if isinstance(backend, HerdrBackend):
+
+        def deliver_inbox(terminal_id: str) -> None:
+            check_and_send_pending_messages(terminal_id, registry=registry)
+
+        svc = HerdrInboxService(
+            herdr_session=backend.herdr_session,
+            delivery_callback=deliver_inbox,
+        )
+        set_herdr_inbox_service(svc)
+        herdr_inbox_task = asyncio.create_task(svc.start())
+        logger.info("Herdr inbox service started")
+    else:
+        inbox_observer = PollingObserver(timeout=INBOX_POLLING_INTERVAL)
+        inbox_observer.schedule(LogFileHandler(registry), str(TERMINAL_LOG_DIR), recursive=False)
+        inbox_observer.start()
+        logger.info("Inbox watcher started (PollingObserver)")
 
     yield
 
-    # Stop inbox observer
-    inbox_observer.stop()
-    inbox_observer.join()
-    logger.info("Inbox watcher stopped")
+    # Stop inbox watcher
+    if herdr_inbox_task is not None:
+        herdr_inbox_task.cancel()
+        try:
+            await herdr_inbox_task
+        except asyncio.CancelledError:
+            pass
+        set_herdr_inbox_service(None)
+        logger.info("Herdr inbox service stopped")
+    elif inbox_observer is not None:
+        inbox_observer.stop()
+        inbox_observer.join()
+        logger.info("Inbox watcher stopped")
 
     # Cancel daemon on shutdown
     daemon_task.cancel()
@@ -304,7 +338,20 @@ app.add_middleware(
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "service": "cli-agent-orchestrator"}
+    import shutil
+
+    def _probe(binary: str) -> str:
+        return "ok" if shutil.which(binary) else "unavailable"
+
+    return {
+        "status": "ok",
+        "service": "cli-agent-orchestrator",
+        "components": {
+            "cao": "ok",
+            "herdr": _probe("herdr"),
+            "claude": _probe("claude"),
+        },
+    }
 
 
 @app.get("/agents/profiles")
@@ -649,6 +696,8 @@ async def get_terminal(terminal_id: TerminalId) -> Terminal:
         terminal = terminal_service.get_terminal(terminal_id)
         return Terminal(**terminal)
     except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except TerminalNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         raise HTTPException(
@@ -1220,6 +1269,13 @@ def main():
     )
     parser.add_argument("--host", type=str, default=None, help="Server host")
     parser.add_argument("--port", type=int, default=None, help="Server port")
+    parser.add_argument(
+        "--terminal",
+        type=str,
+        choices=["tmux", "herdr"],
+        default=None,
+        help="Terminal backend to use, overriding terminal_backend in config.json",
+    )
     args = parser.parse_args()
 
     if args.agents_dir:
@@ -1228,6 +1284,16 @@ def main():
 
         constants.KIRO_AGENTS_DIR = Path(args.agents_dir)
         logger.info(f"Using agents directory: {args.agents_dir}")
+
+    # Resolve the backend before the server starts so the lifespan (and every
+    # get_backend() consumer) sees the CLI-selected backend. Without --terminal,
+    # the singleton stays lazy and BackendFactory reads config.json on first use.
+    if args.terminal:
+        from cli_agent_orchestrator.backends.factory import BackendFactory
+        from cli_agent_orchestrator.backends.registry import set_backend
+
+        set_backend(BackendFactory.create(backend_override=args.terminal))
+        logger.info(f"Terminal backend overridden via --terminal: {args.terminal}")
 
     host = args.host or SERVER_HOST
     port = args.port or SERVER_PORT

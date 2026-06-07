@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from cli_agent_orchestrator.backends.base import TerminalNotFoundError
 from cli_agent_orchestrator.constants import INBOX_RECONCILE_GRACE_SECONDS
 from cli_agent_orchestrator.models.inbox import MessageStatus
 from cli_agent_orchestrator.models.terminal import TerminalStatus
@@ -121,14 +122,18 @@ class TestCheckAndSendPendingMessages:
     @patch("cli_agent_orchestrator.services.inbox_service.provider_manager")
     @patch("cli_agent_orchestrator.services.inbox_service.get_pending_messages")
     def test_terminal_not_ready(self, mock_get_messages, mock_provider_manager):
-        """Test when terminal not ready."""
+        """Test when terminal not ready (PROCESSING, eager disabled -> skip)."""
         mock_message = MagicMock()
         mock_get_messages.return_value = [mock_message]
         mock_provider = MagicMock()
         mock_provider.get_status.return_value = TerminalStatus.PROCESSING
+        mock_provider.accepts_input_while_processing = False
         mock_provider_manager.get_provider.return_value = mock_provider
 
-        result = check_and_send_pending_messages("test-terminal")
+        # Pin the env-driven flag so the test is hermetic regardless of
+        # CAO_EAGER_INBOX_DELIVERY in the runner's environment.
+        with patch("cli_agent_orchestrator.services.inbox_service.EAGER_INBOX_DELIVERY", False):
+            result = check_and_send_pending_messages("test-terminal")
 
         assert result is False
 
@@ -216,12 +221,42 @@ class TestCheckAndSendPendingMessages:
         assert order[0] == ("update", (1, MessageStatus.DELIVERED))
         assert order[1][0] == "send"
 
+    @patch("cli_agent_orchestrator.services.inbox_service.update_message_status")
+    @patch("cli_agent_orchestrator.services.inbox_service.terminal_service")
+    @patch("cli_agent_orchestrator.services.inbox_service.provider_manager")
+    @patch("cli_agent_orchestrator.services.inbox_service.get_pending_messages")
+    def test_resolution_failure_leaves_message_pending(
+        self, mock_get_messages, mock_provider_manager, mock_terminal_service, mock_update_status
+    ):
+        """A TerminalNotFoundError during send leaves the message PENDING, not FAILED.
+
+        Pane resolution can transiently fail (e.g. herdr pane not yet resolvable).
+        Status is optimistically set DELIVERED before send (to close the watchdog
+        re-entrancy race), so on a resolution failure it must be reset to PENDING
+        for a later retry — never left DELIVERED or marked FAILED.
+        """
+        mock_message = MagicMock()
+        mock_message.id = 1
+        mock_message.message = "test message"
+        mock_get_messages.return_value = [mock_message]
+        mock_provider = MagicMock()
+        mock_provider.get_status.return_value = TerminalStatus.IDLE
+        mock_provider_manager.get_provider.return_value = mock_provider
+        mock_terminal_service.send_input.side_effect = TerminalNotFoundError("s:w")
+
+        result = check_and_send_pending_messages("test-terminal")
+
+        assert result is False
+        # Final status is PENDING (reset after the optimistic DELIVERED), never FAILED.
+        assert mock_update_status.call_args_list[-1] == call(1, MessageStatus.PENDING)
+        assert call(1, MessageStatus.FAILED) not in mock_update_status.call_args_list
+
 
 class TestEagerInboxDelivery:
     """Tests for eager inbox delivery (CAO_EAGER_INBOX_DELIVERY).
 
     Covers the relaxed status gate in check_and_send_pending_messages() that
-    allows PROCESSING and WAITING_USER_ANSWER delivery when the env var is
+    allows PROCESSING delivery when the env var is
     enabled and the provider declares accepts_input_while_processing=True.
     """
 
@@ -323,14 +358,18 @@ class TestEagerInboxDelivery:
 
         assert result is False
 
-    @patch("cli_agent_orchestrator.services.inbox_service.update_message_status")
     @patch("cli_agent_orchestrator.services.inbox_service.terminal_service")
     @patch("cli_agent_orchestrator.services.inbox_service.provider_manager")
     @patch("cli_agent_orchestrator.services.inbox_service.get_pending_messages")
     def test_delivery_waiting_user_answer_with_eager_enabled_and_capable_provider(
-        self, mock_get_messages, mock_pm, mock_ts, mock_update
+        self, mock_get_messages, mock_pm, mock_ts
     ):
-        """WAITING_USER_ANSWER + eager ON + capable provider -> delivers."""
+        """WAITING_USER_ANSWER -> stays pending, not eagerly delivered.
+
+        Even under the most delivery-favorable conditions (eager ON + capable
+        provider), WAITING_USER_ANSWER must not deliver: the agent is blocked on
+        a prompt and typing into it would answer the wrong question.
+        """
         mock_get_messages.return_value = [self._make_message()]
         provider = MagicMock()
         provider.get_status.return_value = TerminalStatus.WAITING_USER_ANSWER
@@ -340,8 +379,8 @@ class TestEagerInboxDelivery:
         with patch("cli_agent_orchestrator.services.inbox_service.EAGER_INBOX_DELIVERY", True):
             result = check_and_send_pending_messages("t1")
 
-        assert result is True
-        mock_ts.send_input.assert_called_once()
+        assert result is False
+        mock_ts.send_input.assert_not_called()
 
     @patch("cli_agent_orchestrator.services.inbox_service.provider_manager")
     @patch("cli_agent_orchestrator.services.inbox_service.get_pending_messages")
