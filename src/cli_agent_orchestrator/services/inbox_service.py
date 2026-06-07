@@ -28,6 +28,7 @@ from pathlib import Path
 
 from watchdog.events import FileModifiedEvent, FileSystemEventHandler
 
+from cli_agent_orchestrator.backends.base import TerminalNotFoundError
 from cli_agent_orchestrator.clients.database import (
     get_pending_messages,
     list_pending_receiver_ids_by_provider,
@@ -117,7 +118,7 @@ def check_and_send_pending_messages(
     eager_eligible = (
         EAGER_INBOX_DELIVERY
         and provider.accepts_input_while_processing
-        and status in (TerminalStatus.PROCESSING, TerminalStatus.WAITING_USER_ANSWER)
+        and status in (TerminalStatus.PROCESSING,)
     )
 
     if status not in (TerminalStatus.IDLE, TerminalStatus.COMPLETED) and not eager_eligible:
@@ -148,6 +149,18 @@ def check_and_send_pending_messages(
             )
         logger.info(f"Delivered message {message.id} to terminal {terminal_id}")
         return True
+    except TerminalNotFoundError as e:
+        # The terminal's pane could not be resolved (e.g. herdr pane not found
+        # for this window). Treat as transient: reset to PENDING for a later
+        # retry rather than marking it FAILED or silently misrouting. We must
+        # reset explicitly because the status was optimistically set to
+        # DELIVERED above before the send was attempted.
+        update_message_status(message.id, MessageStatus.PENDING)
+        logger.warning(
+            f"Pane not resolvable for terminal {terminal_id}; leaving message "
+            f"{message.id} pending for retry: {e}"
+        )
+        return False
     except Exception as e:
         logger.error(f"Failed to send message {message.id} to {terminal_id}: {e}")
         update_message_status(message.id, MessageStatus.FAILED)
