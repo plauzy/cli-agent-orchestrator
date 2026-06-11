@@ -180,6 +180,7 @@ Get terminal output.
 
 **Parameters:**
 - `mode` (string, optional): Output mode - "full" (default), "last", or "tail"
+  - `"full"` returns the StatusMonitor rolling buffer (most recent ~8KB of streamed output), not unbounded scrollback. Long sessions are truncated to the tail; use the on-disk terminal log for complete history.
 
 **Response:**
 ```json
@@ -262,7 +263,7 @@ Send a message to another terminal's inbox.
 **Behavior:**
 - Messages are queued and delivered when the receiver terminal is IDLE
 - Messages are delivered in order (oldest first)
-- Delivery is automatic via watchdog file monitoring
+- Delivery is automatic via event-driven status detection
 
 ---
 
