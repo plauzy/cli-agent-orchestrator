@@ -17,7 +17,7 @@ import shlex
 import subprocess
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, cast
 
 from cli_agent_orchestrator.backends.base import (
     TerminalBackend,
@@ -103,8 +103,8 @@ class HerdrBackend(TerminalBackend):
         """
         data = json.loads(stdout)
         if isinstance(data, dict) and "result" in data:
-            return data["result"]
-        return data
+            return cast(dict, data["result"])
+        return cast(dict, data)
 
     def _resolve_pane_id(self, terminal_id: str) -> str:
         """Resolve terminal_id to current compact pane_id.
@@ -340,6 +340,7 @@ class HerdrBackend(TerminalBackend):
         keys: str,
         enter_count: int = 1,
         force_bracketed_paste: bool = False,
+        submit_delay: float = 0.3,
     ) -> None:
         """Send text to a pane via herdr pane send-text + send-keys Enter.
 
@@ -347,6 +348,10 @@ class HerdrBackend(TerminalBackend):
         so Claude Code's Ink TUI treats it as a paste event rather than raw
         keystrokes. Without this, multi-line prompts go into multi-line mode
         and the final Enter adds a newline instead of submitting.
+
+        ``submit_delay`` is accepted for parity with the backend interface; herdr
+        governs its own post-paste timing below (the generous 2s bracketed wait
+        already covers Claude Code's Ink renderer), so the value is not used here.
         """
         # Resolve pane_id from terminal_id stored in DB metadata
         # The window_name is used as a lookup key in CAO's DB → terminal_id mapping
@@ -423,7 +428,7 @@ class HerdrBackend(TerminalBackend):
         if result.returncode != 0:
             logger.warning(f"herdr pane read failed: {result.stderr}")
             return ""
-        return result.stdout
+        return cast(str, result.stdout)
 
     def get_pane_working_directory(self, session_name: str, window_name: str) -> Optional[str]:
         """Get pane CWD via herdr pane get."""
@@ -436,7 +441,7 @@ class HerdrBackend(TerminalBackend):
             data = self._parse_herdr_json(result.stdout)
             # pane get returns {"pane": {...}} inside result
             pane_info = data.get("pane", data) if isinstance(data, dict) else data
-            return pane_info.get("cwd")
+            return cast(Optional[str], pane_info.get("cwd"))
         except (json.JSONDecodeError, AttributeError):
             return None
 
@@ -450,7 +455,7 @@ class HerdrBackend(TerminalBackend):
         try:
             data = self._parse_herdr_json(result.stdout)
             pane_info = data.get("pane", data) if isinstance(data, dict) else data
-            return pane_info.get("foreground_process")
+            return cast(Optional[str], pane_info.get("foreground_process"))
         except (json.JSONDecodeError, AttributeError):
             return None
 
