@@ -41,6 +41,7 @@ dependencies = [
     # JWKS). The [crypto] extra pulls in `cryptography` for RSA signature
     # verification and provides `jwt.PyJWKClient`. See spec task 9.1 research note.
     "pyjwt[crypto]>=2.8.0",
+    "jsonschema>=4.25",
 ]
 
 [project.scripts]
