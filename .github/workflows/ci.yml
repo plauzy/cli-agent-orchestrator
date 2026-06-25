@@ -262,7 +262,7 @@ jobs:
   dependency-review:
     name: Dependency Review
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.repository == 'awslabs/cli-agent-orchestrator'
 
     steps:
       - name: Checkout code
