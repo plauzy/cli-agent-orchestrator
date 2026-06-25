@@ -37,6 +37,10 @@ dependencies = [
     "requests>=2.32.0",
     "rank-bm25>=0.2.2",
     "pyte>=0.8.2",
+    # JWT/JWKS verification for the default-off OAuth 2.1 auth layer (RS256 via
+    # JWKS). The [crypto] extra pulls in `cryptography` for RSA signature
+    # verification and provides `jwt.PyJWKClient`. See spec task 9.1 research note.
+    "pyjwt[crypto]>=2.8.0",
 ]
 
 [project.scripts]
@@ -49,6 +53,7 @@ dependencies = [
 claude_code_memory = "cli_agent_orchestrator.plugins.builtin.claude_code_memory:ClaudeCodeMemoryPlugin"
 kiro_cli_memory = "cli_agent_orchestrator.plugins.builtin.kiro_cli_memory:KiroCliMemoryPlugin"
 codex_memory = "cli_agent_orchestrator.plugins.builtin.codex_memory:CodexMemoryPlugin"
+event_log_publisher = "cli_agent_orchestrator.plugins.builtin.event_log_publisher:EventLogPublisher"
 
 [project.urls]
 Homepage = "https://github.com/awslabs/cli-agent-orchestrator"
@@ -66,6 +71,9 @@ packages = ["src/cli_agent_orchestrator"]
 [tool.hatch.build]
 artifacts = [
     "src/cli_agent_orchestrator/web_ui/**",
+    # Single-file MCP App bundles emitted by `cao_mcp_apps` (npm run build:all).
+    # Shipped so cao-mcp-server can serve the ui://cao/* resources from the wheel.
+    "src/cli_agent_orchestrator/ext_apps/apps_static/**",
 ]
 
 [dependency-groups]
