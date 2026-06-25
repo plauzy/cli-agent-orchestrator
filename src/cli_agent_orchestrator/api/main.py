@@ -57,6 +57,7 @@ from cli_agent_orchestrator.constants import (
     WS_ALLOWED_CLIENTS,
     add_local_cors_origins,
 )
+from cli_agent_orchestrator.ext_apps import mount_widget_static
 from cli_agent_orchestrator.models.flow import Flow
 from cli_agent_orchestrator.models.inbox import MessageStatus, OrchestrationType
 from cli_agent_orchestrator.models.memory import (
@@ -509,6 +510,13 @@ async def events_history(
     kinds_filter = [k.strip() for k in kinds.split(",") if k.strip()] if kinds else None
     events = get_event_log().history(limit=limit, since=since, kinds=kinds_filter)
     return {"events": events}
+
+
+# Topology widget static bundle at /widgets/topology/ — the vanilla SSE-driven
+# view consumed alongside the /events stream above. The mount is default-off
+# (no-op unless CAO_MCP_APPS_ENABLED is set) and idempotent, so re-importing this
+# module under dev/reload is safe.
+mount_widget_static(app)
 
 
 @app.get("/agents/profiles")

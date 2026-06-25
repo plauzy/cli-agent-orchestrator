@@ -75,6 +75,9 @@ artifacts = [
     # Single-file MCP App bundles emitted by `cao_mcp_apps` (npm run build:all).
     # Shipped so cao-mcp-server can serve the ui://cao/* resources from the wheel.
     "src/cli_agent_orchestrator/ext_apps/apps_static/**",
+    # Vanilla topology widget bundle (committed; no build step) served at
+    # /widgets/topology/ and as the cao://widget/topology MCP resource.
+    "src/cli_agent_orchestrator/ext_apps/static/**",
 ]
 
 [dependency-groups]

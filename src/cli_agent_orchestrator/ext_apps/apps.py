@@ -18,7 +18,7 @@ the boundary and only reads static files from disk.
 import logging
 import os
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,17 @@ _RESOURCE_FILES = {
     DASHBOARD_RESOURCE_URI: "dashboard.html",
     AGENT_RESOURCE_URI: "agent.html",
     EVENT_STREAM_RESOURCE_URI: "event-stream.html",
+}
+
+# Preferred iframe sizes per resource. Hosts treat these as SEP-1865 layout
+# hints, not hard caps; ``ui_meta`` attaches the matching entry as
+# ``_meta.ui.preferredFrameSize``. The dashboard is widest (fleet table), the
+# agent view is medium (single-agent detail), and the event ticker is compact.
+_DEFAULT_FRAME: Dict[str, int] = {"width": 1280, "height": 800}
+PREFERRED_FRAMES: Dict[str, Dict[str, int]] = {
+    DASHBOARD_RESOURCE_URI: {"width": 1280, "height": 800},
+    AGENT_RESOURCE_URI: {"width": 1024, "height": 720},
+    EVENT_STREAM_RESOURCE_URI: {"width": 640, "height": 480},
 }
 
 
@@ -118,6 +129,13 @@ def ui_meta(
         ui["visibility"] = list(visibility)
     if resource_uri is not None:
         ui["resourceUri"] = resource_uri
+        # SEP-1865 layout hints, attached only for resource-rendering tools. A
+        # per-resource preferred frame size, a border preference, and a stable
+        # per-resource sandbox ``domain`` key. Hosts that don't understand these
+        # keys ignore them; hosts that do use them to size and isolate the iframe.
+        ui["preferredFrameSize"] = dict(PREFERRED_FRAMES.get(resource_uri, _DEFAULT_FRAME))
+        ui["prefersBorder"] = True
+        ui["domain"] = resource_uri.split("//", 1)[-1].replace("/", "-")
     return {"ui": ui}
 
 
@@ -130,6 +148,26 @@ def _read_resource_html(filename: str) -> Optional[str]:
     path = static_dir / filename
     if not path.is_file():
         return None
+    return path.read_text(encoding="utf-8")
+
+
+def get_resource_body(uri: str) -> str:
+    """Return the HTML body for a registered ``ui://cao/*`` resource.
+
+    Resolves the artifact via :func:`apps_static_dir` (env override → packaged
+    location → source tree). Raises ``KeyError`` for an unknown URI and
+    ``FileNotFoundError`` when the artifact is absent (e.g. the frontend has not
+    been built in a dev tree). Production wheels always ship the artifacts via the
+    hatch ``artifacts`` rule in ``pyproject.toml``.
+    """
+
+    filename = _RESOURCE_FILES.get(uri)
+    if filename is None:
+        raise KeyError(f"Unknown MCP Apps resource: {uri}")
+    static_dir = apps_static_dir()
+    if static_dir is None:
+        raise FileNotFoundError("apps_static/ not found (frontend not built)")
+    path = static_dir / filename
     return path.read_text(encoding="utf-8")
 
 

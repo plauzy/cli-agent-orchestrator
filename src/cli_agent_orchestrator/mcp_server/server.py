@@ -1420,6 +1420,16 @@ from cli_agent_orchestrator.mcp_server.app_tools import register_app_tools  # no
 
 register_app_tools(mcp)
 
+# Topology widget (cao://widget/topology, with a /widgets/topology/ static
+# fallback) and SEP-2133 capability advertisement. Both are default-off (no-op
+# unless CAO_MCP_APPS_ENABLED is set) and best-effort, so the default posture is
+# unchanged. advertise_capability makes the initialize handshake announce
+# io.modelcontextprotocol/ui so SEP-1865 hosts discover the surface.
+from cli_agent_orchestrator.ext_apps import advertise_capability, register_widget  # noqa: E402
+
+register_widget(mcp)
+advertise_capability(mcp)
+
 
 def main():
     """Main entry point for the MCP server."""
