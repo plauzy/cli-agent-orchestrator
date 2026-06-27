@@ -1,9 +1,8 @@
 // Property + unit tests for the RFC 6902 sync client (shared/patch.ts).
 //
-// Property 5 (RFC-6902 round-trip): for all snapshots `prev`, `curr`,
+// RFC-6902 round-trip: for all snapshots `prev`, `curr`,
 //   applyPatch(prev, clientDiff(prev, curr))  deep-equals  curr,
 // including pointer-escaping cases (keys containing '/' and '~').
-// **Validates: Requirements 9.1**
 
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
@@ -31,7 +30,7 @@ const jsonValueArb = fc.letrec((tie) => ({
 
 const objectArb = fc.dictionary(keyArb, jsonValueArb, { maxKeys: 6 });
 
-describe("patch round-trip (Property 5)", () => {
+describe("patch round-trip", () => {
   it("applyPatch(prev, clientDiff(prev, curr)) deep-equals curr", () => {
     fc.assert(
       fc.property(objectArb, objectArb, (prev, curr) => {

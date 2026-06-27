@@ -1,5 +1,5 @@
 /* eslint-disable no-undef */
-// In-browser MCP host JSON-RPC peer for the E2E harness (Task 12.4).
+// In-browser MCP host JSON-RPC peer for the E2E harness.
 //
 // Embeds the built View bundle(s) and answers their postMessage requests
 // (ui/initialize, tools/call, ui/update-model-context) from canned, mutable
@@ -9,15 +9,15 @@
 //                                                embedded iframe has sent
 //                                                ui/notifications/initialized.
 //   window.__host.launch(id, profile)        -> add a terminal + push a fresh
-//                                                dashboard snapshot (Req 19.3).
+//                                                dashboard snapshot.
 //   window.__host.stop(id)                    -> mark a terminal stopped + push
-//                                                updated snapshots (Req 19.6).
+//                                                updated snapshots.
 //   window.__host.teardown()                  -> send ui/resource-teardown to
-//                                                every iframe (Req 19.8).
+//                                                every iframe.
 //   window.__host.toolCallCount(name)         -> how many times a tool was
-//                                                called (Req 19.7 auto-refresh).
+//                                                called (auto-refresh).
 //   window.__host.submitCount()               -> submit_command call count
-//                                                (Req 19.12 must stay 0).
+//                                                (must stay 0).
 //
 // The host peer routes replies back to the requesting iframe via
 // event.source.postMessage, and tracks each iframe's contentWindow so it can
@@ -148,7 +148,7 @@
         detail: {},
       };
       state.events.push(ev);
-      // Relay into the live SSE feed so the event-stream view updates (Req 19.4).
+      // Relay into the live SSE feed so the event-stream view updates.
       void fetch("/emit", {
         method: "POST",
         headers: { "content-type": "application/json" },

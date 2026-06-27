@@ -2,7 +2,7 @@
 //
 // Each event's kind drives a color class; all event metadata is rendered as
 // escaped React children (never innerHTML), so a malicious detail field cannot
-// inject markup (XSS safety, Req 19.11).
+// inject markup (XSS safety).
 
 import React from "react";
 import type { CaoEvent, CaoEventKind } from "./types";

@@ -7,7 +7,7 @@ FastAPI ``Depends(get_current_scopes)`` boundary is the real enforcement point).
 
 Default-off: with ``AUTH0_DOMAIN`` / ``CAO_AUTH_JWKS_URI`` unset,
 ``get_scopes_for_local_token`` returns the full taxonomy, so every required
-scope is present and the check always passes (Property 7/8).
+scope is present and the check always passes.
 
 Works for both sync and async callables. On denial it returns a structured
 ``{"success": False, "error": ...}`` result rather than raising, matching the

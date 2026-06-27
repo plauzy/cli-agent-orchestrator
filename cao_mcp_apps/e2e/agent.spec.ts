@@ -1,4 +1,4 @@
-// E2E tier — agent-detail cells (Task 12.4).
+// E2E tier — agent-detail cells.
 //
 //   19.5  open agent detail -> the terminal-log view (ui://cao/agent) renders
 //         its output region. In MCP Apps, opening an agent's detail is

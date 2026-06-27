@@ -74,7 +74,7 @@ export function AgentView({
     if (result.success) {
       // Exactly one token-efficient, body-free note per material action,
       // described with a Semantic_Primitive. silentlyNoteToModel never throws,
-      // so a failed note cannot block the iframe (Req 11.4).
+      // so a failed note cannot block the iframe.
       void app.silentlyNoteToModel(
         describeGesture(kind, tidRef.current ?? undefined),
       );

@@ -13,15 +13,15 @@ Tools implemented here:
 * ``subscribe_events``  — SSE endpoint descriptor   (visibility ``["app"]``)
 * ``submit_command``    — single mutation choke point **(Phase II skeleton)**
 
-**HTTP-only boundary (Requirement 7).** Every read of Backplane state goes through
+**HTTP-only boundary.** Every read of Backplane state goes through
 the FastAPI surface over ``API_BASE_URL`` (``requests``) or through process-local
 read-only services (``event_log_service``, ``ui_state_service``). This module — and
 all of ``mcp_server/`` — must never import ``clients.tmux`` or ``clients.database``;
-the guard test from task 1.1 enforces it.
+the guard test enforces it.
 
-**Scopes seam (Requirement 17, default-off).** The scope helper
+**Scopes seam (default-off).** The scope helper
 (:func:`get_scopes_for_local_token`) and ``SCOPE_*`` constants are imported from
-``security/auth.py`` (task 10.1). With ``AUTH0_DOMAIN`` unset the helper returns
+``security/auth.py``. With ``AUTH0_DOMAIN`` unset the helper returns
 the full taxonomy, so every command passes the pre-check and behavior is
 byte-for-byte identical to a build with no auth layer. The tool pre-check is a
 UX gate; the FastAPI ``Depends(get_current_scopes)`` boundary is the real
@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 
 # Re-exported for backwards compatibility with callers/tests that referenced the
 # scope constants on ``app_tools`` during Phase II. The single source of truth is
-# now ``security/auth.py`` (task 10.1); ``get_scopes_for_local_token`` preserves
+# now ``security/auth.py``; ``get_scopes_for_local_token`` preserves
 # the same default-off semantics (full scope set when ``AUTH0_DOMAIN`` is unset).
 __all__ = [
     "SCOPE_READ",
@@ -76,7 +76,7 @@ STANDARD_KINDS = frozenset({"send_message", "assign", "create_session"})
 LIFECYCLE_KINDS = frozenset({"interrupt", "pause", "resume"})
 DESTRUCTIVE_KINDS = frozenset({"shutdown_session"})
 
-# Server-side backstop for oversized task payloads (Requirement 19.12). The
+# Server-side backstop for oversized task payloads. The
 # View_Layer rejects messages over 4000 chars before they ever reach the tool
 # channel; this is a defense-in-depth cap at the choke point so an oversized
 # payload bypassing the UI (or coming from another caller) is rejected with a
@@ -255,8 +255,7 @@ def _payload_too_large(payload: Dict[str, Any]) -> Optional[str]:
 
     The cap is measured on the JSON-serialized payload so an oversized value in
     any field (message body, ``allowed_tools`` list, ...) is caught. Returns a
-    structured, human-readable warning the iframe surfaces to the operator
-    (Requirement 19.12).
+    structured, human-readable warning the iframe surfaces to the operator.
     """
 
     try:
@@ -271,7 +270,7 @@ def _payload_too_large(payload: Dict[str, Any]) -> Optional[str]:
 def _submit_command_impl(kind: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """Classify -> scope pre-check -> route to the matching Backplane endpoint.
 
-    The single mutation choke point (Requirement 13): every state-changing UI
+    The single mutation choke point: every state-changing UI
     gesture flows through here. The flow is
 
     1. **classify** the ``kind`` as standard / lifecycle / destructive (unknown
@@ -280,9 +279,9 @@ def _submit_command_impl(kind: str, payload: Dict[str, Any]) -> Dict[str, Any]:
        lifecycle kinds require ``cao:write``. A non-empty granted set missing the
        required scope blocks (auth on); the full set (auth off, the default) passes;
     3. **size guard** — an oversized payload is rejected before routing
-       (Requirement 19.12), a structured warning rather than a forwarded request;
+       — a structured warning rather than a forwarded request;
     4. **route** the authorized command over HTTP to the real FastAPI mutation
-       endpoint (HTTP-only boundary, Requirement 7).
+       endpoint (HTTP-only boundary).
     """
 
     required = _classify_kind(kind)

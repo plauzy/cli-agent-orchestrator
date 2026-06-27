@@ -1,7 +1,7 @@
 // MCP App lifecycle bridge for the CAO views.
 //
-// DEVIATION NOTE (verified against SEP-1865, spec 2026-01-26; see tasks.md task
-// 9.1 research note): the `@modelcontextprotocol/ext-apps` SDK exists (npm
+// DEVIATION NOTE (verified against SEP-1865, spec 2026-01-26): the
+// `@modelcontextprotocol/ext-apps` SDK exists (npm
 // v1.7.4), but the spec explicitly states "you don't need an SDK to talk MCP
 // with the host." To keep the single-file bundles dependency-free and trivially
 // JIT-free, this bridge implements the spec's native `postMessage` JSON-RPC
@@ -9,7 +9,7 @@
 // (connect / submitCommand / fetchHistory / startPolling / updateModelContext /
 // silentlyNoteToModel) is preserved so the SDK can be dropped in later.
 //
-// Lifecycle invariant (Req 8.3): notification handlers are registered BEFORE
+// Lifecycle invariant: notification handlers are registered BEFORE
 // `connect()` sends `ui/initialize`, because the host MUST NOT send
 // `ui/notifications/*` to the View before it observes `ui/notifications/initialized`.
 
@@ -103,8 +103,8 @@ export class McpApp {
     this.scope.addEventListener("message", this.listener);
     this.connected = true;
 
-    // Release event listeners for GC when the host tears down the iframe
-    // (Req 19.8). Registered last so any user-supplied teardown handler runs
+    // Release event listeners for GC when the host tears down the iframe.
+    // Registered last so any user-supplied teardown handler runs
     // first; `disconnect()` then removes the message listener.
     this.on("ui/resource-teardown", () => this.disconnect());
     // Also disconnect on page hide/unload so a hard iframe removal cleans up.
@@ -183,7 +183,7 @@ export class McpApp {
    * Poll a read tool on an interval, invoking `onResult` with each snapshot.
    * Returns a stop function. Failures are swallowed (the iframe keeps polling);
    * an optional `onError` is notified on each failed tick so the view can
-   * surface an unreachable-Backplane state (Req 19.14).
+   * surface an unreachable-Backplane state.
    */
   startPolling(
     toolName: string,
@@ -212,7 +212,7 @@ export class McpApp {
     };
   }
 
-  // ---- model-context loop (Req 11) --------------------------------------
+  // ---- model-context loop --------------------------------------
 
   /**
    * Update the host's model context for FUTURE turns (spec
@@ -231,8 +231,8 @@ export class McpApp {
 
   /**
    * Post a single token-efficient summary note to the model, silently and
-   * failure-tolerantly. Excludes message bodies (privacy boundary, Req 11.3).
-   * Never throws — a failed note must not block the iframe (Req 11.4).
+   * failure-tolerantly. Excludes message bodies (privacy boundary).
+   * Never throws — a failed note must not block the iframe.
    */
   async silentlyNoteToModel(summary: string): Promise<void> {
     try {
@@ -264,7 +264,7 @@ export class McpApp {
   }
 
   private handleMessage(event: MessageEvent): void {
-    // Untrusted-origin guard (Req 19.13): once we learn the host origin from the
+    // Untrusted-origin guard: once we learn the host origin from the
     // first correlated reply, ignore anything from a different origin.
     const data: any = event.data;
     if (!data || data.jsonrpc !== "2.0") return;
@@ -362,7 +362,7 @@ export function buildGesturePayload(
 }
 
 /**
- * The single Command_Kind a drag-and-drop reassignment gesture maps to (Req 12.2).
+ * The single Command_Kind a drag-and-drop reassignment gesture maps to.
  * Dragging a task card onto an agent reassigns it -> `assign`.
  */
 export const DRAG_REASSIGN_KIND: SubmitCommandKind = "assign";

@@ -8,7 +8,7 @@
 //
 // JIT-free guarantee ("allowUnsafeEval: false" intent): there is no Vite option
 // literally named `allowUnsafeEval` — that is an MCP-UI host-renderer prop, not a
-// build setting (see tasks.md task 9.1 research note). We instead target ES2021
+// build setting. We instead target ES2021
 // and ship no code that needs `eval`/`new Function`; the `npm run scan:jit` gate
 // fails the build if any JIT token slips into the output, which is what lets the
 // bundle run under the spec's no-`unsafe-eval` CSP.

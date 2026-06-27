@@ -4,9 +4,9 @@ This module provides scope extraction, JWKS caching, and the FastAPI
 ``get_current_scopes`` dependency. It is **default-off**: with ``AUTH0_DOMAIN``
 unset *and* ``CAO_AUTH_JWKS_URI`` unset, every authorization path returns the
 full scope taxonomy and no enforcement happens — behavior is byte-for-byte
-identical to a build with no auth layer (Requirement 17.1/17.2).
+identical to a build with no auth layer.
 
-The implementation is a **generic OAuth 2.1** one (research gate task 9.1 GO):
+The implementation is a **generic OAuth 2.1** one:
 all load-bearing standards (RFC 9728 Protected Resource Metadata, RFC 8693 Token
 Exchange, RFC 8707 Resource Indicators) are established IETF RFCs. Auth0 is
 treated as just one configurable IdP — ``AUTH0_DOMAIN`` is a convenience that
@@ -57,8 +57,8 @@ def is_auth_enabled() -> bool:
     """Return whether the auth layer is active.
 
     Default-off: auth is enabled only when an IdP is configured — either
-    ``AUTH0_DOMAIN`` (Auth0 convenience) or ``CAO_AUTH_JWKS_URI`` (generic IdP,
-    Requirement 17.3). With neither set, the layer is off and every path returns
+    ``AUTH0_DOMAIN`` (Auth0 convenience) or ``CAO_AUTH_JWKS_URI`` (generic IdP).
+    With neither set, the layer is off and every path returns
     the full scope set.
     """
 
@@ -110,7 +110,7 @@ def get_authorization_servers() -> List[str]:
 class _JWKSCache:
     """Thread-safe JWKS client cache with a 1 h TTL.
 
-    Behavior (Requirement 16.3/16.5/16.6):
+    Behavior:
 
     * within the TTL, the cached client is reused without re-fetching;
     * when the cache is empty (or stale) AND the source is reachable, fresh keys
@@ -174,7 +174,7 @@ def get_jwks_cache() -> _JWKSCache:
 
 def _scopes_from_claims(claims: dict) -> List[str]:
     """Extract granted scopes, accepting the ``scope`` / ``permissions`` / ``scp``
-    claim variants (Requirement 16.7)."""
+    claim variants."""
 
     out: List[str] = []
     scope = claims.get("scope")
@@ -206,7 +206,7 @@ def extract_scopes_from_token(token: str) -> List[str]:
     Default-off: when auth is disabled, returns the full scope set without
     touching the token. When enabled, raises (``jwt.PyJWTError`` subclasses or
     a generic ``Exception`` from the JWKS fetch) on any validation failure so the
-    caller can map it to HTTP 401 (Requirement 16.4).
+    caller can map it to HTTP 401.
     """
 
     if not is_auth_enabled():
@@ -276,8 +276,8 @@ async def get_current_scopes(
     """FastAPI dependency returning the caller's granted scope set.
 
     Default-off: when auth is disabled, returns the full scope set and never
-    inspects the request (Requirement 17.1). When enabled, a missing/invalid/
-    expired bearer token yields HTTP 401 (Requirement 16.4).
+    inspects the request. When enabled, a missing/invalid/
+    expired bearer token yields HTTP 401.
 
     ``authorization`` is bound to the ``Authorization`` request header via
     FastAPI's ``Header`` so the function can be used directly as

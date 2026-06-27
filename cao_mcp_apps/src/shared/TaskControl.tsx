@@ -1,11 +1,11 @@
 // TaskControl — mutation gesture buttons, each mapped to exactly ONE
 // SubmitCommandKind, all routed through the single `submit_command` choke point.
 //
-// - Each button maps to exactly one SubmitCommandKind (Req 12.1).
+// - Each button maps to exactly one SubmitCommandKind.
 // - Destructive kinds require window.confirm() before submitting (wired in
-//   Phase III task 7.3; the confirm hook is already here).
+//   Phase III; the confirm hook is already here).
 // - The free-text message input is rendered as a controlled value and echoed
-//   only as escaped React children (XSS safety, Req 19.11).
+//   only as escaped React children (XSS safety).
 
 import React, { useState } from "react";
 import { buildGesturePayload, DRAG_REASSIGN_KIND } from "./mcpApp";
@@ -111,7 +111,7 @@ export function TaskControl({
   }
 
   /**
-   * Drag-and-drop reassignment (Req 12.2): dropping a task payload onto this
+   * Drag-and-drop reassignment: dropping a task payload onto this
    * control reassigns it to `target` via the single `assign` Command_Kind.
    * The dropped data is read from the `text/plain` drag payload (the task text).
    */
