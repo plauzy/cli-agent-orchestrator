@@ -2,12 +2,12 @@
 //
 // No JIT: this file uses only plain object/array operations (no `eval`,
 // `new Function`, etc.), so the single-file bundle runs under the spec's
-// no-`unsafe-eval` CSP (Requirement 9.2, Correctness Property 10).
+// no-`unsafe-eval` CSP.
 //
 // `clientDiff` mirrors the server's `ui_state_service.diff_snapshot` granularity
 // (whole-key replace for `terminals`/`sessions`, per-key replace for nested
 // scalars) so that `applyPatch(prev, clientDiff(prev, curr))` deep-equals `curr`
-// (Correctness Property 5, RFC-6902 round-trip).
+// (RFC-6902 round-trip).
 
 import type { JsonPatchOp } from "./types";
 

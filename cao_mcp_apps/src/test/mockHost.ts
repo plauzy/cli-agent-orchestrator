@@ -1,4 +1,4 @@
-// Mock Host harness for the Integration tier (Task 12.3).
+// Mock Host harness for the Integration tier.
 //
 // The real MCP App host is a postMessage JSON-RPC peer: the View (our McpApp)
 // is a JSON-RPC client over `postMessage`, and the host answers `ui/initialize`,
@@ -12,7 +12,7 @@
 //   - appWindow  — the View listens here (its `scope`),
 //   - hostWindow — the host listens here; the View's `target` posts here.
 // Each delivered message carries the *sender's* origin, so the untrusted-origin
-// guard (Req 19.13) can be exercised by delivering a frame from another origin.
+// guard can be exercised by delivering a frame from another origin.
 
 export type ToolImpl = (
   args: Record<string, unknown>,
@@ -109,8 +109,7 @@ export class MockHost {
 
   /**
    * Deliver a frame to the View from an arbitrary (untrusted) origin. Used to
-   * verify the View ignores frames whose origin is not the pinned host origin
-   * (Req 19.13).
+   * verify the View ignores frames whose origin is not the pinned host origin.
    */
   deliverFromOrigin(origin: string, data: unknown): void {
     this.appWindow.deliver(origin, data);
@@ -174,7 +173,7 @@ export class MockHost {
    * Wrap a structured tool return as the host delivers it. A real host echoes a
    * `CallToolResult` with a plain-text `content` block (the serialized result)
    * and, for UI-capable tools, a `structuredContent` payload. A no-UI-surface
-   * host (Req 19.9) still returns structured plain-text results — modeled by
+   * host still returns structured plain-text results — modeled by
    * `includePlainText` with `structuredContent` omitted.
    */
   private wrapToolResult(structured: unknown): unknown {

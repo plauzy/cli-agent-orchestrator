@@ -60,7 +60,7 @@ def normalize_kind(event_type: str, detail: Optional[dict] = None) -> str:
         error, other}``.
     """
     # Defensive coercion keeps the function total even if a non-str slips in
-    # (Requirement 1.7: never raise on any input).
+    # (never raise on any input).
     if not isinstance(event_type, str):
         return "other"
 

@@ -1,4 +1,4 @@
-// Unit cells for the RFC 6902 apply/diff client (Task 12.1, Unit tier).
+// Unit cells for the RFC 6902 apply/diff client (Unit tier).
 //
 // The property test in patch.test.ts covers the clientDiff -> applyPatch
 // round-trip. These targeted unit tests exercise the remaining op branches that

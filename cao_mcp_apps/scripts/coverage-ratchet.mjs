@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // Coverage ratchet: fail CI if measured line coverage regresses below the
-// floor recorded in .coverage-baseline.json (Requirement 20.1).
+// floor recorded in .coverage-baseline.json.
 //
 // Reads:
 //   - Python:   `coverage.json` produced by `pytest --cov --cov-report=json`
 //   - Frontend: `coverage/coverage-summary.json` produced by `vitest --coverage`
 //
 // A `null` floor means "not yet established" — the measured value is reported
-// but never fails the gate. Phase V (task 12.5) raises the floors to lock gains.
+// but never fails the gate. Phase V raises the floors to lock gains.
 //
 // Usage:  node scripts/coverage-ratchet.mjs [repoRoot]
 

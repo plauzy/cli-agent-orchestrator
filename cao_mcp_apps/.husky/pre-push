@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # Pre-push gate: full local test sweep before publishing a branch
-# (Requirement 21.2). Runs the Python unit suite and, once the frontend exists
+# Runs the Python unit suite and, once the frontend exists
 # (Phase II), the JIT-free scan, bundle-size budget, and vitest run.
 #
 # The hook enforces tests wherever the toolchain is present, but degrades

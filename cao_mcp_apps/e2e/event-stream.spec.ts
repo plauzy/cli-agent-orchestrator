@@ -1,4 +1,4 @@
-// E2E tier — event-stream cell (Task 12.4).
+// E2E tier — event-stream cell.
 //
 //   19.4 send a task to an agent -> the event stream updates immediately.
 //

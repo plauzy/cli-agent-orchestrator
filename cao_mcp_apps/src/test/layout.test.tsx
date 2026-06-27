@@ -1,4 +1,4 @@
-// Component tests for the container-query dashboard layout (task 5.8).
+// Component tests for the container-query dashboard layout.
 //
 // happy-dom has no layout engine, so we cannot read computed grid tracks. We
 // instead verify the structural + stylesheet contract that drives the layout:
@@ -6,7 +6,6 @@
 //   - the stylesheet declares the <=350px single-column and >=1280px
 //     multi-column container queries,
 //   - the rendered grid is stable (snapshot) at both widths.
-// _Requirements: 10.2, 10.3, 19.15, 19.16_
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";

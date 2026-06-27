@@ -462,7 +462,7 @@ async def oauth_protected_resource_metadata():
     scopes (``cao:read``/``cao:write``/``cao:admin``), and the supported bearer
     methods so OAuth clients can discover how to obtain access. Returns HTTP 404
     when auth is disabled (default-off), so the localhost-only posture is
-    byte-for-byte unchanged (Requirement 15.2).
+    byte-for-byte unchanged.
     """
     if not is_auth_enabled():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="auth disabled")

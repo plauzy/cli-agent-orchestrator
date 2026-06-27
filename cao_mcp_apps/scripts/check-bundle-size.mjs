@@ -7,7 +7,7 @@
 //   event-stream.html  <= 150 KB gz
 //
 // Each artifact is a single inlined HTML file (vite-plugin-singlefile). Exits
-// non-zero if any built bundle exceeds its budget (Requirement 20.4).
+// non-zero if any built bundle exceeds its budget.
 //
 // Usage:  node scripts/check-bundle-size.mjs [artifactsDir]
 

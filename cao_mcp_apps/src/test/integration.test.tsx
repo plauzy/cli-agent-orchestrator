@@ -1,12 +1,11 @@
-// Integration tier cells (Task 12.3) — driven through the Mock Host peer.
+// Integration tier cells — driven through the Mock Host peer.
 //
 // Closes the matrix integration cells at the postMessage/JSON-RPC layer:
-//   - 19.13 a frame from an untrusted origin is ignored; view state unchanged,
-//   - 19.9  a no-UI-surface host still returns structured plain-text results,
-//   - 19.14 an unreachable Backplane surfaces a retry control that recovers,
-//   - Property 12 re-mount idempotence: `oninitialized` replay + re-mount
+//   - a frame from an untrusted origin is ignored; view state unchanged,
+//   - a no-UI-surface host still returns structured plain-text results,
+//   - an unreachable Backplane surfaces a retry control that recovers,
+//   - re-mount idempotence: `oninitialized` replay + re-mount
 //     hydration both reproduce the same governance timeline.
-// _Requirements: 19.9, 19.13, 19.14_  _Validates: Property 12 (re-mount idempotence)_
 
 import {
   cleanup,
@@ -261,7 +260,7 @@ describe("19.8 — iframe teardown releases listeners", () => {
   });
 });
 
-describe("Property 12 — re-mount idempotence", () => {
+describe("re-mount idempotence", () => {
   it("oninitialized replay hydrates the dashboard from a pushed tool-result", async () => {
     const host = buildHost({ tools: { render_dashboard: () => snapshot(0) } });
     const app = makeApp(host);
