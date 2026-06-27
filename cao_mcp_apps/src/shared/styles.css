@@ -2,7 +2,7 @@
  *
  * The root establishes a query container (`container-type: inline-size`) so the
  * grid responds to the iframe's own width — not the viewport — which is what an
- * MCP host actually controls (Req 10.1). Theme colors fall back to sane defaults
+ * MCP host actually controls. Theme colors fall back to sane defaults
  * but consume host-provided CSS variables when present (SEP-1865 theming). */
 
 :root {
@@ -33,7 +33,7 @@ body {
   container-type: inline-size;
   container-name: cao;
   padding: 12px;
-  /* Never produce a horizontal scrollbar in the narrow sidebar case (Req 10.4). */
+  /* Never produce a horizontal scrollbar in the narrow sidebar case. */
   overflow-x: hidden;
 }
 
@@ -67,7 +67,7 @@ body {
   border-radius: var(--border-radius-md);
   padding: 10px;
   background: var(--color-background-secondary);
-  /* Long values wrap instead of forcing horizontal overflow (Req 10.4). */
+  /* Long values wrap instead of forcing horizontal overflow. */
   overflow-wrap: anywhere;
   word-break: break-word;
 }
@@ -198,7 +198,7 @@ body {
   padding: 8px 0;
 }
 
-/* Narrow container (<= 350px): force a single column, no truncation (Req 10.2/10.4). */
+/* Narrow container (<= 350px): force a single column, no truncation. */
 @container cao (max-width: 350px) {
   .cao-grid {
     grid-template-columns: 1fr;
@@ -208,14 +208,14 @@ body {
   }
 }
 
-/* Wide container (>= 1280px): multi-column grid (Req 10.3). */
+/* Wide container (>= 1280px): multi-column grid. */
 @container cao (min-width: 1280px) {
   .cao-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
-/* Mid-width hosts (>= 1000px) also stretch to multi-column (Req 19.16). */
+/* Mid-width hosts (>= 1000px) also stretch to multi-column. */
 @container cao (min-width: 1000px) and (max-width: 1279.98px) {
   .cao-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

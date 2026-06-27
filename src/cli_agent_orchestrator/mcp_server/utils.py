@@ -3,7 +3,7 @@
 HTTP-only: like the rest of ``mcp_server``, this module reaches Backplane state
 exclusively through the FastAPI surface over HTTP (never through
 ``clients.database`` / ``clients.tmux``), preserving the auditable MCP boundary
-enforced by ``test/test_http_only_boundary.py`` (Requirement 7).
+enforced by ``test/test_http_only_boundary.py``.
 """
 
 import logging

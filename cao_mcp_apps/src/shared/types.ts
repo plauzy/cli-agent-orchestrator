@@ -25,7 +25,7 @@ export interface CaoEvent {
   terminal_id: string | null;
   session_name: string | null;
   timestamp: string;
-  /** Metadata only — never message bodies (privacy boundary, Req 18). */
+  /** Metadata only — never message bodies (privacy boundary). */
   detail: Record<string, unknown>;
 }
 

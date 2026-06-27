@@ -1,12 +1,11 @@
-// Component tier cells (Task 12.2, happy-dom).
+// Component tier cells (happy-dom).
 //
 // Closes the matrix component cells:
-//   - 19.1  zero-agents dashboard shows ONLY a placeholder and renders NO cards,
-//   - 19.2  active-agents render cards with the correct status badges,
-//   - 19.11 escaped-markup input/metadata renders as an escaped string (no XSS),
+//   - zero-agents dashboard shows ONLY a placeholder and renders NO cards,
+//   - active-agents render cards with the correct status badges,
+//   - escaped-markup input/metadata renders as an escaped string (no XSS),
 //   - scope-gated button rendering: controls whose required scope is absent are
 //     hidden (and the default-off full-scope case shows everything).
-// _Requirements: 19.1, 19.2, 19.11_
 
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";

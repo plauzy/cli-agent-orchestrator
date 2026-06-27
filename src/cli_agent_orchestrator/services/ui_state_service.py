@@ -140,7 +140,7 @@ def diff_snapshot(prev: Dict[str, Any], curr: Dict[str, Any]) -> List[Dict[str, 
     """Compute the RFC 6902 JSON Patch transforming ``prev`` into ``curr``.
 
     Applying the returned ops to ``prev`` yields a value deep-equal to ``curr``
-    (Correctness Property 5, RFC-6902 round-trip).
+    (RFC-6902 round-trip).
 
     Granularity:
 

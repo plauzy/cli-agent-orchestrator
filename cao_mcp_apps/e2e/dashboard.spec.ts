@@ -1,4 +1,4 @@
-// E2E tier — dashboard cells (Task 12.4).
+// E2E tier — dashboard cells.
 //
 // Drives the built ui://cao/dashboard bundle inside the MCP host harness and
 // asserts on the live iframe content.

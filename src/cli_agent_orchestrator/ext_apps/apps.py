@@ -28,12 +28,12 @@ AGENT_RESOURCE_URI = "ui://cao/agent"
 EVENT_STREAM_RESOURCE_URI = "ui://cao/event-stream"
 
 # Default Content-Security-Policy domains for the sandboxed iframe, expressed in the
-# **structured** SEP-1865 ``_meta.ui.csp`` shape (NOT a raw CSP string — see the
-# research note in tasks.md task 9.1). The host composes the actual CSP header from
+# **structured** SEP-1865 ``_meta.ui.csp`` shape (NOT a raw CSP string). The host
+# composes the actual CSP header from
 # these declared domains. ``connectDomains`` allows the iframe to stream the loopback
 # Backplane ``/events`` directly; no remote origins are declared. The spec's default
 # ``script-src`` is ``'self' 'unsafe-inline'`` with **no** ``'unsafe-eval'`` — our
-# JIT-free bundle (task 1.2 scan) is what lets the views run under that policy.
+# JIT-free bundle is what lets the views run under that policy.
 DEFAULT_CSP = {
     "connectDomains": ["http://127.0.0.1:9889", "http://localhost:9889"],
     "resourceDomains": [],

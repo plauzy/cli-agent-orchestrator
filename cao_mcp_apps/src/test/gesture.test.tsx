@@ -1,5 +1,5 @@
 // Component tests for gesture -> primitive mapping and the silent
-// model-context note (Phase III tasks 7.3 / 7.4; verifies task 7.5).
+// model-context note (Phase III).
 //
 // Covers:
 //   - each TaskControl gesture maps to exactly one SubmitCommandKind,
@@ -9,7 +9,6 @@
 //   - drag-and-drop reassignment maps to the `assign` kind,
 //   - model-context notes are silent (no inference trigger), body-free, and
 //     failure-tolerant.
-// _Requirements: 11.1, 11.2, 11.3, 11.4, 12.1, 12.2, 12.3_
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";

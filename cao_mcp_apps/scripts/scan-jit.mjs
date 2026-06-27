@@ -5,7 +5,7 @@
 // reject any bundle that uses eval, new Function, the Function(string)
 // constructor, or a WASM JIT entry point. This scan catches those tokens in
 // the built artifacts before they ship and exits non-zero on any hit
-// (Requirements 8.2, 8.5, 20.2; Correctness Property 10 — JIT-free bundle).
+// (enforces the JIT-free bundle guarantee).
 //
 // Usage:  node scripts/scan-jit.mjs [artifactsDir]
 // Default artifactsDir: ../src/cli_agent_orchestrator/ext_apps/apps_static

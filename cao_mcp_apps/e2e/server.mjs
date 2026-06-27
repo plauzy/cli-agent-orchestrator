@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// E2E harness server for the CAO MCP App Playwright tier (Task 12.4).
+// E2E harness server for the CAO MCP App Playwright tier.
 //
 // Serves three things on a single origin so the View bundles run exactly as the
 // host would load them (same-origin iframe + same-origin SSE):
@@ -16,7 +16,7 @@
 //
 // No real Backplane is required: the host peer answers all read tools from
 // canned, mutable fleet state, and a submit_command that emits a governance
-// event is relayed to /emit so the live event-stream view updates (Req 19.4).
+// event is relayed to /emit so the live event-stream view updates.
 //
 // The default port is 9889 so the event-stream bundle's default
 // `backplaneBaseUrl` (http://127.0.0.1:9889) resolves to this same origin.

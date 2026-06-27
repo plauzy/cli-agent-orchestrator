@@ -70,7 +70,7 @@ export function Dashboard({
           }
         },
         {},
-        // A failed poll surfaces the retry control (Req 19.14).
+        // A failed poll surfaces the retry control.
         () => setUnreachable(true),
       );
     });
@@ -90,7 +90,7 @@ export function Dashboard({
       const result = await app.submitCommand(kind, payload);
       if (result.success) {
         // One token-efficient, body-free model-context note per material
-        // fleet action (Req 11); never blocks the iframe on failure.
+        // fleet action; never blocks the iframe on failure.
         const target =
           (payload.session_name as string | undefined) ??
           (payload.terminal_id as string | undefined);
