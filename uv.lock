@@ -391,7 +391,7 @@ requires-dist = [
     { name = "apscheduler", specifier = ">=3.10.4" },
     { name = "click", specifier = ">=8.0.0" },
     { name = "fastapi", specifier = ">=0.104.0" },
-    { name = "fastmcp", specifier = ">=2.14.0" },
+    { name = "fastmcp", specifier = ">=2.14.0,<4.0.0" },
     { name = "jsonschema", specifier = ">=4.25" },
     { name = "libtmux", specifier = ">=0.51.0" },
     { name = "mcp", specifier = ">=1.23.0" },

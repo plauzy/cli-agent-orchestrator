@@ -18,6 +18,7 @@
     "build:agent": "vite build -c vite.config.agent.ts",
     "build:events": "vite build -c vite.config.events.ts",
     "build:all": "npm run build:dashboard && npm run build:agent && npm run build:events",
+    "demo": "node scripts/record-demo.mjs",
     "lint-staged": "lint-staged"
   },
   "lint-staged": {
