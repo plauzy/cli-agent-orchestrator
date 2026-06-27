@@ -353,3 +353,52 @@ def test_payload_too_large_helper_is_serialized_size_not_field_count() -> None:
     assert app_tools._payload_too_large({"message": "ok"}) is None
     big_list = {"allowed_tools": ["t" * 100 for _ in range(400)]}
     assert app_tools._payload_too_large(big_list) is not None
+
+
+# --- _extract_error_detail -------------------------------------------------
+
+
+def test_extract_error_detail_non_json_returns_fallback() -> None:
+    resp = MagicMock()
+    resp.json.side_effect = ValueError("not json")
+    assert app_tools._extract_error_detail(resp, "fallback") == "fallback"
+
+
+def test_extract_error_detail_uses_detail_field() -> None:
+    resp = MagicMock()
+    resp.json.return_value = {"detail": "boom"}
+    assert app_tools._extract_error_detail(resp, "fallback") == "boom"
+
+
+def test_extract_error_detail_non_dict_or_empty_returns_fallback() -> None:
+    resp = MagicMock()
+    resp.json.return_value = ["not", "a", "dict"]
+    assert app_tools._extract_error_detail(resp, "fallback") == "fallback"
+    resp.json.return_value = {"detail": ""}
+    assert app_tools._extract_error_detail(resp, "fallback") == "fallback"
+
+
+# --- async tool wrappers delegate to their _impl functions -----------------
+
+
+@pytest.mark.asyncio
+async def test_async_tool_wrappers_delegate_to_impls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The registered async tools are thin wrappers over the tested _impl funcs."""
+
+    monkeypatch.setenv("CAO_MCP_APPS_ENABLED", "true")
+    fake = _FakeMCP()
+    assert app_tools.register_app_tools(fake) is True
+    reg = {name: entry["fn"] for name, entry in fake.registered.items()}
+
+    with patch.object(app_tools, "_render_dashboard_impl", return_value={"v": "dash"}):
+        assert await reg["render_dashboard"]() == {"v": "dash"}
+    with patch.object(app_tools, "_render_agent_view_impl", return_value={"v": "agent"}) as m:
+        assert await reg["render_agent_view"]("t1") == {"v": "agent"}
+        m.assert_called_once_with("t1")
+    with patch.object(app_tools, "_cao_fetch_history_impl", return_value={"events": []}):
+        assert await reg["cao_fetch_history"](limit=5) == {"events": []}
+    with patch.object(app_tools, "_subscribe_events_impl", return_value={"sse_url": "/events"}):
+        assert await reg["subscribe_events"]() == {"sse_url": "/events"}
+    with patch.object(app_tools, "_submit_command_impl", return_value={"success": True}) as m:
+        assert await reg["submit_command"]("send_message", {"x": 1}) == {"success": True}
+        m.assert_called_once_with("send_message", {"x": 1})

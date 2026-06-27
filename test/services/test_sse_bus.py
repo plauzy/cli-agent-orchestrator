@@ -100,6 +100,31 @@ async def test_disconnect_removes_subscriber_from_active_set() -> None:
     assert bus.subscriber_count == 0
 
 
+@pytest.mark.asyncio
+async def test_publish_from_other_thread_delivers() -> None:
+    """publish() invoked off the event loop still reaches the subscriber.
+
+    asyncio.Queue is not thread-safe, so the bus must marshal the put onto the
+    subscriber's own loop via call_soon_threadsafe — exercised here by
+    publishing from a separate OS thread (mirrors a plugin hook under
+    asyncio.run).
+    """
+
+    import threading
+
+    bus = SseBus()
+    gen, task = await _start(bus)
+
+    t = threading.Thread(target=lambda: bus.publish({"id": "from-thread"}))
+    t.start()
+    t.join()
+
+    received = await asyncio.wait_for(task, timeout=1.0)
+    assert received == {"id": "from-thread"}
+
+    await gen.aclose()
+
+
 def test_publish_with_no_subscribers_is_noop() -> None:
     """Publishing to an empty bus does not raise."""
 

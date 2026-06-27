@@ -12,7 +12,7 @@ back-pressure to the orchestration core.
 import asyncio
 import logging
 import threading
-from typing import AsyncGenerator, Dict, List, Optional
+from typing import AsyncGenerator, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,9 @@ class SseBus:
     def __init__(self) -> None:
         """Create a bus with no subscribers."""
 
-        self._subs: List["asyncio.Queue[Dict]"] = []
+        # Pair each subscriber queue with the event loop it was created on, so
+        # publish() can feed it thread-safely (asyncio.Queue is not thread-safe).
+        self._subs: List[Tuple["asyncio.Queue[Dict]", asyncio.AbstractEventLoop]] = []
         # A threading.Lock (not asyncio.Lock) guards the subscriber list so
         # publish() is safe to call from any thread — lifecycle hooks may run
         # off the event loop, and the producer must never await.
@@ -35,20 +37,30 @@ class SseBus:
     def publish(self, event: Dict) -> None:
         """Deliver an event to every subscriber with available capacity.
 
-        Non-blocking: a full subscriber queue causes the event to be dropped
-        for that subscriber only; all other subscribers are still served and
-        the caller returns immediately regardless of queue state.
+        Thread-safe and non-blocking. ``asyncio.Queue`` is not thread-safe, and
+        ``publish`` may be invoked off the event loop (e.g. a plugin lifecycle
+        hook running under ``asyncio.run``), so each subscriber's queue is fed
+        on the loop it was created on via ``call_soon_threadsafe``. A full
+        subscriber queue drops the event for that subscriber only — the durable
+        record is the ring buffer, which the iframe backfills via
+        ``cao_fetch_history``. The caller never blocks.
         """
 
         with self._lock:
             subscribers = list(self._subs)
-        for queue in subscribers:
+
+        def _deliver(queue: "asyncio.Queue[Dict]") -> None:
             try:
                 queue.put_nowait(event)
             except asyncio.QueueFull:
-                # Drop for this slow subscriber; history backfills via
-                # cao_fetch_history. Debug-level to avoid log spam under load.
-                logger.debug("SSE subscriber queue full; dropping event %s", event.get("id"))
+                logger.warning("Subscriber queue full. Dropping event.")
+
+        for queue, loop in subscribers:
+            try:
+                loop.call_soon_threadsafe(_deliver, queue)
+            except RuntimeError:
+                # Subscriber's loop is closed/closing — treat as disconnected.
+                logger.debug("SSE subscriber loop unavailable; dropping event")
 
     async def subscribe(self) -> AsyncGenerator[Dict, None]:
         """Register a new subscriber queue and yield events until cancelled.
@@ -57,16 +69,18 @@ class SseBus:
         (subscriber disconnect / iframe teardown / cancellation).
         """
 
+        loop = asyncio.get_running_loop()
         queue: "asyncio.Queue[Dict]" = asyncio.Queue(maxsize=SSE_MAX_QUEUE_SIZE)
+        entry = (queue, loop)
         with self._lock:
-            self._subs.append(queue)
+            self._subs.append(entry)
         try:
             while True:
                 yield await queue.get()
         finally:
             with self._lock:
                 try:
-                    self._subs.remove(queue)
+                    self._subs.remove(entry)
                 except ValueError:
                     pass
 
