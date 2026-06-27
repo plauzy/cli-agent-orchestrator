@@ -69,10 +69,13 @@ from cli_agent_orchestrator.models.memory import (
 from cli_agent_orchestrator.models.terminal import Terminal, TerminalId
 from cli_agent_orchestrator.plugins import PluginRegistry
 from cli_agent_orchestrator.security.auth import (
+    SCOPE_ADMIN,
+    SCOPE_WRITE,
     SCOPES_SUPPORTED,
     get_authorization_servers,
     get_current_scopes,
     is_auth_enabled,
+    require_any_scope,
 )
 from cli_agent_orchestrator.services import (
     flow_service,
@@ -737,7 +740,7 @@ async def create_session(
     allowed_tools: Optional[str] = None,
     memory_manager: Optional[str] = None,
     env_vars: Optional[Dict[str, str]] = Body(default=None, embed=True),
-    _scopes: List[str] = Depends(get_current_scopes),
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
 ) -> Terminal:
     """Create a new session with exactly one terminal.
 
@@ -847,7 +850,7 @@ async def get_session(session_name: str) -> Dict:
 async def delete_session(
     request: Request,
     session_name: str,
-    _scopes: List[str] = Depends(get_current_scopes),
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_ADMIN)),
 ) -> Dict:
     try:
         validate_tmux_name(session_name, "session_name")
@@ -993,7 +996,7 @@ async def send_terminal_input(
     message: str,
     sender_id: Optional[str] = None,
     orchestration_type: Optional[OrchestrationType] = None,
-    _scopes: List[str] = Depends(get_current_scopes),
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
 ) -> Dict:
     try:
         success = terminal_service.send_input(
@@ -1019,7 +1022,7 @@ async def send_terminal_input(
 async def send_terminal_key(
     terminal_id: TerminalId,
     key: str,
-    _scopes: List[str] = Depends(get_current_scopes),
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
 ) -> Dict:
     """Send a tmux special key to a terminal."""
     if not TMUX_KEY_PATTERN.fullmatch(key):
@@ -1287,7 +1290,7 @@ async def create_inbox_message_endpoint(
     receiver_id: TerminalId,
     sender_id: str,
     message: str,
-    _scopes: List[str] = Depends(get_current_scopes),
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
 ) -> Dict:
     """Create inbox message and attempt immediate delivery."""
     try:

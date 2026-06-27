@@ -93,6 +93,15 @@ def advertise_capability(mcp: Any) -> None:
     ``CAO_MCP_APPS_ENABLED`` is unset, and best-effort otherwise (a FastMCP build
     that exposes no ``_mcp_server`` is logged and skipped rather than crashing
     startup).
+
+    Spec/SDK note: the 2026-01-26 MCP Apps spec advertises the capability under
+    ``capabilities.extensions``. The installed MCP SDK's ``ServerCapabilities``
+    has no ``extensions`` field (only ``experimental``), so we use the
+    ``experimental`` extension point — the sanctioned place for vendor
+    capabilities on this SDK. ``client_supports_mcp_apps`` accepts either
+    location, so a host on a newer SDK that advertises under ``extensions`` is
+    still recognized. Switch the advertise side to ``extensions`` once the SDK
+    exposes it.
     """
     if not _is_enabled():
         return
@@ -141,7 +150,12 @@ def client_supports_mcp_apps(mcp: Any) -> bool:
         capabilities = getattr(client_params, "capabilities", None)
         if capabilities is None:
             return False
+        # The 2026-01-26 spec advertises under capabilities.extensions; the
+        # installed SDK only exposes `experimental`. Accept either so both
+        # current- and future-SDK hosts are recognized.
         experimental = getattr(capabilities, "experimental", None) or {}
-        return EXTENSION_ID in experimental
+        extensions = getattr(capabilities, "extensions", None) or {}
+        return EXTENSION_ID in experimental or EXTENSION_ID in extensions
     except Exception:
+        logger.debug("client_supports_mcp_apps check failed; assuming unsupported", exc_info=True)
         return False

@@ -472,7 +472,7 @@ def register_app_tools(mcp: Any) -> bool:
         required_scopes: Optional[List[str]],
     ) -> bool:
         # SEP-1865 shape: visibility + resourceUri live *under* _meta.ui (verified
-        # against the 2026-01-26 spec; see tasks.md task 9.1 research note).
+        # against the 2026-01-26 spec; see docs/mcp-apps.md).
         meta = ui_meta(
             required_scopes=required_scopes,
             visibility=visibility,

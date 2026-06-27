@@ -133,6 +133,16 @@ class TestClientSupportsMcpApps:
     def test_true_when_client_advertises(self, enabled: None) -> None:
         assert client_supports_mcp_apps(_mcp_with({EXTENSION_ID: {}})) is True
 
+    def test_true_when_client_advertises_via_extensions(self, enabled: None) -> None:
+        # Spec-compliant host on a newer SDK advertises under `extensions`
+        # (the 2026-01-26 location) rather than `experimental`.
+        class _ExtCaps:
+            experimental = None
+            extensions = {EXTENSION_ID: {}}
+
+        mcp = _CtxMcp(_Ctx(_Session(_ClientParams(_ExtCaps()))))
+        assert client_supports_mcp_apps(mcp) is True
+
     def test_false_when_client_lacks_extension(self, enabled: None) -> None:
         assert client_supports_mcp_apps(_mcp_with({})) is False
 

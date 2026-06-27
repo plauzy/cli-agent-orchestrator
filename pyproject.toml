@@ -23,7 +23,10 @@ classifiers = [
 ]
 dependencies = [
     "fastapi>=0.104.0",
-    "fastmcp>=2.14.0",
+    # Upper bound: ext_apps/sep2133.advertise_capability monkey-patches a FastMCP
+    # internal (create_initialization_options); cap the major to avoid silent
+    # breakage on a new major release. Tested against 3.x.
+    "fastmcp>=2.14.0,<4.0.0",
     "mcp>=1.23.0",
     "pydantic>=2.10.6",
     "apscheduler>=3.10.4",
@@ -55,6 +58,7 @@ claude_code_memory = "cli_agent_orchestrator.plugins.builtin.claude_code_memory:
 kiro_cli_memory = "cli_agent_orchestrator.plugins.builtin.kiro_cli_memory:KiroCliMemoryPlugin"
 codex_memory = "cli_agent_orchestrator.plugins.builtin.codex_memory:CodexMemoryPlugin"
 event_log_publisher = "cli_agent_orchestrator.plugins.builtin.event_log_publisher:EventLogPublisher"
+mcp_apps = "cli_agent_orchestrator.plugins.builtin.mcp_apps:McpAppsPlugin"
 
 [project.urls]
 Homepage = "https://github.com/awslabs/cli-agent-orchestrator"

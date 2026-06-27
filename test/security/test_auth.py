@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
+from fastapi import HTTPException
 
 from cli_agent_orchestrator.security import auth
 
@@ -231,3 +232,78 @@ def test_jwks_cache_raises_when_empty_and_unreachable(monkeypatch):
     cache = auth._JWKSCache()
     with pytest.raises(ConnectionError):
         cache.get_client("https://idp/jwks")
+
+
+# --- require_any_scope: HTTP authorization enforcement --------------------
+
+
+@pytest.mark.asyncio
+async def test_require_any_scope_noop_when_auth_disabled():
+    # Default-off: a read-only caller is not blocked from a write-gated dep.
+    dep = auth.require_any_scope(auth.SCOPE_WRITE, auth.SCOPE_ADMIN)
+    assert await dep([auth.SCOPE_READ]) == [auth.SCOPE_READ]
+
+
+@pytest.mark.asyncio
+async def test_require_any_scope_blocks_read_only_on_write(monkeypatch):
+    monkeypatch.setenv("CAO_AUTH_JWKS_URI", "https://idp.example/jwks")
+    dep = auth.require_any_scope(auth.SCOPE_WRITE, auth.SCOPE_ADMIN)
+    with pytest.raises(HTTPException) as ei:
+        await dep([auth.SCOPE_READ])
+    assert ei.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_require_any_scope_allows_write_token(monkeypatch):
+    monkeypatch.setenv("CAO_AUTH_JWKS_URI", "https://idp.example/jwks")
+    dep = auth.require_any_scope(auth.SCOPE_WRITE, auth.SCOPE_ADMIN)
+    assert await dep([auth.SCOPE_WRITE]) == [auth.SCOPE_WRITE]
+
+
+@pytest.mark.asyncio
+async def test_require_any_scope_admin_required_for_delete(monkeypatch):
+    monkeypatch.setenv("CAO_AUTH_JWKS_URI", "https://idp.example/jwks")
+    dep = auth.require_any_scope(auth.SCOPE_ADMIN)
+    with pytest.raises(HTTPException) as ei:
+        await dep([auth.SCOPE_WRITE])
+    assert ei.value.status_code == 403
+    assert await dep([auth.SCOPE_ADMIN]) == [auth.SCOPE_ADMIN]
+
+
+# --- authorization-server discovery + local-token + bearer parsing --------
+
+
+def test_get_authorization_servers_issuer_precedence(monkeypatch):
+    monkeypatch.setenv("CAO_AUTH_ISSUER", "https://issuer.example/")
+    monkeypatch.setenv("AUTH0_DOMAIN", "tenant.auth0.com")
+    assert auth.get_authorization_servers() == ["https://issuer.example/"]
+
+
+def test_get_authorization_servers_from_jwks_uri(monkeypatch):
+    monkeypatch.setenv("CAO_AUTH_JWKS_URI", "https://idp.example/.well-known/jwks.json")
+    assert auth.get_authorization_servers() == ["https://idp.example"]
+
+
+def test_get_authorization_servers_empty_when_disabled():
+    assert auth.get_authorization_servers() == []
+
+
+def test_get_scopes_for_local_token_invalid_falls_back(monkeypatch):
+    monkeypatch.setenv("CAO_AUTH_JWKS_URI", "https://idp.example/jwks")
+    monkeypatch.setenv("CAO_AUTH_LOCAL_TOKEN", "not-a-jwt")
+
+    def _boom(uri):  # noqa: ANN001
+        raise ConnectionError("unreachable")
+
+    monkeypatch.setattr(auth.get_jwks_cache(), "get_client", _boom)
+    # Validation fails -> defensive fallback to the full set (UX pre-check only).
+    assert auth.get_scopes_for_local_token() == auth.FULL_SCOPE_SET
+
+
+def test_extract_bearer_variants():
+    assert auth._extract_bearer(None) is None
+    assert auth._extract_bearer("Bearer") is None
+    assert auth._extract_bearer("Bearer   ") is None
+    assert auth._extract_bearer("NotBearer tok") is None
+    assert auth._extract_bearer("Bearer tok123") == "tok123"
+    assert auth._extract_bearer("bearer tok123") == "tok123"

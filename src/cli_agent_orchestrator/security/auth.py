@@ -22,10 +22,10 @@ import logging
 import os
 import threading
 from datetime import datetime, timedelta, timezone
-from typing import Any, List, Optional, cast
+from typing import Any, Callable, List, Optional, cast
 
 import jwt
-from fastapi import Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from jwt import PyJWKClient
 
 logger = logging.getLogger(__name__)
@@ -249,8 +249,10 @@ def get_scopes_for_local_token() -> List[str]:
         return list(FULL_SCOPE_SET)
     try:
         return extract_scopes_from_token(token)
-    except Exception:  # pragma: no cover - defensive; UX pre-check only
-        logger.debug("Local token validation failed; deferring to FastAPI boundary", exc_info=True)
+    except Exception:
+        logger.warning(
+            "Local token validation failed; deferring to FastAPI boundary", exc_info=True
+        )
         return list(FULL_SCOPE_SET)
 
 
@@ -300,3 +302,27 @@ async def get_current_scopes(
             detail=f"invalid token: {exc}",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+def require_any_scope(*required: str) -> Callable[..., Any]:
+    """FastAPI dependency factory enforcing the caller holds >=1 of ``required``.
+
+    Returns a dependency that resolves the caller's scopes via
+    ``get_current_scopes`` and, when auth is enabled, raises HTTP 403 unless the
+    granted set contains at least one of ``required``. ``get_current_scopes``
+    already returns 401 on a missing/invalid token, so this adds the missing
+    *authorization* layer on top of authentication.
+
+    Default-off: when auth is disabled the granted set is the full taxonomy, so
+    the check always passes and behavior is byte-for-byte unchanged.
+    """
+
+    async def _dep(scopes: List[str] = Depends(get_current_scopes)) -> List[str]:
+        if is_auth_enabled() and not any(scope in scopes for scope in required):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Forbidden: requires one of {list(required)}",
+            )
+        return scopes
+
+    return _dep
