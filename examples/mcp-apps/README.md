@@ -15,7 +15,7 @@ uv run cao-mcp-server    # registers the MCP App tools/resources/widget
 
 ```bash
 # Topology widget (build-free; works without the React bundles):
-curl -s http://127.0.0.1:9889/widgets/topology/ | grep -i topology
+curl -s http://127.0.0.1:9889/widgets/topology/topology.html | grep -i topology
 
 # Live event stream (Server-Sent Events):
 curl -N http://127.0.0.1:9889/events

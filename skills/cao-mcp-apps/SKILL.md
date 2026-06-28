@@ -41,7 +41,7 @@ All mutations flow through `submit_command(kind, payload)` — kinds:
   SEP-1865). Non-SEP-1865 hosts still get text-only tool results.
 - **Views are blank / fail to load** → the React bundles aren't built. Run
   `cd cao_mcp_apps && npm ci && npm run build:all`. The topology widget needs no
-  build and is the quickest smoke test (`curl /widgets/topology/`).
+  build and is the quickest smoke test (`curl /widgets/topology/topology.html`).
 - **Mutations rejected with 403** → the auth layer is enabled and the token lacks
   `cao:write`/`cao:admin` (`cao:admin` for `delete_session`). Unset
   `AUTH0_DOMAIN`/`CAO_AUTH_JWKS_URI` to disable enforcement.
