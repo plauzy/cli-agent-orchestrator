@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, List
 
 from cli_agent_orchestrator.plugins.base import CaoPlugin
@@ -67,3 +68,38 @@ def test_register_mcp_server_surfaces_dispatches_to_plugin(monkeypatch) -> None:
     fake = _FakeMcp()
     register_mcp_server_surfaces(fake)
     assert fake.tools, "expected mcp_apps to register the app tools via discovery"
+
+
+def _no_idp(monkeypatch) -> None:
+    monkeypatch.delenv("AUTH0_DOMAIN", raising=False)
+    monkeypatch.delenv("CAO_AUTH_JWKS_URI", raising=False)
+
+
+def test_warns_when_enabled_without_idp(monkeypatch, caplog) -> None:
+    # Enabled + no IdP: the surface mounts with authorization off, so a startup
+    # warning must surface the unauthenticated localhost-trust posture.
+    monkeypatch.setenv("CAO_MCP_APPS_ENABLED", "true")
+    _no_idp(monkeypatch)
+    with caplog.at_level(logging.WARNING, logger="cli_agent_orchestrator.plugins.builtin.mcp_apps"):
+        McpAppsPlugin().on_mcp_server(_FakeMcp())
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("no IdP" in m and "CAO_MCP_APPS_ENABLED" in m for m in warnings), warnings
+
+
+def test_no_warning_when_idp_configured(monkeypatch, caplog) -> None:
+    # An IdP is configured, so the auth layer enforces scopes; the posture
+    # warning must not fire.
+    monkeypatch.setenv("CAO_MCP_APPS_ENABLED", "true")
+    monkeypatch.setenv("CAO_AUTH_JWKS_URI", "https://idp.example/.well-known/jwks.json")
+    with caplog.at_level(logging.WARNING, logger="cli_agent_orchestrator.plugins.builtin.mcp_apps"):
+        McpAppsPlugin().on_mcp_server(_FakeMcp())
+    assert not any("no IdP" in r.getMessage() for r in caplog.records)
+
+
+def test_no_warning_when_surface_disabled(monkeypatch, caplog) -> None:
+    # Default-off: no surface, so no posture warning regardless of IdP config.
+    monkeypatch.delenv("CAO_MCP_APPS_ENABLED", raising=False)
+    _no_idp(monkeypatch)
+    with caplog.at_level(logging.WARNING, logger="cli_agent_orchestrator.plugins.builtin.mcp_apps"):
+        McpAppsPlugin().on_mcp_server(_FakeMcp())
+    assert not any("no IdP" in r.getMessage() for r in caplog.records)

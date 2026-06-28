@@ -118,6 +118,10 @@ CAO advertises there and `client_supports_mcp_apps` accepts **either** location
   the full scope set and nothing is enforced. When enabled, mutating endpoints
   require `cao:write`/`cao:admin` and `delete_session` requires `cao:admin`
   (enforced via the `require_any_scope` dependency).
+- **Default posture.** With `CAO_MCP_APPS_ENABLED=true` but no IdP configured, the
+  surface (including `submit_command` mutations) inherits CAO's unauthenticated,
+  localhost-only trust model — keep it on a trusted loopback host and configure an
+  IdP before exposing it more widely; the server logs a startup warning in this state.
 
 ## Configuration
 
