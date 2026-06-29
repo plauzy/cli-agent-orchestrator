@@ -89,6 +89,8 @@ from cli_agent_orchestrator.services.cleanup_service import (
     cleanup_old_data,
 )
 from cli_agent_orchestrator.services.event_bus import bus
+from cli_agent_orchestrator.services.event_log_service import RING_CAPACITY
+from cli_agent_orchestrator.services.event_primitives import KINDS as EVENT_KINDS
 from cli_agent_orchestrator.services.herdr_inbox_registry import set_herdr_inbox_service
 from cli_agent_orchestrator.services.herdr_inbox_service import HerdrInboxService
 from cli_agent_orchestrator.services.inbox_service import inbox_service
@@ -563,7 +565,7 @@ async def events_stream(
 
 @app.get("/events/history")
 async def events_history(
-    limit: int = 500,
+    limit: int = Query(default=RING_CAPACITY, ge=0, le=RING_CAPACITY),
     since: Optional[str] = None,
     kinds: Optional[str] = None,
     _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
@@ -574,6 +576,11 @@ async def events_history(
     ``kinds`` is an optional comma-separated filter; ``since`` is an ISO-8601
     timestamp lower bound (exclusive).
 
+    Input hardening: ``limit`` is clamped to ``[0, RING_CAPACITY]`` (the buffer is
+    bounded anyway, so a larger value can never return more) and each ``kinds``
+    token is validated against the closed event vocabulary — an unknown kind is
+    rejected with 400 rather than silently matching nothing.
+
     Default-off: returns 404 unless ``CAO_MCP_APPS_ENABLED`` is set; when auth is
     enabled, any of ``cao:read`` / ``cao:write`` / ``cao:admin`` is required.
     """
@@ -582,6 +589,16 @@ async def events_history(
     from cli_agent_orchestrator.services.event_log_service import get_event_log
 
     kinds_filter = [k.strip() for k in kinds.split(",") if k.strip()] if kinds else None
+    if kinds_filter:
+        invalid = [k for k in kinds_filter if k not in EVENT_KINDS]
+        if invalid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Invalid event kind(s): {', '.join(invalid)}. "
+                    f"Valid kinds: {', '.join(EVENT_KINDS)}"
+                ),
+            )
     events = get_event_log().history(limit=limit, since=since, kinds=kinds_filter)
     return {"events": events}
 
@@ -622,7 +639,10 @@ async def get_agent_profile_endpoint(name: str) -> Dict:
 
 
 @app.post("/agents/profiles/install")
-async def install_agent_profile_endpoint(request: InstallAgentProfileRequest) -> InstallResult:
+async def install_agent_profile_endpoint(
+    request: InstallAgentProfileRequest,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
+) -> InstallResult:
     """Install an agent profile for a target provider.
 
     HTTP (and transitively ``cao-ops-mcp``, which calls this endpoint) is an
@@ -692,7 +712,10 @@ async def get_memory_settings_endpoint() -> Dict:
 
 
 @app.post("/settings/agent-dirs")
-async def set_agent_dirs_endpoint(body: AgentDirsUpdate) -> Dict:
+async def set_agent_dirs_endpoint(
+    body: AgentDirsUpdate,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict:
     """Update agent directories per provider."""
     from cli_agent_orchestrator.services.settings_service import (
         get_extra_agent_dirs,
@@ -726,7 +749,10 @@ class SkillDirsUpdate(BaseModel):
 
 
 @app.post("/settings/skill-dirs")
-async def set_skill_dirs_endpoint(body: SkillDirsUpdate) -> Dict:
+async def set_skill_dirs_endpoint(
+    body: SkillDirsUpdate,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict:
     """Update user-added extra skill directories."""
     from cli_agent_orchestrator.constants import SKILLS_DIR
     from cli_agent_orchestrator.services.settings_service import (
@@ -924,6 +950,7 @@ async def create_terminal_in_session(
     working_directory: Optional[str] = None,
     allowed_tools: Optional[str] = None,
     caller_id: Optional[TerminalId] = None,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
 ) -> Terminal:
     """Create additional terminal in existing session."""
     try:
@@ -1106,7 +1133,10 @@ async def get_terminal_output(
 
 
 @app.post("/terminals/{terminal_id}/exit")
-async def exit_terminal(terminal_id: TerminalId) -> Dict:
+async def exit_terminal(
+    terminal_id: TerminalId,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict:
     """Send provider-specific exit command to terminal."""
     try:
         terminal_service.exit_terminal_cli(terminal_id)
@@ -1134,7 +1164,11 @@ async def exit_terminal(terminal_id: TerminalId) -> Dict:
         "the live terminal (read it as a field; never regex-scrape `message`)."
     ),
 )
-async def run_step(request: Request, body: RunStepRequest) -> RunStepResponse:
+async def run_step(
+    request: Request,
+    body: RunStepRequest,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
+) -> RunStepResponse:
     """Run a single agent step through the shared substrate (N0, #312).
 
     This is the combined server-side endpoint both step callers converge on:
@@ -1263,7 +1297,10 @@ async def get_workflow_endpoint(name: str) -> Dict:
 
 
 @app.delete("/workflows/{name}")
-async def delete_workflow_endpoint(name: str) -> Dict:
+async def delete_workflow_endpoint(
+    name: str,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_ADMIN)),
+) -> Dict:
     """Delete a workflow's spec file and its index row (FR-2.4)."""
     from cli_agent_orchestrator.services import workflow_spec_service
 
@@ -1283,7 +1320,10 @@ async def delete_workflow_endpoint(name: str) -> Dict:
     response_model=StepOutputResponse,
 )
 async def record_step_output_endpoint(
-    run_id: str, step_id: str, body: StepOutputRequest
+    run_id: str,
+    step_id: str,
+    body: StepOutputRequest,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
 ) -> StepOutputResponse:
     """Record a worker's structured output for a step (FR-4.1, C5).
 
@@ -1311,7 +1351,11 @@ async def record_step_output_endpoint(
 
 
 @app.delete("/terminals/{terminal_id}")
-async def delete_terminal(request: Request, terminal_id: TerminalId) -> Dict:
+async def delete_terminal(
+    request: Request,
+    terminal_id: TerminalId,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_ADMIN)),
+) -> Dict:
     """Delete a terminal."""
     try:
         success = terminal_service.delete_terminal(
@@ -1623,7 +1667,10 @@ async def get_flow(name: str) -> Flow:
 
 
 @app.post("/flows", response_model=Flow, status_code=status.HTTP_201_CREATED)
-async def create_flow(body: CreateFlowRequest) -> Flow:
+async def create_flow(
+    body: CreateFlowRequest,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Flow:
     """Create a new flow.
 
     Writes a .flow.md file with YAML frontmatter and prompt body, then
@@ -1659,7 +1706,10 @@ async def create_flow(body: CreateFlowRequest) -> Flow:
 
 
 @app.delete("/flows/{name}")
-async def remove_flow(name: str) -> Dict:
+async def remove_flow(
+    name: str,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_ADMIN)),
+) -> Dict:
     """Remove a flow."""
     try:
         flow_service.remove_flow(name)
@@ -1674,7 +1724,10 @@ async def remove_flow(name: str) -> Dict:
 
 
 @app.post("/flows/{name}/enable")
-async def enable_flow(name: str) -> Dict:
+async def enable_flow(
+    name: str,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict:
     """Enable a flow."""
     try:
         flow_service.enable_flow(name)
@@ -1689,7 +1742,10 @@ async def enable_flow(name: str) -> Dict:
 
 
 @app.post("/flows/{name}/disable")
-async def disable_flow(name: str) -> Dict:
+async def disable_flow(
+    name: str,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict:
     """Disable a flow."""
     try:
         flow_service.disable_flow(name)
@@ -1704,7 +1760,10 @@ async def disable_flow(name: str) -> Dict:
 
 
 @app.post("/flows/{name}/run")
-async def run_flow(name: str) -> Dict:
+async def run_flow(
+    name: str,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict:
     """Manually execute a flow."""
     try:
         executed = await flow_service.execute_flow(name)
@@ -1864,6 +1923,7 @@ async def delete_memory_endpoint(
     key: MemoryKey,
     scope: MemoryScope = MemoryScope.PROJECT,
     scope_id: Optional[MemoryScopeId] = None,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_ADMIN)),
 ) -> Dict:
     """Delete a memory by key (mirrors `cao memory delete`).
 
@@ -1902,6 +1962,7 @@ async def delete_memory_endpoint(
 async def clear_memories_endpoint(
     scope: MemoryScope,
     scope_id: Optional[MemoryScopeId] = None,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_ADMIN)),
 ) -> Dict:
     """Clear all memories in a scope (mirrors `cao memory clear`).
 

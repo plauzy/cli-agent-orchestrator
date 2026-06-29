@@ -105,3 +105,45 @@ def test_full_subscriber_queue_does_not_block_producer() -> None:
             pass
 
     asyncio.run(_run())
+
+
+@pytest.mark.integration
+def test_events_history_rejects_invalid_kind(client) -> None:
+    """An unknown kind is rejected with 400 rather than silently matching nothing."""
+
+    resp = client.get("/events/history", params={"kinds": "bogus"})
+    assert resp.status_code == 400
+
+
+@pytest.mark.integration
+def test_events_history_accepts_mixed_valid_kinds(client) -> None:
+    """A comma-separated list of valid kinds passes validation."""
+
+    resp = client.get("/events/history", params={"kinds": "launch,completion"})
+    assert resp.status_code == 200
+
+
+@pytest.mark.integration
+def test_events_history_rejects_one_invalid_among_valid(client) -> None:
+    """A single bad token anywhere in the list still fails closed."""
+
+    resp = client.get("/events/history", params={"kinds": "launch,bogus"})
+    assert resp.status_code == 400
+
+
+@pytest.mark.integration
+def test_events_history_clamps_limit_over_capacity(client) -> None:
+    """``limit`` above the ring capacity is rejected by the Query bound (422)."""
+
+    from cli_agent_orchestrator.services.event_log_service import RING_CAPACITY
+
+    resp = client.get("/events/history", params={"limit": RING_CAPACITY + 1})
+    assert resp.status_code == 422
+
+
+@pytest.mark.integration
+def test_events_history_rejects_negative_limit(client) -> None:
+    """A negative ``limit`` is rejected by the Query lower bound (422)."""
+
+    resp = client.get("/events/history", params={"limit": -1})
+    assert resp.status_code == 422

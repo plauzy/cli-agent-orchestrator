@@ -143,6 +143,22 @@ CAO advertises there and `client_supports_mcp_apps` accepts **either** location
 | `CAO_MCP_APPS_STATIC_DIR` | — | Override the built `apps_static/` location. |
 | `AUTH0_DOMAIN` / `CAO_AUTH_JWKS_URI` | — | Enable the auth layer (IdP). |
 | `CAO_AUTH_AUDIENCE`, `CAO_AUTH_ISSUER` | — | Token audience / issuer for validation + PRM. |
+| `CAO_AUTH_LOCAL_TOKEN` | — | Service token the MCP server forwards on its internal calls to the CAO API when auth is enabled (see H3 below). Required for auth-enabled mutation. |
+
+### Auth-enabled mutation (`CAO_AUTH_LOCAL_TOKEN`)
+
+When the auth layer is enabled (`AUTH0_DOMAIN` / `CAO_AUTH_JWKS_URI` set), the
+MCP server reaches Backplane state over loopback HTTP to the FastAPI app, and
+those mutation endpoints now *enforce* scope. The internal hop therefore needs a
+credential: provision a **machine token** from the same IdP, scoped with the
+permissions the surface needs (`cao:write` / `cao:admin`), and set it as
+`CAO_AUTH_LOCAL_TOKEN`. The MCP server attaches it as
+`Authorization: Bearer <token>` on its internal `submit_command` / read calls.
+
+If auth is enabled but `CAO_AUTH_LOCAL_TOKEN` is unset, `submit_command` returns
+a structured, actionable error (`{"success": false, "error": "auth enabled but
+CAO_AUTH_LOCAL_TOKEN is not set: …"}`) rather than surfacing a raw `401`. With
+auth disabled (the default) no header is attached and behavior is unchanged.
 
 ## Building the frontend
 
@@ -177,22 +193,25 @@ recorded here because they shape how the MCP Apps surface should evolve.
 - **Reads require `cao:read`; mutations require `cao:write`/`cao:admin`.** Keep the
   taxonomy meaningful: gate every new MCP-Apps-reachable read on at least
   `cao:read` and every mutation on write/admin.
-
-**Deferred — tracked in [`mcp-apps-followups.md`](mcp-apps-followups.md)**
-
-- **H3 — internal MCP→API auth.** When auth is enabled, the MCP server's own
-  loopback calls to the FastAPI mutation endpoints carry no bearer token, so
-  `submit_command` (and the existing MCP mutation tools) would be rejected. Until
-  this is resolved, **treat auth-enabled mutation via the MCP Apps surface as not
-  yet supported** and keep the surface on a trusted loopback host.
-- **H4 — complete scope coverage.** The OAuth layer currently gates the five
-  MCP-Apps-relevant mutation routes plus the event reads; the remaining
-  pre-existing mutating routes (flows, workflows, memory, terminal lifecycle,
-  settings) are not yet scope-gated. Enabling auth does **not** yet make the whole
-  API safe for an untrusted `cao:read` caller.
-
-See [`mcp-apps-followups.md`](mcp-apps-followups.md) for the detailed plan,
-rationale, and acceptance criteria for H3 and H4.
+- **H3 — internal MCP→API auth (resolved).** When auth is enabled the MCP server
+  forwards `CAO_AUTH_LOCAL_TOKEN` as a bearer on its loopback calls to the FastAPI
+  mutation endpoints, so `submit_command` succeeds end to end; a missing local
+  token yields a structured, actionable error instead of a raw `401`. See
+  [Auth-enabled mutation](#auth-enabled-mutation-cao_auth_local_token).
+- **H4 — complete scope coverage (resolved).** Every mutating route (flows,
+  workflows, memory, terminal lifecycle, settings, profile install, run-step) now
+  carries a `require_any_scope` dependency — `cao:write` for create/update/run and
+  `cao:admin` for destructive deletes — so an auth-enabled `cao:read` token is
+  `403`'d across the whole API. A route-coverage guard test
+  (`test/api/test_scope_coverage.py`) fails if a future mutating route is added
+  without a scope dependency.
+- **JWKS robustness.** The JWKS cache forces a single refresh + retry on an
+  unknown `kid` (key rotation no longer waits out the 1 h TTL), and bounds
+  reuse-on-unreachable to a 24 h staleness cap so it fails closed rather than
+  trusting indefinitely-stale keys.
+- **Event-history input hardening.** `/events/history` clamps `limit` to
+  `[0, RING_CAPACITY]` and validates each `kinds` token against the closed event
+  vocabulary (unknown kinds → `400`).
 
 ## See also
 

@@ -32,7 +32,7 @@ class _FakeMCP:
 def _fake_get_factory(sessions: List[Dict], terminals_by_session: Dict[str, List[Dict]]):
     """Build a fake ``requests.get`` routing /sessions and per-session terminals."""
 
-    def _fake_get(url: str, params=None, timeout=None):
+    def _fake_get(url: str, params=None, headers=None, timeout=None):
         resp = MagicMock()
         resp.raise_for_status.return_value = None
         if url.endswith("/sessions"):
@@ -128,7 +128,7 @@ def test_submit_command_classifies_and_passes_default_off() -> None:
 def _capture_post(recorder: List[Dict[str, Any]]):
     """Build a fake ``requests.post`` recording (url, params) and returning {}."""
 
-    def _fake_post(url: str, params=None, timeout=None):
+    def _fake_post(url: str, params=None, headers=None, timeout=None):
         recorder.append({"url": url, "params": params})
         resp = MagicMock()
         resp.raise_for_status.return_value = None
@@ -139,7 +139,7 @@ def _capture_post(recorder: List[Dict[str, Any]]):
 
 
 def _capture_delete(recorder: List[Dict[str, Any]]):
-    def _fake_delete(url: str, timeout=None):
+    def _fake_delete(url: str, headers=None, timeout=None):
         recorder.append({"url": url})
         resp = MagicMock()
         resp.raise_for_status.return_value = None
@@ -402,3 +402,133 @@ async def test_async_tool_wrappers_delegate_to_impls(monkeypatch: pytest.MonkeyP
     with patch.object(app_tools, "_submit_command_impl", return_value={"success": True}) as m:
         assert await reg["submit_command"]("send_message", {"x": 1}) == {"success": True}
         m.assert_called_once_with("send_message", {"x": 1})
+
+
+# ---------------------------------------------------------------------------
+# H3 — internal MCP->API auth: bearer forwarding + missing-token error.
+
+
+def test_auth_headers_empty_when_no_local_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default-off: no Authorization header is built for the internal hop."""
+
+    monkeypatch.setattr(app_tools, "get_local_bearer", lambda: None)
+    assert app_tools._auth_headers() == {}
+
+
+def test_auth_headers_set_when_local_bearer_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With a local token, the internal hop carries a bearer Authorization header."""
+
+    monkeypatch.setattr(app_tools, "get_local_bearer", lambda: "machine-token")
+    assert app_tools._auth_headers() == {"Authorization": "Bearer machine-token"}
+
+
+def test_post_json_forwards_bearer_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_post_json attaches the bearer header when a local token is configured."""
+
+    captured: Dict[str, Any] = {}
+
+    def _fake_post(url, params=None, headers=None, timeout=None):  # noqa: ANN001
+        captured["headers"] = headers
+        resp = MagicMock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {}
+        return resp
+
+    monkeypatch.setattr(app_tools, "get_local_bearer", lambda: "machine-token")
+    monkeypatch.setattr(app_tools.requests, "post", _fake_post)
+    app_tools._post_json("/sessions", {"agent_profile": "dev"})
+    assert captured["headers"] == {"Authorization": "Bearer machine-token"}
+
+
+def test_post_json_no_header_default_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default-off: _post_json sends headers=None (byte-for-byte unchanged)."""
+
+    captured: Dict[str, Any] = {}
+
+    def _fake_post(url, params=None, headers=None, timeout=None):  # noqa: ANN001
+        captured["headers"] = headers
+        resp = MagicMock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {}
+        return resp
+
+    monkeypatch.setattr(app_tools, "get_local_bearer", lambda: None)
+    monkeypatch.setattr(app_tools.requests, "post", _fake_post)
+    app_tools._post_json("/sessions", {"agent_profile": "dev"})
+    assert captured["headers"] is None
+
+
+def test_get_json_and_delete_json_forward_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reads and deletes both carry the bearer when configured (consistent hop)."""
+
+    seen: Dict[str, Any] = {}
+
+    def _fake_get(url, params=None, headers=None, timeout=None):  # noqa: ANN001
+        seen["get"] = headers
+        resp = MagicMock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = []
+        return resp
+
+    def _fake_delete(url, headers=None, timeout=None):  # noqa: ANN001
+        seen["delete"] = headers
+        resp = MagicMock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {}
+        return resp
+
+    monkeypatch.setattr(app_tools, "get_local_bearer", lambda: "tok")
+    monkeypatch.setattr(app_tools.requests, "get", _fake_get)
+    monkeypatch.setattr(app_tools.requests, "delete", _fake_delete)
+    app_tools._get_json("/sessions")
+    app_tools._delete_json("/sessions/cao-x")
+    assert seen["get"] == {"Authorization": "Bearer tok"}
+    assert seen["delete"] == {"Authorization": "Bearer tok"}
+
+
+def test_submit_command_auth_enabled_without_local_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Auth on + no local token -> structured misconfig error, never routed."""
+
+    monkeypatch.setenv("AUTH0_DOMAIN", "example.auth0.com")
+    monkeypatch.delenv("CAO_AUTH_LOCAL_TOKEN", raising=False)
+    # The scope pre-check must PASS (full set) so the misconfig check is what
+    # blocks; patch it explicitly to avoid touching a real JWKS.
+    monkeypatch.setattr(
+        app_tools, "get_scopes_for_local_token", lambda: ["cao:read", "cao:write", "cao:admin"]
+    )
+
+    def _boom(*args: Any, **kwargs: Any):  # pragma: no cover - must not run
+        raise AssertionError("routing must not be reached when the token is missing")
+
+    monkeypatch.setattr(app_tools.requests, "post", _boom)
+    result = app_tools._submit_command_impl("create_session", {"agent_profile": "dev"})
+    assert result["success"] is False
+    assert result["kind"] == "create_session"
+    assert "CAO_AUTH_LOCAL_TOKEN" in result["error"]
+
+
+def test_submit_command_forwards_bearer_when_token_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Auth on + local token -> command routes and carries the bearer header."""
+
+    monkeypatch.setenv("AUTH0_DOMAIN", "example.auth0.com")
+    monkeypatch.setenv("CAO_AUTH_LOCAL_TOKEN", "local-machine-token")
+    # Avoid a real JWKS round-trip during the UX scope pre-check.
+    monkeypatch.setattr(
+        app_tools, "get_scopes_for_local_token", lambda: ["cao:read", "cao:write", "cao:admin"]
+    )
+
+    captured: Dict[str, Any] = {}
+
+    def _fake_post(url, params=None, headers=None, timeout=None):  # noqa: ANN001
+        captured["headers"] = headers
+        resp = MagicMock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {"id": "t1", "session_name": "cao-x"}
+        return resp
+
+    monkeypatch.setattr(app_tools.requests, "post", _fake_post)
+    result = app_tools._submit_command_impl("create_session", {"agent_profile": "dev"})
+    assert result["success"] is True
+    assert captured["headers"] == {"Authorization": "Bearer local-machine-token"}
