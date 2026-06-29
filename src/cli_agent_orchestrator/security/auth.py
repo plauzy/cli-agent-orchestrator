@@ -28,6 +28,8 @@ import jwt
 from fastapi import Depends, Header, HTTPException, status
 from jwt import PyJWKClient
 
+from cli_agent_orchestrator.constants import API_BASE_URL
+
 logger = logging.getLogger(__name__)
 
 # --- scope taxonomy -------------------------------------------------------
@@ -82,10 +84,23 @@ def get_jwks_uri() -> Optional[str]:
 
 
 def get_expected_audience() -> Optional[str]:
-    """Return the expected token audience, if configured."""
+    """Return the expected token audience.
 
-    aud = os.getenv("CAO_AUTH_AUDIENCE", "").strip() or os.getenv("AUTH0_AUDIENCE", "").strip()
-    return aud or None
+    When auth is enabled this never returns ``None``: it falls back to
+    ``API_BASE_URL`` — the resource identifier advertised by the RFC 9728 PRM
+    endpoint (``/.well-known/oauth-protected-resource``) — so audience
+    verification is never silently disabled. An explicit ``CAO_AUTH_AUDIENCE`` /
+    ``AUTH0_AUDIENCE`` takes precedence. Returns ``None`` only when auth is
+    disabled (default-off), so nothing changes in the no-auth posture.
+    """
+
+    if not is_auth_enabled():
+        return None
+    return (
+        os.getenv("CAO_AUTH_AUDIENCE", "").strip()
+        or os.getenv("AUTH0_AUDIENCE", "").strip()
+        or API_BASE_URL
+    )
 
 
 def get_authorization_servers() -> List[str]:
@@ -201,12 +216,18 @@ def _scopes_from_claims(claims: dict) -> List[str]:
 
 
 def extract_scopes_from_token(token: str) -> List[str]:
-    """Validate ``token`` (RS256 + audience + expiry via JWKS) and return scopes.
+    """Validate ``token`` (RS256 + issuer + audience + expiry via JWKS) and
+    return scopes.
 
     Default-off: when auth is disabled, returns the full scope set without
     touching the token. When enabled, raises (``jwt.PyJWTError`` subclasses or
     a generic ``Exception`` from the JWKS fetch) on any validation failure so the
     caller can map it to HTTP 401.
+
+    Validation pins the token to the configured authorization server (``iss``)
+    and audience (``aud``) in addition to the RS256 signature and ``exp`` so a
+    token minted by a different IdP — or for a different resource on the same
+    IdP — is rejected rather than accepted on signature alone.
     """
 
     if not is_auth_enabled():
@@ -220,12 +241,21 @@ def extract_scopes_from_token(token: str) -> List[str]:
     signing_key = client.get_signing_key_from_jwt(token)
 
     audience = get_expected_audience()
-    options = {"require": ["exp"], "verify_aud": audience is not None}
+    # Pin to the first advertised authorization server (the PRM endpoint
+    # advertises the same list). When an issuer is known we also require the
+    # ``iss`` claim to be present so it cannot simply be omitted.
+    issuers = get_authorization_servers()
+    expected_issuer = issuers[0] if issuers else None
+    required_claims = ["exp"]
+    if expected_issuer is not None:
+        required_claims.append("iss")
+    options = {"require": required_claims, "verify_aud": audience is not None}
     claims = jwt.decode(
         token,
         signing_key.key,
         algorithms=_ALGORITHMS,
         audience=audience,
+        issuer=expected_issuer,
         options=cast("Any", options),
     )
     return _scopes_from_claims(claims)

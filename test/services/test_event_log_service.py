@@ -153,3 +153,60 @@ class TestSingleton:
 
     def test_get_event_log_returns_same_instance(self) -> None:
         assert get_event_log() is get_event_log()
+
+
+class TestSinceFilterIsoForms:
+    """The ``since`` lower bound is compared chronologically, not lexically.
+
+    Lexicographic comparison of ISO-8601 is unreliable across equally-valid
+    forms (``Z`` vs ``+00:00``, differing fractional precision); these assert the
+    exclusive boundary is honored regardless of the form the caller supplies, and
+    that an unparseable cursor is ignored rather than filtering everything out
+    (Copilot C2).
+
+    **Validates: Copilot review (C2)**
+    """
+
+    @staticmethod
+    def _append_at(log: EventLog, ts: str) -> dict:
+        # Append, then pin the stored timestamp so ordering is deterministic.
+        ev = log.append("launch", "t", "s", {"event_type": "post_create_terminal"})
+        ev["timestamp"] = ts
+        return ev
+
+    def test_since_z_form_excludes_boundary_event(self) -> None:
+        log = EventLog()
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        boundary = now - timedelta(minutes=2)
+        e1 = self._append_at(log, boundary.isoformat())  # ...+00:00, == boundary
+        e2 = self._append_at(log, (now - timedelta(minutes=1)).isoformat())  # later
+
+        # Caller supplies the boundary in ``Z`` form; the equal event is excluded
+        # (strict >) and the later event is included.
+        since_z = boundary.isoformat().replace("+00:00", "Z")
+        ids = [e["id"] for e in log.history(since=since_z)]
+        assert e1["id"] not in ids
+        assert e2["id"] in ids
+
+    def test_since_fractional_precision(self) -> None:
+        log = EventLog()
+        now = datetime.now(timezone.utc)
+        earlier = self._append_at(
+            log, (now - timedelta(seconds=3)).replace(microsecond=100000).isoformat()
+        )
+        later = self._append_at(
+            log, (now - timedelta(seconds=1)).replace(microsecond=900000).isoformat()
+        )
+        boundary = (now - timedelta(seconds=2)).replace(microsecond=500000).isoformat()
+
+        ids = [e["id"] for e in log.history(since=boundary)]
+        assert earlier["id"] not in ids
+        assert later["id"] in ids
+
+    def test_unparseable_since_is_ignored(self) -> None:
+        log = EventLog()
+        recent = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+        ev = self._append_at(log, recent)
+        # A garbage cursor must neither raise nor filter everything out.
+        ids = [e["id"] for e in log.history(since="not-a-timestamp")]
+        assert ev["id"] in ids

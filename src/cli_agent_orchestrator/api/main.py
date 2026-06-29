@@ -70,6 +70,7 @@ from cli_agent_orchestrator.models.terminal import Terminal, TerminalId
 from cli_agent_orchestrator.plugins import PluginRegistry
 from cli_agent_orchestrator.security.auth import (
     SCOPE_ADMIN,
+    SCOPE_READ,
     SCOPE_WRITE,
     SCOPES_SUPPORTED,
     get_authorization_servers,
@@ -504,15 +505,51 @@ async def health_check():
     }
 
 
+def _mcp_apps_enabled() -> bool:
+    """Whether the MCP Apps HTTP surface (event stream + widget) is enabled.
+
+    Mirrors the ``CAO_MCP_APPS_ENABLED`` gate used by the ``mcp_apps`` plugin,
+    ``app_tools``, ``sep2133`` and the ``event_log_publisher`` observer so the
+    whole surface is consistently default-off.
+    """
+
+    return os.getenv("CAO_MCP_APPS_ENABLED", "false").lower() in ("1", "true", "yes")
+
+
+def _require_mcp_apps_enabled() -> None:
+    """Raise 404 when the MCP Apps surface is disabled (default-off).
+
+    The ``/events`` SSE stream and ``/events/history`` replay expose fleet
+    metadata (terminal ids, session names, routing/launch/kill topology), so
+    they must not be reachable unless an operator opts in via
+    ``CAO_MCP_APPS_ENABLED`` — matching the default-off posture of the rest of
+    the surface (tools, resources, widget, capability advertisement).
+    """
+
+    if not _mcp_apps_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="MCP Apps surface disabled"
+        )
+
+
 @app.get("/events")
-async def events_stream():
+async def events_stream(
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+):
     """Stream live, normalized fleet events to the iframe as Server-Sent Events.
 
     Events come from the in-process ``SseBus`` (fed by the ``EventLogPublisher``
     plugin). The bus is drop-on-slow with a bounded per-subscriber queue, so one
     stalled iframe never applies back-pressure to the orchestration core; gaps are
     backfilled by the client via ``/events/history`` / ``cao_fetch_history``.
+
+    Default-off: returns 404 unless ``CAO_MCP_APPS_ENABLED`` is set, so the fleet
+    event timeline (terminal ids, session names, routing/topology metadata) is
+    never exposed when the surface is disabled. When auth is enabled, any of
+    ``cao:read`` / ``cao:write`` / ``cao:admin`` is required (read is the floor).
     """
+    _require_mcp_apps_enabled()
+
     from fastapi.responses import StreamingResponse
 
     from cli_agent_orchestrator.services.sse_bus import get_bus
@@ -529,13 +566,19 @@ async def events_history(
     limit: int = 500,
     since: Optional[str] = None,
     kinds: Optional[str] = None,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
 ) -> Dict:
     """Replay recent fleet events from the ring buffer (JSON, newest-last).
 
     Events are already normalized to the six-primitive vocabulary at append time.
     ``kinds`` is an optional comma-separated filter; ``since`` is an ISO-8601
     timestamp lower bound (exclusive).
+
+    Default-off: returns 404 unless ``CAO_MCP_APPS_ENABLED`` is set; when auth is
+    enabled, any of ``cao:read`` / ``cao:write`` / ``cao:admin`` is required.
     """
+    _require_mcp_apps_enabled()
+
     from cli_agent_orchestrator.services.event_log_service import get_event_log
 
     kinds_filter = [k.strip() for k in kinds.split(",") if k.strip()] if kinds else None

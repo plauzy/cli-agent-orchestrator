@@ -16,6 +16,7 @@ from fastapi import HTTPException
 from cli_agent_orchestrator.security import auth
 
 AUDIENCE = "cao-api"
+ISSUER = "https://example.auth0.com/"
 
 
 @pytest.fixture
@@ -85,7 +86,7 @@ def test_jwks_uri_resolution(monkeypatch):
 
 def _base_claims(extra: dict) -> dict:
     now = datetime.now(timezone.utc)
-    claims = {"aud": AUDIENCE, "exp": now + timedelta(hours=1), "iat": now}
+    claims = {"aud": AUDIENCE, "iss": ISSUER, "exp": now + timedelta(hours=1), "iat": now}
     claims.update(extra)
     return claims
 
@@ -127,6 +128,81 @@ def test_wrong_audience_raises(monkeypatch, rsa_key):
     token = _make_token(rsa_key, _base_claims({"aud": "someone-else", "scope": "cao:read"}))
     with pytest.raises(jwt.PyJWTError):
         auth.extract_scopes_from_token(token)
+
+
+# --- issuer pinning (M1) ---------------------------------------------------
+
+
+def test_missing_issuer_raises(monkeypatch, rsa_key):
+    """With an issuer configured, a token lacking ``iss`` is rejected."""
+    _enable_auth(monkeypatch, rsa_key)
+    now = datetime.now(timezone.utc)
+    token = _make_token(
+        rsa_key,
+        {"aud": AUDIENCE, "exp": now + timedelta(hours=1), "iat": now, "scope": "cao:read"},
+    )
+    with pytest.raises(jwt.PyJWTError):
+        auth.extract_scopes_from_token(token)
+
+
+def test_wrong_issuer_raises(monkeypatch, rsa_key):
+    """A token minted by a different issuer is rejected even if signed/aud-valid."""
+    _enable_auth(monkeypatch, rsa_key)
+    token = _make_token(
+        rsa_key, _base_claims({"iss": "https://evil.example/", "scope": "cao:read"})
+    )
+    with pytest.raises(jwt.PyJWTError):
+        auth.extract_scopes_from_token(token)
+
+
+# --- audience fallback to API_BASE_URL (M2) -------------------------------
+
+
+def test_expected_audience_none_when_disabled():
+    assert auth.get_expected_audience() is None
+
+
+def test_expected_audience_defaults_to_api_base_url_when_enabled(monkeypatch):
+    """When auth is enabled but no audience env is set, the resource id is used."""
+    from cli_agent_orchestrator.constants import API_BASE_URL
+
+    monkeypatch.setenv("AUTH0_DOMAIN", "tenant.auth0.com")
+    assert auth.get_expected_audience() == API_BASE_URL
+
+
+def test_audience_fallback_enforced_in_validation(monkeypatch, rsa_key):
+    """Enabling via AUTH0_DOMAIN alone still verifies audience (no silent-off)."""
+    from cli_agent_orchestrator.constants import API_BASE_URL
+
+    monkeypatch.setenv("AUTH0_DOMAIN", "example.auth0.com")  # no audience env
+    fake = _FakeClient(rsa_key.public_key())
+    monkeypatch.setattr(auth.get_jwks_cache(), "get_client", lambda uri: fake)
+    now = datetime.now(timezone.utc)
+
+    good = _make_token(
+        rsa_key,
+        {
+            "aud": API_BASE_URL,
+            "iss": ISSUER,
+            "exp": now + timedelta(hours=1),
+            "iat": now,
+            "scope": "cao:read",
+        },
+    )
+    assert auth.extract_scopes_from_token(good) == ["cao:read"]
+
+    bad = _make_token(
+        rsa_key,
+        {
+            "aud": "other-resource",
+            "iss": ISSUER,
+            "exp": now + timedelta(hours=1),
+            "iat": now,
+            "scope": "cao:read",
+        },
+    )
+    with pytest.raises(jwt.PyJWTError):
+        auth.extract_scopes_from_token(bad)
 
 
 # --- get_current_scopes FastAPI dependency --------------------------------

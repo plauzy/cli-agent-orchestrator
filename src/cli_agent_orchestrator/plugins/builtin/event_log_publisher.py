@@ -18,6 +18,7 @@ Invariants:
 from __future__ import annotations
 
 import logging
+import os
 
 from cli_agent_orchestrator.plugins import (
     PostCreateSessionEvent,
@@ -33,6 +34,21 @@ from cli_agent_orchestrator.services.event_primitives import normalize_kind
 from cli_agent_orchestrator.services.sse_bus import get_bus
 
 logger = logging.getLogger(__name__)
+
+
+def _apps_enabled() -> bool:
+    """Return whether the MCP Apps surface is enabled via ``CAO_MCP_APPS_ENABLED``.
+
+    Mirrors the gate used by ``mcp_apps`` / ``app_tools`` / ``sep2133`` so this
+    observer is genuinely default-off. The plugin is still discovered and loaded
+    by the entry-point registry, but when the flag is unset its lifecycle hooks
+    no-op: no normalization, no ring-buffer retention, and no SSE fan-out. That
+    preserves the "default-off, zero-cost-when-unused" contract — an operator who
+    never enables the surface neither pays the per-event cost nor accumulates 24h
+    of fleet metadata in process memory.
+    """
+
+    return os.getenv("CAO_MCP_APPS_ENABLED", "false").lower() in ("1", "true", "yes")
 
 
 class EventLogPublisher(CaoPlugin):
@@ -59,6 +75,13 @@ class EventLogPublisher(CaoPlugin):
         ``detail`` MUST already be metadata-only — callers below construct it
         explicitly from event fields and deliberately exclude message bodies.
         """
+
+        # Default-off gate: when the MCP Apps surface is disabled the observer
+        # does nothing, so the ring buffer / SSE bus are never touched (see
+        # ``_apps_enabled``). This keeps the lifecycle hooks zero-cost and
+        # retains no fleet metadata unless an operator opts in.
+        if not _apps_enabled():
+            return
 
         kind = normalize_kind(event_type, detail)
         event = get_event_log().append(kind, terminal_id, session_name, detail)
