@@ -117,7 +117,19 @@ CAO advertises there and `client_supports_mcp_apps` accepts **either** location
   taxonomy. With `AUTH0_DOMAIN` / `CAO_AUTH_JWKS_URI` unset, every path returns
   the full scope set and nothing is enforced. When enabled, mutating endpoints
   require `cao:write`/`cao:admin` and `delete_session` requires `cao:admin`
-  (enforced via the `require_any_scope` dependency).
+  (enforced via the `require_any_scope` dependency), and the read-only event
+  endpoints (`/events`, `/events/history`) require at least `cao:read`.
+  Token validation pins the **issuer** (`iss`, against the configured
+  authorization server) and the **audience** (`aud`) in addition to the RS256
+  signature and `exp` — audience falls back to the PRM resource id
+  (`API_BASE_URL`) so it is never silently unverified when auth is on. See
+  [Key decisions & deferred hardening](#key-decisions--deferred-hardening).
+- **Event endpoints are part of the default-off surface.** `/events` and
+  `/events/history` (and the observer that feeds them) expose fleet metadata
+  (terminal ids, session names, routing/launch/kill topology). They return
+  **404 unless `CAO_MCP_APPS_ENABLED` is set**, and the `event_log_publisher`
+  observer no-ops while disabled — so a CAO with the surface off retains no
+  fleet event history and exposes no event timeline.
 - **Default posture.** With `CAO_MCP_APPS_ENABLED=true` but no IdP configured, the
   surface (including `submit_command` mutations) inherits CAO's unauthenticated,
   localhost-only trust model — keep it on a trusted loopback host and configure an
@@ -144,6 +156,43 @@ The built bundles (and the committed `ext_apps/static/` topology widget) ship in
 the wheel via the `[tool.hatch.build].artifacts` force-include. If the bundles are
 absent (dev tree without a build), resource registration degrades gracefully and
 the topology widget still works (it needs no build step).
+
+## Key decisions & deferred hardening
+
+This surface landed via PR [#332](https://github.com/awslabs/cli-agent-orchestrator/pull/332).
+A review pass (Copilot + a manual audit) drove the following decisions; they are
+recorded here because they shape how the MCP Apps surface should evolve.
+
+**Applied in this surface**
+
+- **The whole surface is gated on `CAO_MCP_APPS_ENABLED`, end to end.** Beyond the
+  tools/resources/widget, the `event_log_publisher` observer and the `/events`
+  + `/events/history` HTTP endpoints are *also* gated, so "default-off" means
+  *zero retention and zero exposure* of fleet metadata, not just "no UI". Any new
+  surface (endpoint, plugin hook, background task) MUST honor this flag.
+- **Auth, when enabled, verifies issuer and audience** (not just signature/expiry),
+  with audience defaulting to the PRM resource id. New protected resources should
+  reuse `security/auth.py` (`get_current_scopes` / `require_any_scope`) rather than
+  re-deriving validation.
+- **Reads require `cao:read`; mutations require `cao:write`/`cao:admin`.** Keep the
+  taxonomy meaningful: gate every new MCP-Apps-reachable read on at least
+  `cao:read` and every mutation on write/admin.
+
+**Deferred — tracked in [`mcp-apps-followups.md`](mcp-apps-followups.md)**
+
+- **H3 — internal MCP→API auth.** When auth is enabled, the MCP server's own
+  loopback calls to the FastAPI mutation endpoints carry no bearer token, so
+  `submit_command` (and the existing MCP mutation tools) would be rejected. Until
+  this is resolved, **treat auth-enabled mutation via the MCP Apps surface as not
+  yet supported** and keep the surface on a trusted loopback host.
+- **H4 — complete scope coverage.** The OAuth layer currently gates the five
+  MCP-Apps-relevant mutation routes plus the event reads; the remaining
+  pre-existing mutating routes (flows, workflows, memory, terminal lifecycle,
+  settings) are not yet scope-gated. Enabling auth does **not** yet make the whole
+  API safe for an untrusted `cao:read` caller.
+
+See [`mcp-apps-followups.md`](mcp-apps-followups.md) for the detailed plan,
+rationale, and acceptance criteria for H3 and H4.
 
 ## See also
 

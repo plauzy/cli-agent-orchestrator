@@ -135,3 +135,33 @@ def test_publish_with_no_subscribers_is_noop() -> None:
 
 def test_get_bus_returns_singleton() -> None:
     assert get_bus() is get_bus()
+
+
+def test_dead_loop_subscriber_is_dropped() -> None:
+    """A subscriber whose loop is closed is unregistered on publish.
+
+    When ``loop.call_soon_threadsafe`` raises ``RuntimeError`` (closed/closing
+    loop) the bus must drop that subscriber from ``_subs`` rather than leaving a
+    stale entry that is retried — and re-logged — on every subsequent publish
+    (Copilot C3). Exercised with a stub loop so no real event loop is needed.
+    """
+
+    bus = SseBus()
+
+    class _DeadLoop:
+        def call_soon_threadsafe(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            raise RuntimeError("Event loop is closed")
+
+    queue: "asyncio.Queue[dict]" = asyncio.Queue(maxsize=8)
+    entry = (queue, _DeadLoop())
+    with bus._lock:
+        bus._subs.append(entry)  # type: ignore[arg-type]
+    assert bus.subscriber_count == 1
+
+    # publish must not raise, and must drop the dead subscriber.
+    bus.publish({"id": "1", "kind": "launch"})
+    assert bus.subscriber_count == 0
+
+    # A second publish is a clean no-op — the stale entry is gone.
+    bus.publish({"id": "2", "kind": "launch"})
+    assert bus.subscriber_count == 0

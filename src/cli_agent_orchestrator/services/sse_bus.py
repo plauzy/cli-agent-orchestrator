@@ -55,12 +55,27 @@ class SseBus:
             except asyncio.QueueFull:
                 logger.warning("Subscriber queue full. Dropping event.")
 
-        for queue, loop in subscribers:
+        dead: List[Tuple["asyncio.Queue[Dict]", asyncio.AbstractEventLoop]] = []
+        for entry in subscribers:
+            queue, loop = entry
             try:
                 loop.call_soon_threadsafe(_deliver, queue)
             except RuntimeError:
-                # Subscriber's loop is closed/closing — treat as disconnected.
-                logger.debug("SSE subscriber loop unavailable; dropping event")
+                # Subscriber's loop is closed/closing — treat as disconnected and
+                # unregister it so it is neither retried nor logged on every
+                # subsequent publish. ``subscribe()``'s ``finally`` also removes
+                # it on normal teardown; this covers the case where the loop dies
+                # before that runs (otherwise the entry would leak).
+                dead.append(entry)
+                logger.debug("SSE subscriber loop unavailable; dropping subscriber")
+
+        if dead:
+            with self._lock:
+                for entry in dead:
+                    try:
+                        self._subs.remove(entry)
+                    except ValueError:
+                        pass
 
     async def subscribe(self) -> AsyncGenerator[Dict, None]:
         """Register a new subscriber queue and yield events until cancelled.

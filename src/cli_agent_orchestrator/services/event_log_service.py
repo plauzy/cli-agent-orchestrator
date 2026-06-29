@@ -84,8 +84,13 @@ class EventLog:
         Args:
             limit: Maximum number of events to return. The result is at most
                 ``min(limit, RING_CAPACITY)`` since the buffer itself is bounded.
-            since: If given, only events with a strictly greater ISO-8601
-                timestamp are returned.
+            since: If given, only events whose timestamp is strictly greater
+                than this ISO-8601 value are returned. It is parsed once into an
+                aware datetime and compared chronologically (not as a string):
+                lexicographic comparison of ISO-8601 is unreliable across valid
+                forms (``Z`` vs ``+00:00``, differing fractional precision). An
+                unparseable ``since`` is ignored (no filter), consistent with the
+                tolerant TTL handling that skips rows with bad timestamps.
             kinds: If given, only events whose ``kind`` is in this collection
                 are returned.
 
@@ -95,6 +100,21 @@ class EventLog:
         """
 
         cutoff = datetime.now(timezone.utc) - TTL
+
+        # Parse the ``since`` lower bound once into an aware datetime so the
+        # comparison below is chronological rather than lexicographic. ``Z`` is
+        # normalized to ``+00:00`` for Python 3.10 (whose ``fromisoformat`` does
+        # not accept the ``Z`` suffix); a naive value is assumed UTC.
+        since_dt: Optional[datetime] = None
+        if since is not None:
+            try:
+                since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                since_dt = None
+            else:
+                if since_dt.tzinfo is None:
+                    since_dt = since_dt.replace(tzinfo=timezone.utc)
+
         with self._lock:
             items = list(self._buf)
 
@@ -105,11 +125,16 @@ class EventLog:
                 ts = datetime.fromisoformat(event["timestamp"])
             except (KeyError, ValueError):
                 continue
+            # Defensive: treat a naive stored timestamp as UTC so the comparisons
+            # below never raise on aware/naive mismatch.
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
             if ts < cutoff:
                 continue
             if kinds is not None and event["kind"] not in kinds:
                 continue
-            if since is not None and event["timestamp"] <= since:
+            # Exclusive lower bound, compared as datetimes (see ``since_dt``).
+            if since_dt is not None and ts <= since_dt:
                 continue
             out.append(event)
 
