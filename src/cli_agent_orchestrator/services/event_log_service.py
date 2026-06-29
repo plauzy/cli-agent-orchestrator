@@ -95,6 +95,19 @@ class EventLog:
         """
 
         cutoff = datetime.now(timezone.utc) - TTL
+        # Parse the ``since`` lower bound once to a datetime so we compare
+        # datetimes, not ISO-8601 *strings*: lexical comparison is unreliable
+        # across equivalent forms (``Z`` vs ``+00:00``, differing fractional
+        # precision). A naive bound is assumed UTC; an unparseable bound is
+        # ignored (returns all, best-effort).
+        since_dt: Optional[datetime] = None
+        if since is not None:
+            try:
+                since_dt = datetime.fromisoformat(since)
+                if since_dt.tzinfo is None:
+                    since_dt = since_dt.replace(tzinfo=timezone.utc)
+            except ValueError:
+                since_dt = None
         with self._lock:
             items = list(self._buf)
 
@@ -109,7 +122,7 @@ class EventLog:
                 continue
             if kinds is not None and event["kind"] not in kinds:
                 continue
-            if since is not None and event["timestamp"] <= since:
+            if since_dt is not None and ts <= since_dt:
                 continue
             out.append(event)
 

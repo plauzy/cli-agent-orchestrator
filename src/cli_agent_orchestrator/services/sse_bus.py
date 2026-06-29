@@ -59,8 +59,17 @@ class SseBus:
             try:
                 loop.call_soon_threadsafe(_deliver, queue)
             except RuntimeError:
-                # Subscriber's loop is closed/closing — treat as disconnected.
-                logger.debug("SSE subscriber loop unavailable; dropping event")
+                # Subscriber's loop is closed/closing — treat as disconnected
+                # and evict the entry so we neither leak it nor re-log on every
+                # subsequent publish. The subscribe() generator's finally also
+                # removes it, but a dead loop may never resume to run that
+                # finally, so drop it here too (idempotent under the lock).
+                logger.debug("SSE subscriber loop unavailable; removing subscriber")
+                with self._lock:
+                    try:
+                        self._subs.remove((queue, loop))
+                    except ValueError:
+                        pass
 
     async def subscribe(self) -> AsyncGenerator[Dict, None]:
         """Register a new subscriber queue and yield events until cancelled.

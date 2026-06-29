@@ -133,5 +133,31 @@ def test_publish_with_no_subscribers_is_noop() -> None:
     assert bus.subscriber_count == 0
 
 
+def test_publish_evicts_subscriber_whose_loop_is_closed() -> None:
+    """A subscriber on a dead/closing loop is removed from ``_subs`` on publish.
+
+    ``call_soon_threadsafe`` raises ``RuntimeError`` when the target loop is
+    closed; that subscriber must be evicted so it neither leaks nor re-logs on
+    every subsequent publish. Regression for the PR #332 Copilot review
+    (sse_bus.py RuntimeError path).
+    """
+
+    bus = SseBus()
+    queue: "asyncio.Queue[dict]" = asyncio.Queue(maxsize=8)
+
+    class _DeadLoop:
+        def call_soon_threadsafe(self, *_args, **_kwargs):
+            raise RuntimeError("event loop is closed")
+
+    entry = (queue, _DeadLoop())
+    with bus._lock:  # noqa: SLF001 - inject a dead-loop subscriber directly
+        bus._subs.append(entry)
+    assert bus.subscriber_count == 1
+
+    bus.publish({"id": "x"})  # must not raise
+
+    assert bus.subscriber_count == 0
+
+
 def test_get_bus_returns_singleton() -> None:
     assert get_bus() is get_bus()

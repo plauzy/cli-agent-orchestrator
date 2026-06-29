@@ -17,10 +17,19 @@
     const li = document.createElement("li");
     const type = document.createElement("span");
     type.className = "event-type";
-    type.textContent = event.type || "?";
+    // /events emits normalized events: { kind, terminal_id, session_name,
+    // timestamp, detail }. (Earlier drafts used type/payload, which rendered
+    // "?" and "{}" against the real stream.)
+    type.textContent = event.kind || "?";
     const payload = document.createElement("span");
     payload.className = "event-payload";
-    payload.textContent = JSON.stringify(event.payload || {});
+    const meta = Object.assign(
+      {},
+      event.session_name ? { session: event.session_name } : {},
+      event.terminal_id ? { terminal: event.terminal_id } : {},
+      event.detail || {},
+    );
+    payload.textContent = JSON.stringify(meta);
     li.appendChild(type);
     li.appendChild(payload);
     log.insertBefore(li, log.firstChild);

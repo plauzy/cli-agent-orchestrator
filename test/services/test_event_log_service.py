@@ -91,6 +91,33 @@ class TestHistoryFiltering:
         assert all(e["timestamp"] > first["timestamp"] for e in result)
         assert first["id"] not in {e["id"] for e in result}
 
+    def test_since_filter_compares_datetimes_not_strings(self) -> None:
+        """``since`` must compare datetimes, not ISO strings.
+
+        ``Z`` and ``+00:00`` denote the same instant but order differently
+        lexically (``'Z' > '+'``), so a string compare would wrongly *include*
+        a 'Z'-stamped event at the exclusive bound. Regression for the PR #332
+        Copilot review (event_log_service.py since-filter).
+        """
+        log = EventLog()
+        now = datetime.now(timezone.utc)
+        # Inject an event stamped with the 'Z' designator (same instant as the
+        # '+00:00' bound below).
+        with log._lock:  # noqa: SLF001 - reach in to control the stored form
+            log._buf.append(
+                {
+                    "id": "zulu",
+                    "kind": "launch",
+                    "terminal_id": "t",
+                    "session_name": None,
+                    "timestamp": now.isoformat().replace("+00:00", "Z"),
+                    "detail": {},
+                }
+            )
+        # Exclusive lower bound at the same instant in '+00:00' form => excluded.
+        result = log.history(since=now.isoformat())
+        assert "zulu" not in {e["id"] for e in result}
+
     def test_ttl_excludes_events_older_than_24h(self) -> None:
         log = EventLog()
         # Manually inject a stale event past the 24h TTL.
