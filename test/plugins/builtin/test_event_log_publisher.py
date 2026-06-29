@@ -22,14 +22,16 @@ from cli_agent_orchestrator.services.sse_bus import SseBus
 
 
 @pytest.fixture
-def wired_publisher():
+def wired_publisher(monkeypatch):
     """Provide a publisher wired to isolated EventLog and SseBus instances.
 
     Patches the module-level singleton accessors the plugin imports so each
     test runs against a fresh buffer/bus (no cross-test bleed). Captures every
-    event relayed to the bus.
+    event relayed to the bus. The MCP Apps surface flag is enabled because the
+    observer is default-off (see ``TestDefaultOff``).
     """
 
+    monkeypatch.setenv("CAO_MCP_APPS_ENABLED", "true")
     log = EventLog()
     bus = SseBus()
     relayed: list[dict] = []
@@ -171,3 +173,48 @@ class TestObserverOnly:
         # The only observable effect is the in-process append + relay.
         assert len(log.history()) == 1
         assert len(relayed) == 1
+
+
+class TestDefaultOff:
+    """With ``CAO_MCP_APPS_ENABLED`` unset the observer no-ops entirely.
+
+    Guards the "default-off, zero-cost-when-unused" contract: the plugin is
+    still discovered/loaded by the entry-point registry, but its hooks must not
+    normalize, append to the ring buffer, or fan out to the SSE bus when the
+    surface is disabled — so no fleet metadata is retained.
+
+    **Validates: default-off contract (H1)**
+    """
+
+    @pytest.mark.asyncio
+    async def test_hooks_noop_when_surface_disabled(self, monkeypatch) -> None:
+        monkeypatch.delenv("CAO_MCP_APPS_ENABLED", raising=False)
+
+        log = EventLog()
+        bus = SseBus()
+        relayed: list[dict] = []
+
+        with patch.object(bus, "publish", side_effect=lambda e: relayed.append(e)):
+            with (
+                patch(
+                    "cli_agent_orchestrator.plugins.builtin.event_log_publisher.get_event_log",
+                    return_value=log,
+                ),
+                patch(
+                    "cli_agent_orchestrator.plugins.builtin.event_log_publisher.get_bus",
+                    return_value=bus,
+                ),
+            ):
+                publisher = EventLogPublisher()
+                await publisher.on_post_create_terminal(
+                    PostCreateTerminalEvent(terminal_id="t1", provider="kiro_cli")
+                )
+                await publisher.on_post_send_message(
+                    PostSendMessageEvent(
+                        sender="s", receiver="r", message="body", orchestration_type="handoff"
+                    )
+                )
+
+        # No retention and no fan-out while disabled.
+        assert log.history() == []
+        assert relayed == []

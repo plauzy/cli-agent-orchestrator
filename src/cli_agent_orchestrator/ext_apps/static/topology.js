@@ -17,10 +17,21 @@
     const li = document.createElement("li");
     const type = document.createElement("span");
     type.className = "event-type";
-    type.textContent = event.type || "?";
+    // /events publishes normalized rows shaped as
+    //   { id, kind, terminal_id, session_name, timestamp, detail }
+    // (see services/event_log_service.py). Render the semantic `kind` as the
+    // type label and `detail` as the payload. The earlier `type`/`payload`
+    // names never existed on the wire, so every row showed "?" / "{}".
+    type.textContent = event.kind || "?";
     const payload = document.createElement("span");
     payload.className = "event-payload";
-    payload.textContent = JSON.stringify(event.payload || {});
+    // Surface the available routing context (session / terminal) so a row is
+    // meaningful instead of a bare detail blob.
+    const ctx = [event.session_name, event.terminal_id]
+      .filter(Boolean)
+      .join(" / ");
+    payload.textContent =
+      (ctx ? ctx + " " : "") + JSON.stringify(event.detail || {});
     li.appendChild(type);
     li.appendChild(payload);
     log.insertBefore(li, log.firstChild);

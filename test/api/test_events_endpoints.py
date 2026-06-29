@@ -14,6 +14,34 @@ from cli_agent_orchestrator.services.event_log_service import get_event_log
 from cli_agent_orchestrator.services.sse_bus import get_bus
 
 
+@pytest.fixture(autouse=True)
+def _enable_mcp_apps(monkeypatch):
+    """The event endpoints are part of the default-off MCP Apps surface.
+
+    Enable the flag for the happy-path tests in this module; the default-off
+    behavior (404 when unset) is asserted explicitly by the ``*_when_disabled``
+    tests, which clear it again.
+    """
+
+    monkeypatch.setenv("CAO_MCP_APPS_ENABLED", "true")
+
+
+@pytest.mark.integration
+def test_events_history_404_when_disabled(client, monkeypatch) -> None:
+    """/events/history is not reachable unless the MCP Apps surface is enabled."""
+
+    monkeypatch.delenv("CAO_MCP_APPS_ENABLED", raising=False)
+    assert client.get("/events/history").status_code == 404
+
+
+@pytest.mark.integration
+def test_events_stream_404_when_disabled(client, monkeypatch) -> None:
+    """/events is not reachable unless the MCP Apps surface is enabled."""
+
+    monkeypatch.delenv("CAO_MCP_APPS_ENABLED", raising=False)
+    assert client.get("/events").status_code == 404
+
+
 @pytest.mark.integration
 def test_events_history_returns_six_primitive_events(client) -> None:
     """/events/history replays normalized events from the ring buffer."""

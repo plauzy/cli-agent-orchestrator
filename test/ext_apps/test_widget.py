@@ -49,6 +49,19 @@ class TestStaticBundle:
         assert "/events" in js
         assert "EventSource" in js
 
+    def test_js_renders_normalized_event_fields(self) -> None:
+        """Renders the normalized wire shape (kind/detail), not type/payload.
+
+        ``/events`` publishes ``{id, kind, terminal_id, session_name, timestamp,
+        detail}``; the old ``type``/``payload`` field names never existed on the
+        wire and rendered "?" / "{}" (Copilot C1).
+        """
+        js = (_STATIC_DIR / "topology.js").read_text(encoding="utf-8")
+        assert "event.kind" in js
+        assert "event.detail" in js
+        assert "event.type" not in js
+        assert "event.payload" not in js
+
     def test_css_present(self) -> None:
         assert (_STATIC_DIR / "topology.css").exists()
 
