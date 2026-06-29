@@ -1,6 +1,6 @@
 // MCP App lifecycle bridge for the CAO views.
 //
-// DEVIATION NOTE (verified against SEP-1865, spec 2026-01-26): the
+// DEVIATION NOTE (per the authoritative SEP-1865 spec, Final): the
 // `@modelcontextprotocol/ext-apps` SDK exists (npm
 // v1.7.4), but the spec explicitly states "you don't need an SDK to talk MCP
 // with the host." To keep the single-file bundles dependency-free and trivially
@@ -23,7 +23,8 @@ interface PendingRequest {
   reject: (reason: Error) => void;
 }
 
-const PROTOCOL_VERSION = "2026-01-26";
+// Matches the `ui/initialize` examples in the authoritative SEP-1865 spec.
+const PROTOCOL_VERSION = "2025-06-18";
 
 export interface McpAppOptions {
   /** Window to post messages to (defaults to window.parent). */

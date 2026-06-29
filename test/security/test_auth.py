@@ -383,3 +383,129 @@ def test_extract_bearer_variants():
     assert auth._extract_bearer("NotBearer tok") is None
     assert auth._extract_bearer("Bearer tok123") == "tok123"
     assert auth._extract_bearer("bearer tok123") == "tok123"
+
+
+# --- H3: local bearer + misconfiguration error ----------------------------
+
+
+def test_get_local_bearer_none_when_disabled():
+    """Default-off: no bearer is attached to internal MCP->API calls."""
+    assert auth.get_local_bearer() is None
+
+
+def test_get_local_bearer_none_when_enabled_without_token(monkeypatch):
+    """Auth on but no CAO_AUTH_LOCAL_TOKEN -> no bearer (caller surfaces error)."""
+    monkeypatch.setenv("CAO_AUTH_JWKS_URI", "https://idp.example/jwks")
+    assert auth.get_local_bearer() is None
+
+
+def test_get_local_bearer_returns_token_when_configured(monkeypatch):
+    """Auth on with a local token -> that token is returned for forwarding."""
+    monkeypatch.setenv("CAO_AUTH_JWKS_URI", "https://idp.example/jwks")
+    monkeypatch.setenv("CAO_AUTH_LOCAL_TOKEN", "  machine-token  ")
+    assert auth.get_local_bearer() == "machine-token"
+
+
+def test_local_auth_misconfig_error_none_when_disabled():
+    """Default-off: the internal hop is fine, no misconfiguration error."""
+    assert auth.local_auth_misconfig_error() is None
+
+
+def test_local_auth_misconfig_error_none_when_token_present(monkeypatch):
+    monkeypatch.setenv("CAO_AUTH_JWKS_URI", "https://idp.example/jwks")
+    monkeypatch.setenv("CAO_AUTH_LOCAL_TOKEN", "machine-token")
+    assert auth.local_auth_misconfig_error() is None
+
+
+def test_local_auth_misconfig_error_set_when_enabled_without_token(monkeypatch):
+    """Auth on with no local token -> an actionable error string is returned."""
+    monkeypatch.setenv("CAO_AUTH_JWKS_URI", "https://idp.example/jwks")
+    monkeypatch.delenv("CAO_AUTH_LOCAL_TOKEN", raising=False)
+    msg = auth.local_auth_misconfig_error()
+    assert msg is not None
+    assert "CAO_AUTH_LOCAL_TOKEN" in msg
+
+
+# --- JWKS robustness: unknown-kid forced refresh + staleness bound --------
+
+
+def test_extract_scopes_refreshes_on_unknown_kid(monkeypatch, rsa_key):
+    """An unknown ``kid`` forces a single JWKS refresh + retry (key rotation)."""
+    monkeypatch.setenv("AUTH0_DOMAIN", "example.auth0.com")
+    monkeypatch.setenv("CAO_AUTH_AUDIENCE", AUDIENCE)
+
+    calls = {"n": 0}
+
+    class _RotatingClient:
+        def get_signing_key_from_jwt(self, token):  # noqa: ANN001
+            calls["n"] += 1
+            if calls["n"] == 1:
+                # First lookup misses (stale cache from before the rotation).
+                raise jwt.PyJWKClientError("no matching key for kid")
+            return _FakeSigningKey(rsa_key.public_key())
+
+    fake = _RotatingClient()
+    monkeypatch.setattr(auth.get_jwks_cache(), "get_client", lambda uri: fake)
+
+    token = _make_token(rsa_key, _base_claims({"scope": "cao:read"}))
+    assert auth.extract_scopes_from_token(token) == ["cao:read"]
+    # The signing-key lookup was retried exactly once after the forced refresh.
+    assert calls["n"] == 2
+
+
+def test_extract_scopes_unknown_kid_still_raises_after_refresh(monkeypatch, rsa_key):
+    """A genuinely unknown key still raises (mapped to 401) after the retry."""
+    monkeypatch.setenv("AUTH0_DOMAIN", "example.auth0.com")
+    monkeypatch.setenv("CAO_AUTH_AUDIENCE", AUDIENCE)
+
+    class _AlwaysMissing:
+        def get_signing_key_from_jwt(self, token):  # noqa: ANN001
+            raise jwt.PyJWKClientError("no matching key for kid")
+
+    monkeypatch.setattr(auth.get_jwks_cache(), "get_client", lambda uri: _AlwaysMissing())
+    token = _make_token(rsa_key, _base_claims({"scope": "cao:read"}))
+    with pytest.raises(jwt.PyJWKClientError):
+        auth.extract_scopes_from_token(token)
+
+
+def test_jwks_cache_fails_closed_past_max_staleness(monkeypatch):
+    """Reuse-on-unreachable is bounded: past the staleness cap it fails closed."""
+    state = {"fail": False}
+
+    class _Flaky(_CountingClient):
+        def __init__(self, uri, *a, **k):  # noqa: ANN001
+            if state["fail"]:
+                raise ConnectionError("jwks unreachable")
+            super().__init__(uri, *a, **k)
+
+    monkeypatch.setattr(auth, "PyJWKClient", _Flaky)
+    _CountingClient.instances = 0
+    cache = auth._JWKSCache(ttl=timedelta(seconds=0))  # always tries to refetch
+    cache.get_client("https://idp/jwks")
+    # Age the cached keys past the hard staleness bound.
+    cache._fetched_at = datetime.now(timezone.utc) - (
+        auth._JWKS_MAX_STALENESS + timedelta(minutes=1)
+    )
+    state["fail"] = True
+    with pytest.raises(ConnectionError):
+        cache.get_client("https://idp/jwks")
+
+
+def test_jwks_cache_reuses_within_max_staleness(monkeypatch):
+    """Within the staleness bound, unreachable refetch still reuses cached keys."""
+    state = {"fail": False}
+
+    class _Flaky(_CountingClient):
+        def __init__(self, uri, *a, **k):  # noqa: ANN001
+            if state["fail"]:
+                raise ConnectionError("jwks unreachable")
+            super().__init__(uri, *a, **k)
+
+    monkeypatch.setattr(auth, "PyJWKClient", _Flaky)
+    _CountingClient.instances = 0
+    cache = auth._JWKSCache(ttl=timedelta(seconds=0))
+    first = cache.get_client("https://idp/jwks")
+    # Still well within the staleness bound.
+    cache._fetched_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+    state["fail"] = True
+    assert cache.get_client("https://idp/jwks") is first

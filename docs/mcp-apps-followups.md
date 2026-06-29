@@ -1,16 +1,19 @@
 # MCP Apps — deferred security follow-ups (H3 & H4)
 
-**Status:** open / deferred
+**Status:** RESOLVED — H3 and H4 implemented (plus the JWKS-robustness,
+`/events/history` input-hardening, and UI-scope items below). See the
+"Resolution" notes under each section.
 **Origin:** review of PR [#332](https://github.com/awslabs/cli-agent-orchestrator/pull/332)
 ("sandboxed host-rendered fleet UI"). The Copilot comments (C1–C3) and the
 default-off / auth-correctness items (H1, H2, M1, M2) were addressed in the
-review branch. The two items below were **intentionally deferred** to keep that
-change focused and behavior-preserving; this document is the filing that records
-the plan so they are not lost.
+review branch. The two items below were **intentionally deferred** at the time to
+keep that change focused and behavior-preserving; this document recorded the plan
+and now records how each was implemented.
 
-> **Until H3 lands, treat auth-enabled mutation via the MCP Apps surface as not
-> yet supported.** The surface remains safe in its default posture (default-off)
-> and in its intended posture (enabled on a trusted loopback host with no IdP).
+> **Resolved:** auth-enabled mutation via the MCP Apps surface is now supported
+> when an operator provisions `CAO_AUTH_LOCAL_TOKEN` (see H3). The surface remains
+> safe in its default posture (default-off) and in its intended posture (enabled
+> on a trusted loopback host with no IdP).
 
 ---
 
@@ -76,6 +79,19 @@ rather than surfacing a raw 401.
 `get_local_bearer()` helper), `docs/mcp-apps.md`, and tests under
 `test/mcp_server/` + `test/api/`.
 
+### Resolution (implemented)
+Option **1** was implemented. `security/auth.py` gained `get_local_bearer()`
+(returns `CAO_AUTH_LOCAL_TOKEN` when auth is enabled, else `None`) and
+`local_auth_misconfig_error()` (the actionable "auth enabled but
+CAO_AUTH_LOCAL_TOKEN not set" message). `mcp_server/app_tools.py` and
+`mcp_server/utils.py` now attach `Authorization: Bearer <token>` to every
+outgoing MCP→API request via a shared `_auth_headers()` helper (reads *and*
+mutations, for consistency). `submit_command` returns the structured misconfig
+error before routing when auth is on and the token is missing, instead of leaking
+a raw `401`. Default-off attaches no header (byte-for-byte unchanged). Covered by
+`test/mcp_server/test_app_tools.py` (bearer forwarding, default-off, missing-token
+error) and `test/mcp_server/test_utils.py`.
+
 ---
 
 ## H4 — Scope coverage is incomplete across mutating routes
@@ -135,31 +151,53 @@ full scope set), mirroring the five already-wired routes.
 `src/cli_agent_orchestrator/api/main.py`, and tests under `test/api/`
 (including a route-coverage guard test).
 
+### Resolution (implemented)
+Every mutating route now carries `Depends(require_any_scope(...))`, classified by
+destructiveness exactly as planned above — `cao:write`/`cao:admin` for
+create/update/run (`/sessions/{name}/terminals`, `/terminals/run-step`,
+`/terminals/{id}/exit`, `/settings/agent-dirs`, `/settings/skill-dirs`,
+`/agents/profiles/install`, `/flows` create + `enable`/`disable`/`run`,
+`/workflows/runs/.../output`) and `cao:admin` for destructive deletes
+(`DELETE /terminals/{id}`, `DELETE /flows/{name}`, `DELETE /workflows/{name}`,
+`DELETE /memory/{key}`, `DELETE /memory`). `POST /workflows/validate` is left
+ungated as a read-only operation (no state change). A guard test
+(`test/api/test_scope_coverage.py`) enumerates the live route table and fails if
+any mutating route is missing a scope dependency, plus enforcement tests assert a
+`cao:read` token is `403`'d on a write route and a `cao:write` token is `403`'d on
+an admin route. Behavior is unchanged with auth disabled (the dependency returns
+the full scope set).
+
 ---
 
-## Related smaller follow-ups (not blocking)
+## Related smaller follow-ups
 
-These were noted in the same review and can ride along with H3/H4 or be filed
-separately:
+These were noted in the same review. The status of each is marked below.
 
 - **UI scope source.** `render_dashboard` populates snapshot `scopes` from
-  `get_scopes_for_local_token()` (full set when no local token), so the UI may
-  show write/admin controls to a read-only operator. Align with the caller's
-  token once H3 lands.
-- **JWKS robustness.** Bound the reuse-on-unreachable staleness and force a
-  refresh on an unknown `kid` (key rotation currently waits out the 1h TTL).
-- **`pause`/`resume` gestures.** `TaskControl` renders these buttons but
-  `submit_command` returns `unsupported` (no Backplane route) — hide/disable
-  until routes exist.
-- **`/events/history` input hardening.** Validate `kinds` against
-  `event_primitives.KINDS` and clamp `limit` (`Query(ge=0, le=RING_CAPACITY)`).
-- **`topology.js` reconnect.** Reconnect with capped backoff after a dropped SSE
-  stream; add a restrictive CSP / `frame-ancestors` to `topology.html`.
-- **Unused `requires_scopes` decorator.** `security/decorators.py` is not wired
-  into the production tool path — wire it or remove it.
-- **Reserved primitives.** `file_mod` and `error` are in the `PRIMITIVES`
+  `get_scopes_for_local_token()`. With H3 implemented, an operator who configures
+  `CAO_AUTH_LOCAL_TOKEN` now has the dashboard reflect exactly that token's
+  granted scopes (the loopback caller's identity), so read-only operators no
+  longer see controls that would `403`. **Addressed by H3** (no separate change
+  needed); the full set is only surfaced in the default-off posture.
+- **JWKS robustness.** ✅ **Done.** The cache forces a single refresh + retry on an
+  unknown `kid` (rotation no longer waits out the 1 h TTL), and reuse-on-unreachable
+  is bounded by a 24 h staleness cap (`_JWKS_MAX_STALENESS`) so it fails closed
+  rather than trusting indefinitely-stale keys.
+- **`/events/history` input hardening.** ✅ **Done.** `kinds` is validated against
+  `event_primitives.KINDS` (unknown kind → `400`) and `limit` is clamped via
+  `Query(ge=0, le=RING_CAPACITY)`.
+- **`pause`/`resume` gestures.** Open (frontend). `TaskControl` renders these
+  buttons but `submit_command` returns `unsupported` (no Backplane route); hide or
+  disable them in `cao_mcp_apps/` until routes exist.
+- **`topology.js` reconnect.** Open (frontend). Reconnect with capped backoff after
+  a dropped SSE stream; add a restrictive CSP / `frame-ancestors` to
+  `topology.html`.
+- **Unused `requires_scopes` decorator.** Open. `security/decorators.py` is not
+  wired into the production tool path (the `submit_command` choke point does its
+  own inline scope pre-check) — wire it or remove it.
+- **Reserved primitives.** Open. `file_mod` and `error` are in the `PRIMITIVES`
   vocabulary but `normalize_kind` never emits them; document as reserved or wire
   producing events.
-- **`submit_command` audit trail (optional).** The choke point does not emit an
-  audit record today; add one if an audit trail is desired (the PR does not claim
-  it is "audited", so this is an enhancement, not a regression).
+- **`submit_command` audit trail (optional).** Open enhancement. The choke point
+  does not emit an audit record today; add one if an audit trail is desired (the
+  PR does not claim it is "audited", so this is an enhancement, not a regression).

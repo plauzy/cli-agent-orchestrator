@@ -11,6 +11,10 @@ the default posture is byte-for-byte unchanged when the flag is unset. Durable
 event observation (the ring buffer that backs ``cao_fetch_history``) is handled
 by the companion ``event_log_publisher`` plugin; this plugin owns the
 MCP-server-facing registration.
+
+Authoritative spec (source of truth for the surface this plugin registers):
+SEP-1865 "MCP Apps" (Final) — https://modelcontextprotocol.io/seps/1865-mcp-apps-interactive-user-interfaces-for-mcp
+(PR https://github.com/modelcontextprotocol/modelcontextprotocol/pull/1865; full spec https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/draft/apps.mdx); capability negotiation per SEP-2133.
 """
 
 import logging

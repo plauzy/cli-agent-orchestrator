@@ -94,7 +94,7 @@ def advertise_capability(mcp: Any) -> None:
     that exposes no ``_mcp_server`` is logged and skipped rather than crashing
     startup).
 
-    Spec/SDK note: the 2026-01-26 MCP Apps spec advertises the capability under
+    Spec/SDK note: SEP-1865 (Final) advertises the capability under
     ``capabilities.extensions``. The installed MCP SDK's ``ServerCapabilities``
     has no ``extensions`` field (only ``experimental``), so we use the
     ``experimental`` extension point — the sanctioned place for vendor
@@ -150,7 +150,7 @@ def client_supports_mcp_apps(mcp: Any) -> bool:
         capabilities = getattr(client_params, "capabilities", None)
         if capabilities is None:
             return False
-        # The 2026-01-26 spec advertises under capabilities.extensions; the
+        # SEP-1865 advertises under capabilities.extensions (per SEP-1724); the
         # installed SDK only exposes `experimental`. Accept either so both
         # current- and future-SDK hosts are recognized.
         experimental = getattr(capabilities, "experimental", None) or {}

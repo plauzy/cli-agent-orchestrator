@@ -26,7 +26,7 @@ from typing import Any, Callable, List, Optional, cast
 
 import jwt
 from fastapi import Depends, Header, HTTPException, status
-from jwt import PyJWKClient
+from jwt import PyJWKClient, PyJWKClientError
 
 from cli_agent_orchestrator.constants import API_BASE_URL
 
@@ -42,6 +42,16 @@ SCOPES_SUPPORTED: List[str] = list(FULL_SCOPE_SET)
 # Accepted RS256 only (RFC 9728 protected resources use asymmetric signatures).
 _ALGORITHMS = ["RS256"]
 _JWKS_TTL = timedelta(hours=1)
+
+# Hard upper bound on how long the cache will keep serving keys it could not
+# refresh because the JWKS source was unreachable. Within ``_JWKS_TTL`` keys are
+# served without re-fetching; past the TTL a refresh is attempted on every call
+# and, on failure, the *stale* keys are reused so a transient outage does not
+# lock out valid callers — but only up to this bound. Past it the keys are
+# considered too stale to trust (an IdP that rotated keys during a long outage
+# would otherwise let revoked keys validate indefinitely), so validation fails
+# closed instead.
+_JWKS_MAX_STALENESS = timedelta(hours=24)
 
 
 # --- configuration (default-off) -----------------------------------------
@@ -163,9 +173,20 @@ class _JWKSCache:
                 self._fetched_at = now
                 return client
             except Exception:  # source unreachable / fetch failed
-                if self._client is not None and self._uri == uri:
-                    logger.warning("JWKS source unreachable; reusing cached keys for %s", uri)
-                    return self._client
+                # Reuse cached keys across a transient outage, but only up to a
+                # hard staleness bound: if the source has been unreachable past
+                # ``_JWKS_MAX_STALENESS`` we fail closed rather than keep trusting
+                # keys an IdP may have rotated away during the outage.
+                if self._client is not None and self._uri == uri and self._fetched_at is not None:
+                    if (now - self._fetched_at) <= _JWKS_MAX_STALENESS:
+                        logger.warning("JWKS source unreachable; reusing cached keys for %s", uri)
+                        return self._client
+                    logger.warning(
+                        "JWKS source unreachable and cached keys exceed the %s staleness "
+                        "bound for %s; failing closed",
+                        _JWKS_MAX_STALENESS,
+                        uri,
+                    )
                 raise
 
     def clear(self) -> None:
@@ -238,7 +259,16 @@ def extract_scopes_from_token(token: str) -> List[str]:
         return list(FULL_SCOPE_SET)
 
     client = _jwks_cache.get_client(uri)
-    signing_key = client.get_signing_key_from_jwt(token)
+    try:
+        signing_key = client.get_signing_key_from_jwt(token)
+    except PyJWKClientError:
+        # Unknown ``kid`` — almost always an IdP key rotation the 1 h TTL has not
+        # picked up yet. Force a single refresh and retry rather than rejecting
+        # valid tokens (and re-issued keys) for up to an hour. A genuinely
+        # unknown key still raises on the retry and maps to 401.
+        _jwks_cache.clear()
+        client = _jwks_cache.get_client(uri)
+        signing_key = client.get_signing_key_from_jwt(token)
 
     audience = get_expected_audience()
     # Pin to the first advertised authorization server (the PRM endpoint
@@ -284,6 +314,53 @@ def get_scopes_for_local_token() -> List[str]:
             "Local token validation failed; deferring to FastAPI boundary", exc_info=True
         )
         return list(FULL_SCOPE_SET)
+
+
+# --- internal MCP -> API service credential (H3) --------------------------
+
+
+def get_local_bearer() -> Optional[str]:
+    """Return the bearer token for internal MCP->API (loopback) calls, or ``None``.
+
+    The MCP server reaches Backplane state over loopback HTTP to the FastAPI
+    app. When the auth layer enforces scope on the mutation endpoints, those
+    internal calls must carry a credential or they are rejected at the boundary
+    with a raw ``401``. This returns the operator-provisioned
+    ``CAO_AUTH_LOCAL_TOKEN`` (a machine token from the same IdP, holding the
+    scopes the surface needs) so callers can attach
+    ``Authorization: Bearer <token>``.
+
+    Default-off: returns ``None`` when auth is disabled so no header is attached
+    and the no-auth posture is byte-for-byte unchanged. When auth is enabled but
+    no local token is configured it also returns ``None`` — the caller is
+    responsible for surfacing the actionable misconfiguration
+    (:func:`local_auth_misconfig_error`) rather than letting the bare ``401``
+    leak out.
+    """
+
+    if not is_auth_enabled():
+        return None
+    return os.getenv("CAO_AUTH_LOCAL_TOKEN", "").strip() or None
+
+
+def local_auth_misconfig_error() -> Optional[str]:
+    """Return an actionable error string when auth is on but no local token is set.
+
+    Returns ``None`` when the internal hop is properly configured (auth disabled,
+    or auth enabled with a ``CAO_AUTH_LOCAL_TOKEN`` present). When auth is enabled
+    but the token is missing, returns a message the MCP App surface can hand back
+    as ``{"success": false, "error": ...}`` instead of a confusing raw ``401``.
+    """
+
+    if not is_auth_enabled():
+        return None
+    if get_local_bearer():
+        return None
+    return (
+        "auth enabled but CAO_AUTH_LOCAL_TOKEN is not set: the MCP Apps surface "
+        "cannot authorize its internal call to the CAO API. Provision a machine "
+        "token (with the scopes the surface needs) and set CAO_AUTH_LOCAL_TOKEN."
+    )
 
 
 # --- FastAPI dependency ---------------------------------------------------

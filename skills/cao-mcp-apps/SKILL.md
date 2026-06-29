@@ -8,6 +8,10 @@ description: Enable, operate, and extend CAO's MCP Apps surface — the sandboxe
 Operator + developer playbook for CAO's host-rendered fleet UI. Reference docs:
 [`docs/mcp-apps.md`](../../docs/mcp-apps.md); example: [`examples/mcp-apps/`](../../examples/mcp-apps/).
 
+**Authoritative spec:** [SEP-1865 — MCP Apps](https://modelcontextprotocol.io/seps/1865-mcp-apps-interactive-user-interfaces-for-mcp) (Final) ·
+[PR #1865](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/1865) · [full ext-apps spec](https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/draft/apps.mdx) ·
+[SEP-2133 (Extensions)](https://modelcontextprotocol.io/seps/2133-extensions).
+
 ## Turn it on
 
 The surface is **default-off**. Enable and run:

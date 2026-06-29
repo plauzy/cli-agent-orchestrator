@@ -47,7 +47,9 @@ from cli_agent_orchestrator.security.auth import (
     SCOPE_ADMIN,
     SCOPE_READ,
     SCOPE_WRITE,
+    get_local_bearer,
     get_scopes_for_local_token,
+    local_auth_misconfig_error,
 )
 from cli_agent_orchestrator.services.event_log_service import get_event_log
 from cli_agent_orchestrator.services.event_primitives import normalize_kind
@@ -96,12 +98,28 @@ def _is_enabled() -> bool:
 # HTTP helpers (HTTP-only boundary)
 
 
+def _auth_headers() -> Dict[str, str]:
+    """Return the ``Authorization`` header for the internal MCP->API hop, if any.
+
+    When the auth layer is enabled, the mutation endpoints enforce scope, so the
+    loopback call must carry the operator-provisioned ``CAO_AUTH_LOCAL_TOKEN``
+    (see :func:`security.auth.get_local_bearer`). Default-off this returns an
+    empty mapping, so no header is attached and the no-auth posture is
+    byte-for-byte unchanged. Applied to reads too (not just mutations) so the
+    whole MCP->API hop is consistent.
+    """
+
+    token = get_local_bearer()
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
 def _get_json(path: str, **params: Any) -> Any:
     """GET ``{API_BASE_URL}{path}`` and return parsed JSON (raises on HTTP error)."""
 
     response = requests.get(
         f"{API_BASE_URL}{path}",
         params=params or None,
+        headers=_auth_headers() or None,
         timeout=MCP_REQUEST_TIMEOUT,
     )
     response.raise_for_status()
@@ -130,6 +148,7 @@ def _post_json(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
     response = requests.post(
         f"{API_BASE_URL}{path}",
         params={k: v for k, v in (params or {}).items() if v is not None} or None,
+        headers=_auth_headers() or None,
         timeout=MCP_REQUEST_TIMEOUT,
     )
     response.raise_for_status()
@@ -142,7 +161,11 @@ def _post_json(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
 def _delete_json(path: str) -> Any:
     """DELETE ``{API_BASE_URL}{path}`` and return parsed JSON (raises on HTTP error)."""
 
-    response = requests.delete(f"{API_BASE_URL}{path}", timeout=MCP_REQUEST_TIMEOUT)
+    response = requests.delete(
+        f"{API_BASE_URL}{path}",
+        headers=_auth_headers() or None,
+        timeout=MCP_REQUEST_TIMEOUT,
+    )
     response.raise_for_status()
     try:
         return response.json()
@@ -293,6 +316,14 @@ def _submit_command_impl(kind: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     # full set (auth off, the default) passes every kind.
     if scopes and required not in scopes:
         return {"success": False, "error": f"scope {required} required"}
+
+    # H3: when auth is enabled the internal MCP->API hop must carry a bearer or
+    # the FastAPI boundary rejects it with a raw 401. Surface the
+    # misconfiguration as a structured, actionable result instead of forwarding
+    # a request we know will fail. Default-off this is always None (no-op).
+    misconfig = local_auth_misconfig_error()
+    if misconfig is not None:
+        return {"success": False, "kind": kind, "error": misconfig}
 
     oversized = _payload_too_large(payload)
     if oversized is not None:
@@ -470,8 +501,8 @@ def register_app_tools(mcp: Any) -> bool:
         resource_uri: Optional[str],
         required_scopes: Optional[List[str]],
     ) -> bool:
-        # SEP-1865 shape: visibility + resourceUri live *under* _meta.ui (verified
-        # against the 2026-01-26 spec; see docs/mcp-apps.md).
+        # SEP-1865 shape: visibility + resourceUri live *under* _meta.ui (per the
+        # authoritative SEP-1865 spec; see docs/mcp-apps.md).
         meta = ui_meta(
             required_scopes=required_scopes,
             visibility=visibility,

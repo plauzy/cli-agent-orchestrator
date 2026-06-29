@@ -66,3 +66,31 @@ class TestGetTerminalRecord:
 
         with pytest.raises(requests.HTTPError):
             get_terminal_record("term-123")
+
+    @patch("cli_agent_orchestrator.mcp_server.utils.get_local_bearer", return_value="tok")
+    @patch("cli_agent_orchestrator.mcp_server.utils.requests.get")
+    def test_get_terminal_record_attaches_bearer(self, mock_get, _bearer):
+        """H3: the internal GET carries the local bearer when auth is enabled."""
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"id": "t"}
+        mock_get.return_value = mock_response
+
+        get_terminal_record("t")
+        _, kwargs = mock_get.call_args
+        assert kwargs["headers"] == {"Authorization": "Bearer tok"}
+
+    @patch("cli_agent_orchestrator.mcp_server.utils.get_local_bearer", return_value=None)
+    @patch("cli_agent_orchestrator.mcp_server.utils.requests.get")
+    def test_get_terminal_record_no_bearer_default_off(self, mock_get, _bearer):
+        """Default-off: no Authorization header (byte-for-byte unchanged)."""
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"id": "t"}
+        mock_get.return_value = mock_response
+
+        get_terminal_record("t")
+        _, kwargs = mock_get.call_args
+        assert kwargs["headers"] is None
