@@ -72,7 +72,8 @@ def well_known_oauth_protected_resource() -> Any:
     from fastapi import HTTPException, Request
     from fastapi.responses import JSONResponse
 
-    from cli_agent_orchestrator.security import ALL_SCOPES, auth_enabled
+    from cli_agent_orchestrator.security import SCOPES_SUPPORTED as ALL_SCOPES
+    from cli_agent_orchestrator.security import is_auth_enabled as auth_enabled
 
     if not auth_enabled():
         raise HTTPException(status_code=404, detail="OAuth not configured")

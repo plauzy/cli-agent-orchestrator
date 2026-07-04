@@ -176,7 +176,11 @@ class TestPrimitivePath:
                 "launch",
                 terminal_id="abc12345",
                 session_name="cao-foo",
-                detail={"event_type": "post_create_terminal", "agent_name": "developer", "provider": "claude_code"},
+                detail={
+                    "event_type": "post_create_terminal",
+                    "agent_name": "developer",
+                    "provider": "claude_code",
+                },
             )
         )
         assert agui_type == AGUI_STEP_STARTED
@@ -186,14 +190,20 @@ class TestPrimitivePath:
 
     def test_completion_session_maps_to_run_finished(self) -> None:
         agui_type, data = to_agui_event(
-            _record("completion", session_name="cao-foo", detail={"event_type": "post_kill_session"})
+            _record(
+                "completion", session_name="cao-foo", detail={"event_type": "post_kill_session"}
+            )
         )
         assert agui_type == AGUI_RUN_FINISHED
         assert data["status"] == "terminated"
 
     def test_completion_terminal_maps_to_step_finished(self) -> None:
         agui_type, data = to_agui_event(
-            _record("completion", terminal_id="abc12345", detail={"event_type": "post_kill_terminal", "agent_name": "developer"})
+            _record(
+                "completion",
+                terminal_id="abc12345",
+                detail={"event_type": "post_kill_terminal", "agent_name": "developer"},
+            )
         )
         assert agui_type == AGUI_STEP_FINISHED
         assert data["step_id"] == "abc12345"
@@ -213,13 +223,18 @@ class TestPrimitivePath:
 
     def test_a2a_delegation_maps_to_tool_call_start(self) -> None:
         agui_type, data = to_agui_event(
-            _record("a2a_delegation", detail={"sender": "s", "receiver": "r", "orchestration_type": "a2a_send"})
+            _record(
+                "a2a_delegation",
+                detail={"sender": "s", "receiver": "r", "orchestration_type": "a2a_send"},
+            )
         )
         assert agui_type == AGUI_TOOL_CALL_START
         assert data["tool_call_name"] == "a2a_delegation"
 
     def test_file_mod_maps_to_state_delta(self) -> None:
-        agui_type, data = to_agui_event(_record("file_mod", terminal_id="t", detail={"path": "x.py"}))
+        agui_type, data = to_agui_event(
+            _record("file_mod", terminal_id="t", detail={"path": "x.py"})
+        )
         assert agui_type == AGUI_STATE_DELTA
         assert data["delta"] == []
 
@@ -228,7 +243,9 @@ class TestPrimitivePath:
         assert agui_type == AGUI_RUN_ERROR
 
     def test_other_falls_back_to_raw(self) -> None:
-        agui_type, data = to_agui_event(_record("other", detail={"event_type": "post_pause_terminal"}))
+        agui_type, data = to_agui_event(
+            _record("other", detail={"event_type": "post_pause_terminal"})
+        )
         assert agui_type == AGUI_RAW
         assert data["cao_kind"] == "other"
         assert data["cao_type"] == "post_pause_terminal"
@@ -351,6 +368,8 @@ class TestGenerativeUI:
 
     def test_oversized_props_are_truncated(self) -> None:
         big = {"blob": "x" * 20000}
-        agui_type, data = to_agui_event({"id": "e5", "ui": {"component": "diff_summary", "props": big}})
+        agui_type, data = to_agui_event(
+            {"id": "e5", "ui": {"component": "diff_summary", "props": big}}
+        )
         assert agui_type == AGUI_GENERATIVE_UI
         assert data["props"] == {"_truncated": True}

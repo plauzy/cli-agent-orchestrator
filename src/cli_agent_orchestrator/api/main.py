@@ -32,6 +32,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, Field, field_validator
 
+from cli_agent_orchestrator.a2a import (
+    InMemoryTaskEventBus,
+    InMemoryTaskStore,
+    build_a2a_router,
+    build_stream_router,
+)
+from cli_agent_orchestrator.agent_card import start_agent_card_listener
 from cli_agent_orchestrator.backends import TerminalNotFoundError
 from cli_agent_orchestrator.backends.herdr_backend import HerdrBackend
 from cli_agent_orchestrator.backends.registry import get_backend
@@ -41,13 +48,6 @@ from cli_agent_orchestrator.clients.database import (
     get_terminal_metadata,
     init_db,
 )
-from cli_agent_orchestrator.a2a import (
-    InMemoryTaskEventBus,
-    InMemoryTaskStore,
-    build_a2a_router,
-    build_stream_router,
-)
-from cli_agent_orchestrator.agent_card import start_agent_card_listener
 from cli_agent_orchestrator.constants import (
     AGENT_CARD_KEY_DIR,
     AGENT_CARD_PORT,
@@ -67,7 +67,6 @@ from cli_agent_orchestrator.constants import (
     WS_ALLOWED_CLIENTS,
     add_local_cors_origins,
 )
-from cli_agent_orchestrator.telemetry import init_telemetry, shutdown_telemetry
 from cli_agent_orchestrator.ext_apps import mount_widget_static
 from cli_agent_orchestrator.models.flow import Flow
 from cli_agent_orchestrator.models.inbox import MessageStatus, OrchestrationType
@@ -111,6 +110,7 @@ from cli_agent_orchestrator.services.install_service import InstallResult, insta
 from cli_agent_orchestrator.services.log_writer import log_writer
 from cli_agent_orchestrator.services.status_monitor import status_monitor
 from cli_agent_orchestrator.services.terminal_service import OutputMode, TerminalInputBlockedError
+from cli_agent_orchestrator.telemetry import init_telemetry, shutdown_telemetry
 from cli_agent_orchestrator.utils.agent_profiles import load_agent_profile, resolve_provider
 from cli_agent_orchestrator.utils.logging import setup_logging
 from cli_agent_orchestrator.utils.skills import (

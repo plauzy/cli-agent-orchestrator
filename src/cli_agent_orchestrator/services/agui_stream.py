@@ -87,12 +87,12 @@ AGUI_RAW = "RAW"
 # untrusted CLI agent drive UI without an iframe sandbox.
 GENERATIVE_UI_COMPONENTS = frozenset(
     {
-        "approval_card",   # a request the operator can approve/reject (handoff, destructive op)
-        "choice_prompt",   # a bounded multiple-choice question from an agent
-        "diff_summary",    # a compact file-change summary (paths + +/- counts; no bodies)
-        "progress",        # a determinate/indeterminate progress indicator for a long step
-        "metric",          # a single labelled metric (tokens, latency, cost)
-        "agent_card",      # a compact agent identity/status card
+        "approval_card",  # a request the operator can approve/reject (handoff, destructive op)
+        "choice_prompt",  # a bounded multiple-choice question from an agent
+        "diff_summary",  # a compact file-change summary (paths + +/- counts; no bodies)
+        "progress",  # a determinate/indeterminate progress indicator for a long step
+        "metric",  # a single labelled metric (tokens, latency, cost)
+        "agent_card",  # a compact agent identity/status card
     }
 )
 
@@ -131,9 +131,7 @@ def _from_primitive(event: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
 
     if kind == "launch":
         if is_session or event_type == "post_create_session":
-            data.update(
-                thread_id=event.get("session_name"), run_id=event.get("session_name")
-            )
+            data.update(thread_id=event.get("session_name"), run_id=event.get("session_name"))
             return AGUI_RUN_STARTED, data
         data.update(
             step_id=event.get("terminal_id"),
@@ -267,9 +265,7 @@ def _extract_ui_intent(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _from_generative_ui(
-    event: Dict[str, Any], ui: Dict[str, Any]
-) -> Tuple[str, Dict[str, Any]]:
+def _from_generative_ui(event: Dict[str, Any], ui: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     """Map an agent-authored UI intent to a safe AG-UI GENERATIVE_UI frame.
 
     Safety is the whole point (see GENERATIVE_UI_COMPONENTS): only an
