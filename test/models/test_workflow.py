@@ -2,7 +2,7 @@
 
 Covers WorkflowSpec.validate_grammar aggregation (BR-1/BR-4/BR-5/BR-6/BR-7) and
 the non-raising validate_only service surface (FR-1.3), including the
-reserved-construct honesty invariant (BR-3) that guards the cross-Bolt
+reserved-construct honesty invariant (BR-3) that guards the cross-version
 WORKFLOW_SHIPPED_UNITS flag flip.
 """
 
@@ -238,7 +238,7 @@ steps:
 
     def test_loop_with_all_three_guards_no_guard_error(self):
         """All three guards present -> not a guard error (still pass_reserved
-        because loop execution is N8, not shipped in Bolt 1)."""
+        because loop execution is N8, not shipped in the grammar layer)."""
         result = validate_only("""\
 name: wf
 steps:
@@ -293,14 +293,14 @@ steps:
         assert any("not built yet" in n for n in result.reserved_notes)
 
     def test_sequential_only_passes_not_reserved(self):
-        """Guards the cross-Bolt flag flip: a sequential-only spec is `pass`,
+        """Guards the cross-version flag flip: a sequential-only spec is `pass`,
         NOT `pass_reserved`."""
         result = validate_only(_SEQ_YAML)
         assert result.status == "pass"
         assert result.reserved_notes == []
 
     def test_is_reserved_for_known_and_unknown_constructs(self):
-        # In Bolt 1, WORKFLOW_SHIPPED_UNITS is empty -> all mapped constructs reserved.
+        # Initially, WORKFLOW_SHIPPED_UNITS is empty -> all mapped constructs reserved.
         assert is_reserved("parallel") is True
         assert is_reserved("loop") is True
         assert is_reserved("when") is True
@@ -401,13 +401,13 @@ class TestSizeCaps:
 class TestNotBuiltYetError:
     def test_defined_but_not_raised_in_bolt1(self):
         """N1 only DEFINES NotBuiltYetError; the engine (N5) raises it. Confirm
-        it exists and is an Exception subclass — nothing in Bolt 1 raises it."""
+        it exists and is an Exception subclass — nothing in the grammar layer raises it."""
         assert issubclass(NotBuiltYetError, Exception)
 
 
-class TestBolt3AdditiveModelChanges:
-    """B3-BR-3/B3-BR-12/B3-BR-13: the retries field + CANCELLED enum are additive
-    and regression-safe — a spec without retries behaves exactly as before."""
+class TestAdditiveModelChanges:
+    """The retries field + CANCELLED enum are additive and regression-safe —
+    a spec without retries behaves exactly as before."""
 
     def test_spec_without_retries_unchanged(self):
         """A spec that omits ``retries`` parses exactly as before (retries None)."""

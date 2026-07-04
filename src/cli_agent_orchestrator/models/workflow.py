@@ -1,9 +1,10 @@
 """Workflow spec domain model + grammar validation (issue #312, unit N1).
 
 This module defines the native multi-agent workflow object: a trusted-author
-YAML spec describing a DAG of agent steps. Bolt 1 ships only the *grammar* —
-the Pydantic model, the aggregating ``validate_grammar`` model-validator, and
-the non-raising ``validate_only`` service surface. It NEVER executes a spec.
+YAML spec describing a DAG of agent steps. This initial version ships only the
+*grammar* — the Pydantic model, the aggregating ``validate_grammar``
+model-validator, and the non-raising ``validate_only`` service surface. It
+NEVER executes a spec.
 
 Key invariants (see functional-design/business-rules.md):
 - BR-1: spec name + every step id match ``WORKFLOW_NAME_RE``; step ids unique.
@@ -19,8 +20,9 @@ Key invariants (see functional-design/business-rules.md):
   fail-on-first); ``validate_only`` NEVER raises — it returns a
   ``ValidationResult``.
 
-``NotBuiltYetError`` is *defined* here but RAISED only by the run engine (N5,
-Bolt 3) when sequencing reaches a reserved construct. Bolt 1 never raises it.
+``NotBuiltYetError`` is *defined* here but RAISED only by the run engine (not
+yet built) when sequencing reaches a reserved construct. The grammar layer
+never raises it.
 """
 
 from __future__ import annotations
@@ -74,8 +76,8 @@ _NAME_RE = re.compile(WORKFLOW_NAME_RE)
 # execution. A construct is "reserved" iff its implementing unit is not in
 # WORKFLOW_SHIPPED_UNITS. ``sequential`` is the one executable mode (from N5);
 # it has no entry here because it never tags reserved (its absence => shipped
-# by definition once N5 lands; in Bolt 1 nothing executes, but a sequential-only
-# spec is the canonical "pass" case per the Bolt-1 flag-flip test).
+# by definition once N5 lands; nothing executes yet, but a sequential-only
+# spec is the canonical "pass" case per the flag-flip test).
 TIER_REGISTRY: Dict[str, str] = {
     "parallel": "N7",
     "pipeline": "N7",
@@ -119,8 +121,9 @@ class NotBuiltYetError(Exception):
     """Raised by the run engine (N5+) when sequencing reaches a reserved
     construct whose implementing unit has not shipped.
 
-    DEFINED in Bolt 1 (N1) so the vocabulary exists; NEVER raised here. Bolt 1
-    only validates-and-stores reserved constructs; it never executes a spec.
+    DEFINED at the grammar layer (N1) so the vocabulary exists; NEVER raised
+    here. The grammar layer only validates-and-stores reserved constructs; it
+    never executes a spec.
     """
 
 
@@ -143,8 +146,8 @@ class InputDecl(BaseModel):
 class WorkflowStep(BaseModel):
     """A single agent step in a workflow DAG.
 
-    Reserved fields (``when`` and the loop fields) validate structurally in
-    Bolt 1 but never execute; the engine (N5/N8) animates them later.
+    Reserved fields (``when`` and the loop fields) validate structurally at
+    the grammar layer but never execute; the engine (N5/N8) animates them later.
     """
 
     id: str

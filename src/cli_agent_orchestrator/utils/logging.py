@@ -1,4 +1,5 @@
 import logging
+import sys
 from datetime import datetime
 
 from cli_agent_orchestrator.constants import LOG_DIR
@@ -14,10 +15,19 @@ def setup_logging() -> None:
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     log_file = LOG_DIR / f"cao_{timestamp}.log"
 
+    fmt = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+    # Stream handler: WARNING+ always goes to stderr so operationally-relevant
+    # events surface on the console (and in a subprocess's captured stdout/stderr,
+    # which the e2e harness asserts on) rather than being buried in the log file.
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setLevel(logging.WARNING)
+    stderr_handler.setFormatter(logging.Formatter(fmt))
+
     logging.basicConfig(
         level=log_level,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[logging.FileHandler(log_file)],
+        format=fmt,
+        handlers=[logging.FileHandler(log_file), stderr_handler],
     )
 
     print(f"Server logs: {log_file}")

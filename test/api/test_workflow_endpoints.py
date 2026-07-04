@@ -1,4 +1,4 @@
-"""Tests for the Bolt-2 workflow endpoints (issue #312, N2 + N4).
+"""Tests for the v2 workflow endpoints (issue #312, N2 + N4).
 
 Covers the four lifecycle endpoints (validate / list / get / delete) and the
 structured-return output endpoint: 400/404 mapping, and the load-bearing rule
@@ -82,7 +82,7 @@ class TestValidateEndpoint:
     def test_non_string_yaml_key_returns_fail_not_500(self, client, spec_dir):
         """A parseable spec with a non-string mapping key (``1: foo``) is a clean
         200 + status=fail — never an unhandled 500 from a leaked ``TypeError``
-        (regression for the PR #320 never-raise finding, re-checked on Bolt 2)."""
+        (regression for the PR #320 never-raise finding, re-checked on v2)."""
         path = _write(spec_dir, "intkey", "1: foo\nname: intkey\nsteps: []\n")
         resp = client.post("/workflows/validate", json={"path": str(path)})
         assert resp.status_code == 200

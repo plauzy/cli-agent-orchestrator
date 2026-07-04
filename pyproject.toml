@@ -45,6 +45,15 @@ dependencies = [
     # verification and provides `jwt.PyJWKClient`. See spec task 9.1 research note.
     "pyjwt[crypto]>=2.8.0",
     "jsonschema>=4.25",
+    # Ported net-new subsystems (fork plauzy/cao):
+    # OpenTelemetry GenAI telemetry (telemetry/, observability/span_consumer).
+    "opentelemetry-api>=1.27.0",
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.27.0",
+    # A2A JSON-RPC + signed Agent Card OAuth PRM (a2a/, agent_card/).
+    "authlib>=1.7.1",
+    # multipart form parsing for the A2A/agent-card listener endpoints.
+    "python-multipart>=0.0.27",
 ]
 
 [project.scripts]
@@ -107,7 +116,7 @@ profile = "black"
 line_length = 100
 
 [tool.mypy]
-python_version = "2.1.1"
+python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true

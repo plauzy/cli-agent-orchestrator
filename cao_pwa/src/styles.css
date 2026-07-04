@@ -1,0 +1,252 @@
+:root {
+  color-scheme: light dark;
+  --bg: light-dark(#ffffff, #111418);
+  --fg: light-dark(#1c1f26, #e7e9ec);
+  --muted: light-dark(#5a6170, #8a93a3);
+  --border: light-dark(#e2e5ea, #2a2f3a);
+  --row-hover: light-dark(#f4f6fa, #1a1f2a);
+  --accent: light-dark(#0a66c2, #4dabf7);
+  --status-ok: light-dark(#2a8c4a, #51cf66);
+  --status-err: light-dark(#c03333, #ff6b6b);
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  min-height: 100vh;
+}
+
+.cao-pwa-root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.cao-pwa-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.cao-pwa-header h1 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.cao-pwa-nav {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.cao-pwa-nav button {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cao-pwa-nav button.active {
+  background: var(--row-hover);
+  border-color: var(--accent);
+}
+
+.cao-pwa-remove {
+  font-size: 14px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.cao-pwa-remove:hover {
+  color: var(--status-err);
+}
+
+.cao-pwa-empty {
+  color: var(--muted);
+  font-style: italic;
+  font-size: 13px;
+}
+
+.cao-pwa-dialog {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  padding: 16px;
+  border-radius: 6px;
+  min-width: 360px;
+  font-size: 13px;
+}
+
+.cao-pwa-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.cao-pwa-dialog h2 {
+  font-size: 15px;
+  margin: 0 0 12px 0;
+}
+
+.cao-pwa-dialog label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.cao-pwa-dialog input {
+  font-size: 13px;
+  padding: 6px 8px;
+  background: var(--row-hover);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  box-sizing: border-box;
+}
+
+.cao-pwa-error {
+  color: var(--status-err);
+  font-size: 12px;
+  margin: 8px 0;
+}
+
+.cao-pwa-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.cao-pwa-actions button {
+  font-size: 12px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.cao-pwa-actions button[type="submit"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.cao-pwa-tab header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.cao-pwa-tab h2 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.cao-pwa-tab code {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.cao-pwa-status {
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.cao-pwa-status.open {
+  color: var(--status-ok);
+}
+
+.cao-pwa-status.error {
+  color: var(--status-err);
+}
+
+.cao-pwa-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.cao-pwa-grid article {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 12px;
+}
+
+.cao-pwa-grid article h3 {
+  font-size: 13px;
+  margin: 0 0 8px 0;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+
+.cao-pwa-grid ul,
+.cao-pwa-grid ol {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 12px;
+}
+
+.cao-pwa-grid li {
+  padding: 4px 0;
+}
+
+.cao-pwa-terminal.terminated {
+  color: var(--muted);
+}
+
+.cao-pwa-provider {
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: 8px;
+}
+
+.cao-pwa-status-pill {
+  font-size: 10px;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.cao-pwa-events {
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  font-size: 11px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.cao-pwa-events li {
+  padding: 2px 4px;
+  border-left: 2px solid var(--border);
+}

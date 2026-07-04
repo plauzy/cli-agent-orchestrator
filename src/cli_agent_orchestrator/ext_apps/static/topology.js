@@ -1,6 +1,6 @@
-// Phase 1 / commit 7: minimal SSE-driven topology event log.
+// Minimal SSE-driven topology event log.
 // Subscribes to /events on the same origin and renders each event as a
-// list item. Future commits replace this with a real fleet visualisation.
+// list item. A richer fleet visualisation can replace this later.
 (function () {
   "use strict";
 
