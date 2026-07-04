@@ -58,8 +58,21 @@ The flagship AG-UI surface is now wired:
 
 - **`services/agui_stream.py` re-based** onto upstream's six-primitive vocabulary. `to_agui_event()` now maps by the normalized `kind` (`launch`/`handoff`/`a2a_delegation`/`file_mod`/`completion`/`error`/`other`) to AG-UI typed events (`RUN_STARTED`, `STEP_STARTED`/`FINISHED`, `RUN_FINISHED`/`ERROR`, `TEXT_MESSAGE_CONTENT`, `TOOL_CALL_START`, `STATE_DELTA`, `RAW`). The fork's original dotted-name mapping is retained as a non-breaking, shape-dispatched fallback.
 - **`GET /agui/v1/stream` mounted in `api/main.py`**, mirroring `/events`: same `SseBus` source (fed by `EventLogPublisher`), same default-off `_require_mcp_apps_enabled()` gate and `require_any_scope(read/write/admin)` auth. Emits *named* AG-UI SSE frames (`event: <TYPE>` + `data: <json>`). Message bodies never cross the wire (metadata-only source + redacting mapping).
-- **Verified:** 22 mapping tests pass (12 legacy + 10 re-based primitive, incl. privacy assertions); `/agui/v1/stream` is mounted and returns the identical gate/auth status as `/events` under a TestClient; upstream core still imports.
-- **Still deferred (state channel):** real `STATE_SNAPSHOT`/`STATE_DELTA` RFC-6902 patches should be sourced from `services/ui_state_service.py`; `file_mod` currently emits an empty `delta`.
+- **Verified:** mapping tests pass (12 legacy + 10 re-based primitive, incl. privacy assertions); `/agui/v1/stream` is mounted and returns the identical gate/auth status as `/events` under a TestClient; upstream core still imports.
+
+### 1.5 AG-UI shared-state channel — STATE_SNAPSHOT + STATE_DELTA (applied)
+
+The state channel deferred in §1.4 is now wired:
+
+- **`agui_stream.py`**: added pure, unit-tested frame helpers `state_snapshot_frame(snapshot)` and `state_delta_frame(prev, curr)` that wrap upstream's authoritative `ui_state_service.build_dashboard_snapshot` / `diff_snapshot` (RFC-6902) in AG-UI envelopes. `state_delta_frame` returns `None` for a no-op tick.
+- **`/agui/v1/stream`**: emits a full `STATE_SNAPSHOT` on connect (fleet sessions + terminals + granted scopes), then a minimal RFC-6902 `STATE_DELTA` after each fleet event when the snapshot moved. Fetching is failure-isolated (empty snapshot on backend hiccup). Per-event recompute is flagged for a debounce/cache follow-up (this is the opt-in dashboard surface, not the orchestration hot path).
+- **Verified:** 3 new state-channel unit tests (snapshot framing, no-op delta, RFC-6902 ops on change); 25 mapping-file tests pass total.
+
+### 1.6 A2A / Agent Card listener + OpenTelemetry lifespan (applied)
+
+- **Constants** added: `OTEL_SERVICE_NAME` (`"cao"`), `AGENT_CARD_PORT` (env `CAO_AGENT_CARD_PORT`, default `9890`), `AGENT_CARD_KEY_DIR`.
+- **`api/main.py` lifespan**: `init_telemetry()` at startup / `shutdown_telemetry()` at shutdown (opt-in — no-op unless `OTEL_SDK_DISABLED=false`; failure-isolated). The dedicated read-only **Agent Card / A2A listener** starts on `:9890` before `yield` and stops on shutdown. Gated by `CAO_AGENT_CARD_DISABLED` (skip listener) and `CAO_A2A_DISABLED` (skip A2A routers, still publish the card). Agent-card metadata is sourced via `settings_service.get_agent_card_metadata` if present, else `ConfigService`, else `{}`.
+- **Verified:** full lifespan **startup + shutdown boots cleanly both with the listener disabled AND enabled** (real `:9890` bind + A2A router mount + teardown) under a TestClient; telemetry init/shutdown no-op; 105 a2a/agent_card/telemetry/mapping tests pass, zero regressions.
 
 ---
 
@@ -79,8 +92,8 @@ The flagship AG-UI surface is now wired:
 
 These require editing upstream's **diverged, hard-to-unit-verify** core files and are best reviewed as focused follow-ups. None blocks the subsystem code from importing/testing.
 
-1. ~~**AG-UI server endpoint (`GET /agui/v1/stream`).**~~ **✅ APPLIED** — `agui_stream.to_agui_event()` re-based onto the six `event_primitives` and `GET /agui/v1/stream` wired into `api/main.py` alongside `/events`. See §1.4. Remaining sub-item: source real `STATE_SNAPSHOT`/`STATE_DELTA` RFC-6902 patches from `ui_state_service` (currently `file_mod` emits an empty delta).
-2. **A2A / Agent Card listener + telemetry lifespan.** The fork starts `start_agent_card_listener`, `init_telemetry`/`shutdown_telemetry`, the observability span consumer, and `BudgetService` in the app lifespan (`api/main.py` lines ~318–352 in the fork). Transplant into upstream's lifespan.
+1. ~~**AG-UI server endpoint (`GET /agui/v1/stream`).**~~ **✅ APPLIED** — re-based onto the six `event_primitives`, wired into `api/main.py`, **plus** the shared-state channel (`STATE_SNAPSHOT`/`STATE_DELTA` from `ui_state_service`). See §1.4–1.5.
+2. ~~**A2A / Agent Card listener + telemetry lifespan.**~~ **✅ APPLIED** — `init_telemetry`/`shutdown_telemetry` + the `:9890` Agent Card / A2A listener wired into upstream's lifespan (gated, failure-isolated). See §1.6. Still deferred from the fork's fuller lifespan: the **observability span consumer**, **three-layer cache**, **WAL replay**, and **BudgetService** startup blocks (each is independently gated in the fork and can be ported the same way).
 3. **ASI kill-switch + cache-stats endpoints** (`/asi/kill-switch`, `/asi/kill-switch/clear`, `/cache/stats`) and **terminal signal endpoints** (`/terminals/{id}/interrupt|pause|resume`, which emit the newly-added `PostInterrupt/Pause/Resume` events). Additive `@app` handlers.
 4. **Persistence WAL + Refinery DB rewiring.** `test/persistence/*` and `test/refinery/test_sync_submit.py` expect `clients/database.py` mutations to route through the WAL queue. Upstream's `database.py` diverged (the `flow`→`schedule`/`workflow` rename, #378), so the method set differs (`create_flow` etc.). Rewire against upstream's current DB API. WAL runs in shadow mode, so this is non-blocking.
 5. **CLI subcommand wiring.** Register `doctor`, `register`, `zellij` commands in `cli/main.py`.

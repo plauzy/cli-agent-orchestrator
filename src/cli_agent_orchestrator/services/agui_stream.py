@@ -54,7 +54,9 @@ a follow-up (see docs/PORT-NOTES-fork-net-new-2026-07-04.md).
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+from cli_agent_orchestrator.services.ui_state_service import diff_snapshot
 
 # AG-UI typed-event names. Pinned at the v1 spec families — when AG-UI evolves,
 # the mapping is the one-file change.
@@ -241,6 +243,39 @@ def to_agui_event(event: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     return _from_legacy(event)
 
 
+# ---------------------------------------------------------------------------
+# Shared-state channel (AG-UI STATE_SNAPSHOT / STATE_DELTA)
+# ---------------------------------------------------------------------------
+#
+# AG-UI's shared-state feature lets a client hold a live projection of the
+# agent/fleet state and keep it current via minimal RFC-6902 patches. CAO's
+# authoritative projection + diff already exist as pure functions in
+# ``services/ui_state_service.py`` (``build_dashboard_snapshot`` /
+# ``diff_snapshot``); these two frames wrap them in AG-UI SSE envelopes so the
+# ``/agui/v1/stream`` endpoint can emit a full ``STATE_SNAPSHOT`` on connect and
+# incremental ``STATE_DELTA`` patches as the fleet changes. Keeping the framing
+# here (not in the endpoint) keeps it pure and unit-testable.
+
+
+def state_snapshot_frame(snapshot: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """Wrap a ``DashboardSnapshot`` as an AG-UI ``STATE_SNAPSHOT`` frame."""
+    return AGUI_STATE_SNAPSHOT, {"snapshot": snapshot}
+
+
+def state_delta_frame(
+    prev: Dict[str, Any], curr: Dict[str, Any]
+) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """Wrap the ``prev -> curr`` change as an AG-UI ``STATE_DELTA`` frame.
+
+    Returns ``None`` when the snapshots are equal (no RFC-6902 ops), so the
+    caller emits nothing on the wire for a no-op tick.
+    """
+    ops: List[Dict[str, Any]] = diff_snapshot(prev, curr)
+    if not ops:
+        return None
+    return AGUI_STATE_DELTA, {"delta": ops}
+
+
 __all__ = [
     "AGUI_RAW",
     "AGUI_RUN_ERROR",
@@ -252,5 +287,7 @@ __all__ = [
     "AGUI_STEP_STARTED",
     "AGUI_TEXT_MESSAGE_CONTENT",
     "AGUI_TOOL_CALL_START",
+    "state_delta_frame",
+    "state_snapshot_frame",
     "to_agui_event",
 ]

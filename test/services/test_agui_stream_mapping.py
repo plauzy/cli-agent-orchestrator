@@ -240,3 +240,49 @@ class TestPrimitivePath:
         )
         assert agui_type == AGUI_TEXT_MESSAGE_CONTENT
         assert "SECRET-BODY" not in str(data)
+
+
+# ---------------------------------------------------------------------------
+# Shared-state channel: STATE_SNAPSHOT on connect + STATE_DELTA on change.
+# ---------------------------------------------------------------------------
+
+from cli_agent_orchestrator.services.agui_stream import (  # noqa: E402
+    AGUI_STATE_SNAPSHOT,
+    state_delta_frame,
+    state_snapshot_frame,
+)
+from cli_agent_orchestrator.services.ui_state_service import (  # noqa: E402
+    build_dashboard_snapshot,
+)
+
+
+class TestStateChannel:
+    def test_snapshot_frame_wraps_dashboard_snapshot(self) -> None:
+        snap = build_dashboard_snapshot(
+            sessions=[{"id": "cao-foo", "name": "cao-foo", "status": "running"}],
+            terminals=[{"id": "t1", "tmux_session": "cao-foo", "provider": "claude_code"}],
+            scopes=["cao:read"],
+        )
+        agui_type, data = state_snapshot_frame(snap)
+        assert agui_type == AGUI_STATE_SNAPSHOT
+        assert data["snapshot"]["counts"] == {"sessions": 1, "terminals": 1}
+        assert data["snapshot"]["scopes"] == ["cao:read"]
+
+    def test_delta_frame_none_when_unchanged(self) -> None:
+        snap = build_dashboard_snapshot(sessions=[], terminals=[], scopes=None)
+        assert state_delta_frame(snap, snap) is None
+
+    def test_delta_frame_emits_rfc6902_ops_on_change(self) -> None:
+        prev = build_dashboard_snapshot(sessions=[], terminals=[], scopes=None)
+        curr = build_dashboard_snapshot(
+            sessions=[{"id": "cao-foo", "name": "cao-foo", "status": "running"}],
+            terminals=[],
+            scopes=None,
+        )
+        frame = state_delta_frame(prev, curr)
+        assert frame is not None
+        agui_type, data = frame
+        assert agui_type == AGUI_STATE_DELTA
+        # A JSON-Patch op list that moves prev -> curr (sessions + counts changed).
+        assert isinstance(data["delta"], list) and data["delta"]
+        assert all("op" in op and "path" in op for op in data["delta"])

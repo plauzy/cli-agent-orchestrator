@@ -41,7 +41,16 @@ from cli_agent_orchestrator.clients.database import (
     get_terminal_metadata,
     init_db,
 )
+from cli_agent_orchestrator.a2a import (
+    InMemoryTaskEventBus,
+    InMemoryTaskStore,
+    build_a2a_router,
+    build_stream_router,
+)
+from cli_agent_orchestrator.agent_card import start_agent_card_listener
 from cli_agent_orchestrator.constants import (
+    AGENT_CARD_KEY_DIR,
+    AGENT_CARD_PORT,
     ALLOWED_HOSTS,
     API_BASE_URL,
     CAO_HOME_DIR,
@@ -49,6 +58,7 @@ from cli_agent_orchestrator.constants import (
     DEFAULT_PROVIDER,
     INBOX_POLLING_INTERVAL,
     INBOX_RECONCILE_INTERVAL,
+    OTEL_SERVICE_NAME,
     SERVER_HOST,
     SERVER_PORT,
     SERVER_VERSION,
@@ -57,6 +67,7 @@ from cli_agent_orchestrator.constants import (
     WS_ALLOWED_CLIENTS,
     add_local_cors_origins,
 )
+from cli_agent_orchestrator.telemetry import init_telemetry, shutdown_telemetry
 from cli_agent_orchestrator.ext_apps import mount_widget_static
 from cli_agent_orchestrator.models.flow import Flow
 from cli_agent_orchestrator.models.inbox import MessageStatus, OrchestrationType
@@ -321,6 +332,12 @@ async def lifespan(app: FastAPI):
     """Application lifespan events."""
     logger.info("Starting CLI Agent Orchestrator server...")
     setup_logging()
+    # OpenTelemetry (ported): opt-in — no-op unless OTEL_SDK_DISABLED=false.
+    # Safe to call unconditionally; failure-isolated so it never blocks boot.
+    try:
+        init_telemetry(OTEL_SERVICE_NAME)
+    except Exception:
+        logger.warning("OTel telemetry init failed; continuing", exc_info=True)
     init_db()
     registry = PluginRegistry()
     await registry.load()
@@ -370,7 +387,71 @@ async def lifespan(app: FastAPI):
         herdr_inbox_task = asyncio.create_task(svc.start())
         logger.info("Herdr inbox service started")
 
+    # Agent Card / A2A listener (ported from fork plauzy/cao).
+    #
+    # Starts the dedicated read-only Agent Card listener on its own port
+    # (AGENT_CARD_PORT, default :9890). This listener does NOT inherit
+    # TrustedHostMiddleware — it is intentionally discoverable by external A2A
+    # peers, while the main API stays localhost-only. Failures are logged but
+    # never block startup.
+    #   - CAO_AGENT_CARD_DISABLED=true skips the listener entirely (used by the
+    #     test suite to avoid port conflicts across many lifespan tests).
+    #   - CAO_A2A_DISABLED=true publishes the Agent Card but skips mounting the
+    #     A2A v1.0 JSON-RPC + stream routers on the same listener.
+    agent_card_listener = None
+    if os.environ.get("CAO_AGENT_CARD_DISABLED", "false").lower() != "true":
+        try:
+            from cli_agent_orchestrator.services import settings_service
+
+            def _agent_card_metadata() -> Dict:
+                """Operator-supplied Agent Card metadata (best-effort).
+
+                Prefers a ``get_agent_card_metadata`` on settings_service if the
+                (ported) implementation is present; otherwise falls back to the
+                unified config ``agent_card`` key, then an empty dict (the
+                builder produces a valid default card from an empty mapping).
+                """
+                getter = getattr(settings_service, "get_agent_card_metadata", None)
+                if callable(getter):
+                    try:
+                        return getter() or {}
+                    except Exception:
+                        return {}
+                try:
+                    return ConfigService.get("agent_card", default={}) or {}
+                except Exception:
+                    return {}
+
+            a2a_router = None
+            a2a_stream_router = None
+            if os.environ.get("CAO_A2A_DISABLED", "false").lower() != "true":
+                a2a_store = InMemoryTaskStore()
+                a2a_bus = InMemoryTaskEventBus()
+                a2a_router = build_a2a_router(store=a2a_store, bus=a2a_bus)
+                a2a_stream_router = build_stream_router(store=a2a_store, bus=a2a_bus)
+                app.state.a2a_store = a2a_store
+                app.state.a2a_bus = a2a_bus
+
+            agent_card_listener = await start_agent_card_listener(
+                AGENT_CARD_KEY_DIR,
+                _agent_card_metadata,
+                port=AGENT_CARD_PORT,
+                a2a_router=a2a_router,
+                a2a_stream_router=a2a_stream_router,
+            )
+            logger.info("Agent Card / A2A listener started on :%s", AGENT_CARD_PORT)
+        except Exception:
+            logger.warning("Agent Card listener failed to start; continuing", exc_info=True)
+
     yield
+
+    # Stop Agent Card / A2A listener (best-effort).
+    if agent_card_listener is not None:
+        try:
+            await agent_card_listener.stop()
+            logger.info("Agent Card / A2A listener stopped")
+        except Exception:
+            logger.warning("Error stopping Agent Card listener", exc_info=True)
 
     # Stop herdr inbox service on shutdown
     if herdr_inbox_task is not None:
@@ -415,6 +496,11 @@ async def lifespan(app: FastAPI):
         pass
 
     await registry.teardown()
+    # OpenTelemetry (ported): flush + shut down exporters (no-op when disabled).
+    try:
+        shutdown_telemetry()
+    except Exception:
+        logger.warning("Error shutting down OTel telemetry", exc_info=True)
     logger.info("Shutting down CLI Agent Orchestrator server...")
 
 
@@ -646,13 +732,62 @@ async def agui_stream(
 
     from fastapi.responses import StreamingResponse
 
-    from cli_agent_orchestrator.services.agui_stream import to_agui_event
+    from cli_agent_orchestrator.clients.database import list_terminals_by_session
+    from cli_agent_orchestrator.services import session_service
+    from cli_agent_orchestrator.services.agui_stream import (
+        state_delta_frame,
+        state_snapshot_frame,
+        to_agui_event,
+    )
     from cli_agent_orchestrator.services.sse_bus import get_bus
+    from cli_agent_orchestrator.services.ui_state_service import build_dashboard_snapshot
+
+    def _fleet_snapshot() -> Dict:
+        """Build the current DashboardSnapshot from live session/terminal state.
+
+        Failure-isolated: any backend hiccup yields an empty snapshot rather
+        than tearing down the stream. ``list_sessions`` already returns ``[]``
+        on error, so an unavailable tmux/herdr backend degrades gracefully.
+        """
+        sessions = session_service.list_sessions()
+        terminals: List[Dict] = []
+        for sess in sessions:
+            try:
+                terminals.extend(list_terminals_by_session(sess["id"]))
+            except Exception:
+                logger.debug("agui_stream: terminal listing failed for %s", sess.get("id"))
+        return build_dashboard_snapshot(sessions, terminals, list(_scopes) if _scopes else None)
 
     async def event_generator():
+        # AG-UI shared-state: emit a full STATE_SNAPSHOT on connect so any
+        # client hydrates its projection, then keep it current with minimal
+        # RFC-6902 STATE_DELTA patches after each fleet event.
+        prev_snapshot: Optional[Dict] = None
+        try:
+            prev_snapshot = _fleet_snapshot()
+            agui_type, data = state_snapshot_frame(prev_snapshot)
+            yield f"event: {agui_type}\ndata: {json.dumps(data)}\n\n"
+        except Exception:
+            logger.warning("agui_stream: initial STATE_SNAPSHOT failed", exc_info=True)
+
         async for event in get_bus().subscribe():
             agui_type, data = to_agui_event(event)
             yield f"event: {agui_type}\ndata: {json.dumps(data)}\n\n"
+
+            # Recompute the fleet snapshot and emit a STATE_DELTA when it moved.
+            # NB: this recomputes on every event; for high event rates a debounce
+            # / cache is a natural follow-up (this is the opt-in L2 dashboard
+            # surface, not the orchestration hot path).
+            try:
+                curr = _fleet_snapshot()
+                if prev_snapshot is not None:
+                    delta = state_delta_frame(prev_snapshot, curr)
+                    if delta is not None:
+                        dtype, ddata = delta
+                        yield f"event: {dtype}\ndata: {json.dumps(ddata)}\n\n"
+                prev_snapshot = curr
+            except Exception:
+                logger.warning("agui_stream: STATE_DELTA computation failed", exc_info=True)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
