@@ -286,3 +286,71 @@ class TestStateChannel:
         # A JSON-Patch op list that moves prev -> curr (sessions + counts changed).
         assert isinstance(data["delta"], list) and data["delta"]
         assert all("op" in op and "path" in op for op in data["delta"])
+
+
+# ---------------------------------------------------------------------------
+# Generative UI: agent-authored, allow-listed, safe-by-construction components
+# rendered uniformly across heterogeneous CLI providers.
+# ---------------------------------------------------------------------------
+
+from cli_agent_orchestrator.services.agui_stream import (  # noqa: E402
+    AGUI_GENERATIVE_UI,
+    GENERATIVE_UI_COMPONENTS,
+)
+
+
+class TestGenerativeUI:
+    def test_allow_listed_component_maps_to_generative_ui(self) -> None:
+        agui_type, data = to_agui_event(
+            {
+                "id": "e1",
+                "kind": "other",
+                "terminal_id": "t1",
+                "detail": {
+                    "event_type": "post_agent_ui",
+                    "ui": {
+                        "component": "approval_card",
+                        "props": {"title": "Approve handoff to security?", "risk": "medium"},
+                    },
+                },
+            }
+        )
+        assert agui_type == AGUI_GENERATIVE_UI
+        assert data["component"] == "approval_card"
+        assert data["props"]["title"] == "Approve handoff to security?"
+        assert data["terminal_id"] == "t1"
+
+    def test_top_level_ui_intent_is_honored(self) -> None:
+        agui_type, data = to_agui_event(
+            {"id": "e2", "ui": {"component": "metric", "props": {"label": "tokens/s", "value": 42}}}
+        )
+        assert agui_type == AGUI_GENERATIVE_UI
+        assert data["component"] == "metric"
+
+    def test_unknown_component_is_refused_not_rendered(self) -> None:
+        # An agent asking for an off-list component must NOT become GENERATIVE_UI.
+        agui_type, data = to_agui_event(
+            {"id": "e3", "ui": {"component": "iframe", "props": {"src": "http://evil"}}}
+        )
+        assert agui_type == AGUI_RAW
+        assert data["rejected_component"] == "iframe"
+        assert data["cao_kind"] == "generative_ui"
+
+    def test_every_allow_listed_component_round_trips(self) -> None:
+        for comp in GENERATIVE_UI_COMPONENTS:
+            agui_type, data = to_agui_event({"id": "x", "ui": {"component": comp, "props": {}}})
+            assert agui_type == AGUI_GENERATIVE_UI
+            assert data["component"] == comp
+
+    def test_non_serializable_props_degrade_to_empty(self) -> None:
+        agui_type, data = to_agui_event(
+            {"id": "e4", "ui": {"component": "progress", "props": {"cb": lambda: 1}}}
+        )
+        assert agui_type == AGUI_GENERATIVE_UI
+        assert data["props"] == {}
+
+    def test_oversized_props_are_truncated(self) -> None:
+        big = {"blob": "x" * 20000}
+        agui_type, data = to_agui_event({"id": "e5", "ui": {"component": "diff_summary", "props": big}})
+        assert agui_type == AGUI_GENERATIVE_UI
+        assert data["props"] == {"_truncated": True}

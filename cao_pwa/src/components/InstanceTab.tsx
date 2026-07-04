@@ -1,17 +1,20 @@
 import React, { useEffect, useReducer, useState } from "react";
 import { connectAGUI } from "../api";
 import type { AGUIEvent, CaoInstance, SessionSummary, TerminalSummary } from "../types";
+import { GenerativeUI, type GenerativeUIData } from "./GenerativeUI";
 
 interface State {
   sessions: Map<string, SessionSummary>;
   terminals: Map<string, TerminalSummary>;
   raw: AGUIEvent[];
+  generative: GenerativeUIData[];
 }
 
 const EMPTY: State = {
   sessions: new Map(),
   terminals: new Map(),
   raw: [],
+  generative: [],
 };
 
 function reducer(state: State, event: AGUIEvent): State {
@@ -49,6 +52,16 @@ function reducer(state: State, event: AGUIEvent): State {
       terminals.set(tid, { ...existing, status: "terminated" });
     }
     return { ...state, terminals };
+  }
+  if (event.type === "GENERATIVE_UI") {
+    // Agent-authored UI intent. Keep the last 20 for the live surface.
+    const gen: GenerativeUIData = {
+      component: String(data.component ?? ""),
+      props: (data.props as Record<string, unknown> | undefined) ?? {},
+      terminal_id: (data.terminal_id as string | null | undefined) ?? null,
+      event_id: (data.event_id as string | null | undefined) ?? null,
+    };
+    return { ...state, generative: [...state.generative, gen].slice(-20) };
   }
   if (event.type === "RAW" || event.type === "TEXT_MESSAGE_CONTENT") {
     // Keep last 100 raw / message events for the live ticker.
@@ -118,6 +131,19 @@ export function InstanceTab({ instance }: Props) {
                 </li>
               ))}
             </ul>
+          )}
+        </article>
+
+        <article>
+          <h3>Generative UI ({state.generative.length})</h3>
+          {state.generative.length === 0 ? (
+            <p className="cao-pwa-empty">No agent-authored UI yet.</p>
+          ) : (
+            <div className="cao-pwa-generative">
+              {state.generative.map((g, i) => (
+                <GenerativeUI key={g.event_id ?? i} data={g} />
+              ))}
+            </div>
           )}
         </article>
 

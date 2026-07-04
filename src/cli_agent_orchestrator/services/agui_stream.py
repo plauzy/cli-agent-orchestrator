@@ -54,6 +54,7 @@ a follow-up (see docs/PORT-NOTES-fork-net-new-2026-07-04.md).
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from cli_agent_orchestrator.services.ui_state_service import diff_snapshot
@@ -69,7 +70,35 @@ AGUI_TEXT_MESSAGE_CONTENT = "TEXT_MESSAGE_CONTENT"
 AGUI_TOOL_CALL_START = "TOOL_CALL_START"
 AGUI_STATE_DELTA = "STATE_DELTA"
 AGUI_STATE_SNAPSHOT = "STATE_SNAPSHOT"
+AGUI_GENERATIVE_UI = "GENERATIVE_UI"
 AGUI_RAW = "RAW"
+
+# ---------------------------------------------------------------------------
+# Generative UI — the safety allow-list
+# ---------------------------------------------------------------------------
+#
+# CAO's differentiator: a *heterogeneous* fleet (Claude Code, Q, Kiro, Codex,
+# Gemini, ...) can each author a UI intent, and CAO renders it *uniformly* on
+# one surface. The safety model that makes this shippable — and distinct from
+# MCP Apps' arbitrary-HTML-in-an-iframe approach — is that agents may only emit
+# a *closed vocabulary of named components with JSON props*. There is no HTML,
+# no script, no eval on the wire. An unknown component name is refused (mapped
+# to RAW with a rejection marker) rather than rendered. This is what lets an
+# untrusted CLI agent drive UI without an iframe sandbox.
+GENERATIVE_UI_COMPONENTS = frozenset(
+    {
+        "approval_card",   # a request the operator can approve/reject (handoff, destructive op)
+        "choice_prompt",   # a bounded multiple-choice question from an agent
+        "diff_summary",    # a compact file-change summary (paths + +/- counts; no bodies)
+        "progress",        # a determinate/indeterminate progress indicator for a long step
+        "metric",          # a single labelled metric (tokens, latency, cost)
+        "agent_card",      # a compact agent identity/status card
+    }
+)
+
+# Maximum serialized size of a generative-UI props payload (defense-in-depth
+# against an agent emitting a huge blob onto the fan-out bus).
+_MAX_GENERATIVE_PROPS_BYTES = 8 * 1024
 
 # The closed primitive vocabulary upstream's normalizer emits (see
 # services/event_primitives.py: PRIMITIVES + the "other" sentinel). A record
@@ -225,19 +254,77 @@ def _from_legacy(event: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     }
 
 
+def _extract_ui_intent(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Return the agent-authored UI intent block, if this event carries one.
+
+    A generative-UI intent may ride at the top level (``event["ui"]``) or inside
+    the normalized ``detail`` (``event["detail"]["ui"]``). It must be a mapping
+    with a ``component`` key to be considered a UI intent.
+    """
+    for candidate in (event.get("ui"), (event.get("detail") or {}).get("ui")):
+        if isinstance(candidate, dict) and candidate.get("component"):
+            return candidate
+    return None
+
+
+def _from_generative_ui(
+    event: Dict[str, Any], ui: Dict[str, Any]
+) -> Tuple[str, Dict[str, Any]]:
+    """Map an agent-authored UI intent to a safe AG-UI GENERATIVE_UI frame.
+
+    Safety is the whole point (see GENERATIVE_UI_COMPONENTS): only an
+    allow-listed component name with JSON props is ever emitted. An unknown
+    component is *refused* — routed to RAW with a ``rejected_component`` marker
+    — never rendered. Props are validated to be JSON-serializable and bounded
+    in size; a non-conforming payload is dropped to an empty mapping so a
+    malformed intent degrades to an empty (harmless) component rather than
+    breaking the stream.
+    """
+    detail: Dict[str, Any] = event.get("detail") or {}
+    component = ui.get("component")
+    base = _base(event, detail)
+
+    if component not in GENERATIVE_UI_COMPONENTS:
+        # Refuse: never render an unknown/unsafe component. Preserve the intent
+        # under RAW so a client could log/inspect it, but do not treat it as UI.
+        base.update(cao_kind="generative_ui", rejected_component=component)
+        return AGUI_RAW, base
+
+    props = ui.get("props")
+    if not isinstance(props, dict):
+        props = {}
+    else:
+        try:
+            encoded = json.dumps(props)
+            if len(encoded.encode("utf-8")) > _MAX_GENERATIVE_PROPS_BYTES:
+                props = {"_truncated": True}
+        except (TypeError, ValueError):
+            # Non-serializable props => drop to empty (never crash the stream).
+            props = {}
+
+    base.update(component=component, props=props)
+    return AGUI_GENERATIVE_UI, base
+
+
 def to_agui_event(event: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     """Translate one CAO event record to an AG-UI ``(type, data)`` pair.
 
     Dispatches on shape:
 
+    - **Generative UI first.** If the record carries an agent-authored UI intent
+      (``ui.component``, top-level or in ``detail``), map it to a safe,
+      allow-listed ``GENERATIVE_UI`` frame (unknown components are refused).
     - If the record carries a top-level ``kind`` in the closed six-primitive
       vocabulary (the upstream ``SseBus`` / ``EventLog`` record), it is mapped
-      via the primitive path — this is the normal, re-based path.
+      via the primitive path — the normal, re-based path.
     - Otherwise the record is treated as the legacy dotted-name envelope and
       routed through the legacy mapping (backward compatibility).
 
     Privacy: message bodies are NEVER included in the returned payload.
     """
+    ui = _extract_ui_intent(event)
+    if ui is not None:
+        return _from_generative_ui(event, ui)
     if event.get("kind") in _PRIMITIVE_KINDS:
         return _from_primitive(event)
     return _from_legacy(event)
@@ -284,9 +371,11 @@ __all__ = [
     "AGUI_STATE_DELTA",
     "AGUI_STATE_SNAPSHOT",
     "AGUI_STEP_FINISHED",
+    "AGUI_GENERATIVE_UI",
     "AGUI_STEP_STARTED",
     "AGUI_TEXT_MESSAGE_CONTENT",
     "AGUI_TOOL_CALL_START",
+    "GENERATIVE_UI_COMPONENTS",
     "state_delta_frame",
     "state_snapshot_frame",
     "to_agui_event",
