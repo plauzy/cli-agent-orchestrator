@@ -55,7 +55,7 @@ __all__ = [
     "client_supports_mcp_apps",
     "EXTENSION_ID",
     "SERVER_EXTENSION_CAPABILITY",
-    # commit 7 topology widget
+    # topology widget
     "register_widget",
     "mount_widget_static",
     "WIDGET_HTML_PATH",

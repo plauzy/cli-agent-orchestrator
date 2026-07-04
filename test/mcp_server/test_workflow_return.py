@@ -1,4 +1,4 @@
-"""Tests for the workflow_return MCP tool (issue #312, Bolt 2 / N4).
+"""Tests for the workflow_return MCP tool (issue #312, v2 / N4).
 
 The tool POSTs a structured output to the single-seam output endpoint and
 returns a ReturnAck envelope on EVERY path — it never raises into the agent loop

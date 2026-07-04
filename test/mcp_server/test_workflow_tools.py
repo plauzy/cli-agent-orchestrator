@@ -1,4 +1,4 @@
-"""Tests for the Bolt-3 workflow MCP tools (issue #312, N5).
+"""Tests for the v3 workflow MCP tools (issue #312, N5).
 
 ``workflow_run`` / ``workflow_cancel`` are thin HTTP clients over the run-engine
 endpoints. They return a structured envelope on EVERY path and NEVER raise into

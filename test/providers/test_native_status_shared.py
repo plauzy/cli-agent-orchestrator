@@ -14,8 +14,7 @@ the None fall-through to buffer parsing on the tmux backend.
 
 ``claude_code`` keeps its own detailed suite (``TestClaudeCodeProviderNativeStatus``
 in test_claude_code_unit.py); it is included here for breadth alongside the
-providers that previously had no native-status coverage. ``q_cli`` and
-``gemini_cli`` are out of scope for the herdr backend and excluded.
+providers that previously had no native-status coverage.
 """
 
 import time

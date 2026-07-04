@@ -161,6 +161,16 @@ LOCAL_AGENT_STORE_DIR = CAO_HOME_DIR / "agent-store"
 # Local skill store for installed CAO skills
 SKILLS_DIR = CAO_HOME_DIR / "skills"
 
+# OpenTelemetry service.name for CAO's spans/metrics.
+OTEL_SERVICE_NAME = "cao"
+
+# Dedicated read-only Agent Card / A2A listener.
+# Runs on its own port (default 9890), intentionally discoverable by external
+# A2A peers, separate from the localhost-only main API. Signing keys live under
+# AGENT_CARD_KEY_DIR.
+AGENT_CARD_PORT = int(os.environ.get("CAO_AGENT_CARD_PORT", "9890"))
+AGENT_CARD_KEY_DIR = CAO_HOME_DIR / "agent_card"
+
 # Provider-specific agent directories
 KIRO_AGENTS_DIR = Path(os.environ.get("CAO_AGENTS_DIR", str(Path.home() / ".kiro" / "agents")))
 COPILOT_AGENTS_DIR = Path.home() / ".copilot" / "agents"  # Copilot custom agents
@@ -207,6 +217,9 @@ CORS_ORIGINS = [
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    # cao_pwa dev server (Vite picks 5174 since web/ uses 5173).
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
 ] + _split_env_list("CAO_CORS_ORIGINS")
 
 
@@ -342,9 +355,9 @@ SECURITY_PROMPT = """## SECURITY CONSTRAINTS
 # =============================================================================
 # Workflow Configuration (issue #312)
 # =============================================================================
-# Native multi-agent workflow object. Bolt 1 ships the spec grammar + Pydantic
+# Native multi-agent workflow object. v1 ships the spec grammar + Pydantic
 # model (N1) and the shared run_agent_step substrate (N0). Execution (N5+),
-# fan-out (N7) and loops (N8) are reserved — validated but not run in Bolt 1.
+# fan-out (N7) and loops (N8) are reserved — validated but not run in v1.
 
 # Structural caps for a workflow spec. A spec exceeding any of these fails
 # grammar validation (fail-closed, deterministic).
@@ -354,9 +367,9 @@ WORKFLOW_OUTPUT_SCHEMA_MAX_DEPTH = 8
 WORKFLOW_MAX_INPUTS = 64
 
 # Units (from units-generation) whose constructs are EXECUTABLE in the current
-# Bolt. Empty in Bolt 1: the run engine (N5) is not shipped, so every
+# version. Empty in v1: the run engine (N5) is not shipped, so every
 # non-sequential mode and every loop/conditional construct tags as reserved.
-# Each future Bolt's PR flips its own unit flag here. Reserved-ness is computed
+# Each future version's PR flips its own unit flag here. Reserved-ness is computed
 # solely from TIER_REGISTRY + this set — no env-dependent branching (REL-2/NFR-3).
 WORKFLOW_SHIPPED_UNITS: frozenset[str] = frozenset()
 
@@ -374,17 +387,17 @@ WORKFLOW_NAME_RE = r"^[A-Za-z0-9_-]{1,64}$"
 TERMINALS_RUN_STEP_ROUTE = "/terminals/run-step"
 
 # Default directory scanned for workflow spec YAML files when no --dir is given
-# (Bolt 2, N2). Spec files on disk are the single source of truth; the
+# (v2, N2). Spec files on disk are the single source of truth; the
 # ``workflow_index`` SQLite table is a derived, droppable projection (B2-BR-2).
 WORKFLOW_SPEC_DIR = CAO_HOME_DIR / "workflows"
 
-# Soft cap on the in-memory structured-return store (Bolt 2, N4, ADR-4 / Q1=A).
+# Soft cap on the in-memory structured-return store (v2, N4, ADR-4 / Q1=A).
 # On ``put`` the oldest entry is evicted first when ``len > cap`` — a best-effort,
 # non-blocking eviction that NEVER raises (the store is transient and process-local;
 # the N6 run journal supersedes it). Last-write-wins on the same (run_id, step_id).
 WORKFLOW_OUTPUT_STORE_MAX_ENTRIES = 10000
 
-# Run-engine retry policy (Bolt 3, N5, FR-5.3 / B3-BR-3/B3-BR-4). A step's
+# Run-engine retry policy (v3, N5, FR-5.3 / B3-BR-3/B3-BR-4). A step's
 # run-failure loop (run_agent_step raising StepExecutionError) retries the SAME
 # prompt up to ``WORKFLOW_DEFAULT_STEP_RETRIES`` extra times when the step omits
 # ``retries`` (attempts range 1..N+1). The per-step ``retries`` grammar field, if

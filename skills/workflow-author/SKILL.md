@@ -76,4 +76,4 @@ cao workflow validate ~/.aws/cli-agent-orchestrator/workflows/review-pipeline.ya
 - `invalid` (exit 1) — fix the reported errors and re-validate.
 
 Iterate until the spec validates. The authored artifact is now ready for a human (or,
-in a later Bolt, the run engine) to run.
+in a later version, the run engine) to run.

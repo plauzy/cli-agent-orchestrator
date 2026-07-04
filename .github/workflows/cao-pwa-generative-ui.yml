@@ -1,0 +1,119 @@
+name: CAO PWA — Generative UI proof
+
+# Builds + unit-tests the L2 PWA and produces the generative-UI SCREEN RECORDING
+# that cannot be generated in the restricted build sandbox (the Playwright
+# browser CDN is blocked there). On GitHub-hosted runners the CDN is reachable,
+# so this job downloads chromium, drives the deterministic replay
+# (cao_pwa/demo/generative-ui-replay.html), records video + screenshots, and
+# uploads them as build artifacts attached to the run/PR.
+#
+# See docs/generative-ui-implementation-2026-07-04.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cao_pwa/**"
+      - ".github/workflows/cao-pwa-generative-ui.yml"
+  pull_request:
+    paths:
+      - "cao_pwa/**"
+      - ".github/workflows/cao-pwa-generative-ui.yml"
+  # Allow manual runs so the recording can be regenerated on demand.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generative-ui:
+    name: Build, test & record
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cao_pwa
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: cao_pwa/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Unit + component tests (shift-left)
+        run: npm test
+
+      - name: Build PWA
+        run: npm run build
+
+      # ---- Screen recording (the artifact this workflow exists to produce) ----
+      - name: Install Playwright chromium
+        run: npm run test:e2e:install
+
+      - name: Run Playwright e2e (records video + screenshots)
+        run: npm run test:e2e
+
+      - name: Convert recording to mp4 + gif (best-effort)
+        if: always()
+        run: |
+          set -e
+          shopt -s globstar nullglob
+          mkdir -p recordings
+          found=0
+          for webm in test-results/**/*.webm; do
+            found=1
+            base="recordings/generative-ui"
+            echo "Converting $webm -> $base.mp4 / $base.gif"
+            # ffmpeg is preinstalled on ubuntu-latest runners; don't fail the
+            # job if conversion has an issue — the raw .webm is still uploaded.
+            ffmpeg -y -i "$webm" -movflags +faststart -pix_fmt yuv420p "$base.mp4" || true
+            ffmpeg -y -i "$webm" -vf "fps=8,scale=1000:-1:flags=lanczos" "$base.gif" || true
+            cp "$webm" "$base.webm" || true
+            break
+          done
+          if [ "$found" = "0" ]; then echo "No .webm recording found under test-results/"; fi
+          ls -la recordings || true
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## Generative UI — screen recording"
+            echo ""
+            echo "Deterministic replay of a real \`to_agui_event\`-produced event sequence"
+            echo "across heterogeneous providers (q_cli / claude_code / codex), including the"
+            echo "off-list \`iframe\` refusal."
+            echo ""
+            echo "Download the **generative-ui-recording** and **generative-ui-report** artifacts"
+            echo "below to view the mp4/gif/webm and the full Playwright HTML report + screenshot."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload recording (mp4 / gif / webm)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generative-ui-recording
+          path: |
+            cao_pwa/recordings/**
+            cao_pwa/test-results/**/*.webm
+            cao_pwa/e2e/__screenshots__/**
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generative-ui-report
+          path: cao_pwa/playwright-report/**
+          if-no-files-found: warn
+          retention-days: 30

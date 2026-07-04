@@ -160,3 +160,8 @@ class EventLogPublisher(CaoPlugin):
             event.session_name,
             {"event_type": event.event_type, "session_name": event.session_name},
         )
+
+
+# Backward-compatible alias. Some tests/consumers refer to this class as
+# ``EventLogPublisherPlugin``; keep the old name importable so they resolve it.
+EventLogPublisherPlugin = EventLogPublisher

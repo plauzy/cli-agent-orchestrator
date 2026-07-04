@@ -1,4 +1,4 @@
-"""Tests for the workflow_index migration (issue #312, Bolt 2 / N2).
+"""Tests for the workflow_index migration (issue #312, v2 / N2).
 
 Asserts ``_migrate_workflow_index`` is zero-arg, creates the derived table with
 the agreed columns, and is idempotent (running it twice is a no-op).

@@ -1,0 +1,32 @@
+{
+  "name": "CAO CI Environment",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "biomejs.biome",
+        "ms-python.python",
+        "ms-playwright.playwright"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "biomejs.biome"
+      }
+    }
+  },
+  "postCreateCommand": "bun install && uv sync",
+  "remoteUser": "root",
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached"
+  ],
+  "workspaceFolder": "/workspace",
+  "forwardPorts": [9889],
+  "portsAttributes": {
+    "9889": {
+      "label": "CAO Server",
+      "onAutoForward": "notify"
+    }
+  }
+}
