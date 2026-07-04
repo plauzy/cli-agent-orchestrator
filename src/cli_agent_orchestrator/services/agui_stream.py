@@ -3,64 +3,180 @@
 Sibling RFC: ``docs/rfc/cao-agui-l2-dashboard-2026-05-11-v1.md``.
 
 The L2 standalone dashboard PWA (under ``cao_pwa/``) consumes
-``GET /agui/v1/stream`` as an SSE stream of AG-UI typed events. CAO's
-own event taxonomy (session.created, terminal.created, message.sent,
-terminal.interrupt/pause/resume, etc.) is mapped to the AG-UI protocol's
-typed event names via the pure function in this module.
+``GET /agui/v1/stream`` as an SSE stream of AG-UI typed events.
 
-Map (v1 — 6 of the 16 AG-UI typed events):
+Re-based onto upstream's semantic event vocabulary
+============================================================
+Upstream normalizes every internal lifecycle event to one of six semantic
+primitives (``services/event_primitives.py``) before it hits the ``SseBus`` /
+``EventLog`` ring buffer. The canonical record the bus fans out looks like::
 
-| CAO event             | AG-UI type             |
-|-----------------------|------------------------|
-| session.created       | RUN_STARTED            |
-| session.killed        | RUN_FINISHED           |
-| terminal.created      | STEP_STARTED           |
-| terminal.killed       | STEP_FINISHED          |
-| message.sent          | TEXT_MESSAGE_CONTENT   |
-| terminal.interrupt    | RAW                    |
-| terminal.pause        | RAW                    |
-| terminal.resume       | RAW                    |
-| terminal.interrupted  | RAW                    |
-| terminal.paused       | RAW                    |
-| terminal.resumed      | RAW                    |
-| (any other)           | RAW                    |
+    {"id": "...", "kind": "launch", "terminal_id": "...",
+     "session_name": "...", "timestamp": "...", "detail": {...}}
 
-Privacy boundary: message bodies are NEVER carried on the wire (same
-contract as the SSE bus + rolling event log). TEXT_MESSAGE_CONTENT
-emits an empty ``delta`` field; the PWA renders the metadata only.
+where ``kind`` is one of ``launch | handoff | a2a_delegation | file_mod |
+completion | error`` (or the ``other`` pass-through sentinel). This adapter
+maps that closed primitive vocabulary onto AG-UI typed events. Mapping by the
+*normalized primitive* (rather than raw event-type strings) is the correct L1
+layer: it inherits the privacy boundary and total-ness of ``normalize_kind``,
+and a change to CAO's internal event names never ripples into the AG-UI wire.
+
+Primitive → AG-UI map (L1):
+
+| CAO primitive (kind) | AG-UI type                       | Disambiguation            |
+|----------------------|----------------------------------|---------------------------|
+| launch (session)     | RUN_STARTED                      | terminal_id is None       |
+| launch (terminal)    | STEP_STARTED                     | terminal_id present       |
+| completion (session) | RUN_FINISHED                     | terminal_id is None       |
+| completion (terminal)| STEP_FINISHED                    | terminal_id present       |
+| handoff              | TEXT_MESSAGE_CONTENT (empty delta)| message dispatch          |
+| a2a_delegation       | TOOL_CALL_START                  | cross-agent A2A task       |
+| file_mod             | STATE_DELTA                      | (RFC-6902 patch: see note)|
+| error                | RUN_ERROR                        |                           |
+| other / unknown      | RAW                              | reducer dispatches on kind|
+
+Backward compatibility: a legacy envelope shape ``{"type": "session.created",
+"payload": {...}}`` (the fork's original SSE bus emitted dotted names) is still
+accepted and routed through the legacy mapping, so nothing that emits the old
+shape breaks. The dispatcher picks the primitive path whenever the record
+carries a top-level ``kind`` in the closed vocabulary.
+
+Privacy boundary: message bodies are NEVER carried on the wire (same contract
+as the ``EventLog`` / ``SseBus``, which store metadata only). ``handoff`` emits
+an empty ``delta``; the client renders metadata only.
+
+Note (file_mod → STATE_DELTA): the six-primitive event records do not yet carry
+an RFC-6902 patch body, so ``delta`` is emitted empty and the metadata is passed
+through. The authoritative source of real ``STATE_SNAPSHOT`` / ``STATE_DELTA``
+patches is ``services/ui_state_service.py``; wiring that as the state channel is
+a follow-up (see docs/PORT-NOTES-fork-net-new-2026-07-04.md).
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
-# AG-UI typed-event names. Pinned at the v1 spec version — when AG-UI
-# evolves, the mapping is the one-file change.
+# AG-UI typed-event names. Pinned at the v1 spec families — when AG-UI evolves,
+# the mapping is the one-file change.
 AGUI_RUN_STARTED = "RUN_STARTED"
 AGUI_RUN_FINISHED = "RUN_FINISHED"
+AGUI_RUN_ERROR = "RUN_ERROR"
 AGUI_STEP_STARTED = "STEP_STARTED"
 AGUI_STEP_FINISHED = "STEP_FINISHED"
 AGUI_TEXT_MESSAGE_CONTENT = "TEXT_MESSAGE_CONTENT"
+AGUI_TOOL_CALL_START = "TOOL_CALL_START"
+AGUI_STATE_DELTA = "STATE_DELTA"
+AGUI_STATE_SNAPSHOT = "STATE_SNAPSHOT"
 AGUI_RAW = "RAW"
 
+# The closed primitive vocabulary upstream's normalizer emits (see
+# services/event_primitives.py: PRIMITIVES + the "other" sentinel). A record
+# carrying a top-level ``kind`` in this set is routed through the primitive
+# mapping; anything else falls back to the legacy dotted-name mapping.
+_PRIMITIVE_KINDS = frozenset(
+    {"launch", "handoff", "a2a_delegation", "file_mod", "completion", "error", "other"}
+)
 
-def to_agui_event(cao_event: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
-    """Translate one CAO event envelope to an AG-UI (type, data) pair.
 
-    Args:
-        cao_event: The dict the SSE bus publishes — shape
-            ``{"type": "session.created", "payload": {...}, "traceparent": "..."}``.
+def _base(event: Dict[str, Any], detail: Dict[str, Any]) -> Dict[str, Any]:
+    """Common envelope fields carried on every primitive-path AG-UI event."""
+    return {
+        "event_id": event.get("id"),
+        "terminal_id": event.get("terminal_id"),
+        "session_name": event.get("session_name"),
+        "timestamp": event.get("timestamp"),
+        # traceparent may ride on the record or inside detail (OTel context).
+        "traceparent": event.get("traceparent") or detail.get("traceparent"),
+    }
 
-    Returns:
-        ``(agui_type, data_payload)`` where ``agui_type`` is one of the
-        AGUI_* constants and ``data_payload`` is the JSON-serializable
-        dict carried under ``data:`` on the wire.
 
-    Privacy: message bodies are NEVER included in the payload.
+def _from_primitive(event: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """Map an upstream normalized event record (by ``kind``) to AG-UI."""
+    kind = event.get("kind", "other")
+    detail: Dict[str, Any] = event.get("detail") or {}
+    event_type = detail.get("event_type", "")
+    is_session = event.get("terminal_id") is None
+    data = _base(event, detail)
+
+    if kind == "launch":
+        if is_session or event_type == "post_create_session":
+            data.update(
+                thread_id=event.get("session_name"), run_id=event.get("session_name")
+            )
+            return AGUI_RUN_STARTED, data
+        data.update(
+            step_id=event.get("terminal_id"),
+            step_name=detail.get("agent_name"),
+            provider=detail.get("provider"),
+        )
+        return AGUI_STEP_STARTED, data
+
+    if kind == "completion":
+        if is_session or event_type == "post_kill_session":
+            data.update(
+                thread_id=event.get("session_name"),
+                run_id=event.get("session_name"),
+                status="terminated",
+            )
+            return AGUI_RUN_FINISHED, data
+        data.update(step_id=event.get("terminal_id"), step_name=detail.get("agent_name"))
+        return AGUI_STEP_FINISHED, data
+
+    if kind == "handoff":
+        # Message dispatch between agents. Body is intentionally redacted — the
+        # detail is metadata-only (routing) by the EventLogPublisher contract.
+        data.update(
+            message_id=detail.get("receiver"),
+            role="assistant",
+            delta="",
+            metadata={
+                "sender": detail.get("sender"),
+                "receiver": detail.get("receiver"),
+                "orchestration_type": detail.get("orchestration_type"),
+            },
+        )
+        return AGUI_TEXT_MESSAGE_CONTENT, data
+
+    if kind == "a2a_delegation":
+        data.update(
+            tool_call_id=event.get("id"),
+            tool_call_name="a2a_delegation",
+            metadata={
+                "sender": detail.get("sender"),
+                "receiver": detail.get("receiver"),
+                "orchestration_type": detail.get("orchestration_type"),
+            },
+        )
+        return AGUI_TOOL_CALL_START, data
+
+    if kind == "file_mod":
+        # No RFC-6902 patch body on the primitive record yet — emit an empty
+        # delta and pass metadata through. See module docstring note.
+        data.update(delta=[], metadata=detail)
+        return AGUI_STATE_DELTA, data
+
+    if kind == "error":
+        data.update(
+            message=detail.get("event_type", "error"),
+            metadata={k: v for k, v in detail.items() if k != "message"},
+        )
+        return AGUI_RUN_ERROR, data
+
+    # "other" and any unmapped kind: RAW preserves original semantics so the
+    # client reducer can dispatch on cao_kind / cao_type.
+    data.update(cao_kind=kind, cao_type=event_type, detail=detail)
+    return AGUI_RAW, data
+
+
+def _from_legacy(event: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """Legacy mapping for the fork's original dotted-name envelope shape.
+
+    Kept for backward compatibility with any producer emitting
+    ``{"type": "session.created", "payload": {...}, "traceparent": "..."}``.
     """
-    event_type = cao_event.get("type", "")
-    payload = cao_event.get("payload") or {}
-    traceparent = cao_event.get("traceparent")
+    event_type = event.get("type", "")
+    payload = event.get("payload") or {}
+    traceparent = event.get("traceparent")
 
     if event_type == "session.created":
         return AGUI_RUN_STARTED, {
@@ -68,7 +184,6 @@ def to_agui_event(cao_event: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
             "run_id": payload.get("session_name"),
             "traceparent": traceparent,
         }
-
     if event_type == "session.killed":
         return AGUI_RUN_FINISHED, {
             "thread_id": payload.get("session_name"),
@@ -76,7 +191,6 @@ def to_agui_event(cao_event: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
             "status": "terminated",
             "traceparent": traceparent,
         }
-
     if event_type == "terminal.created":
         return AGUI_STEP_STARTED, {
             "step_id": payload.get("terminal_id"),
@@ -84,18 +198,13 @@ def to_agui_event(cao_event: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
             "provider": payload.get("provider"),
             "traceparent": traceparent,
         }
-
     if event_type == "terminal.killed":
         return AGUI_STEP_FINISHED, {
             "step_id": payload.get("terminal_id"),
             "step_name": payload.get("agent_name"),
             "traceparent": traceparent,
         }
-
     if event_type == "message.sent":
-        # Body is intentionally redacted — matches the WAL / SSE-bus
-        # privacy boundary. The PWA renders the metadata; it never
-        # sees the message text.
         return AGUI_TEXT_MESSAGE_CONTENT, {
             "message_id": payload.get("receiver"),
             "role": "assistant",
@@ -107,11 +216,6 @@ def to_agui_event(cao_event: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
             },
             "traceparent": traceparent,
         }
-
-    # Everything else (terminal.interrupt/pause/resume, ASI mitigations,
-    # plugin-defined events) falls through to RAW. The PWA's reducer
-    # dispatches on the ``cao_type`` field so the original semantics
-    # survive the wire.
     return AGUI_RAW, {
         "cao_type": event_type,
         "payload": payload,
@@ -119,12 +223,34 @@ def to_agui_event(cao_event: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     }
 
 
+def to_agui_event(event: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """Translate one CAO event record to an AG-UI ``(type, data)`` pair.
+
+    Dispatches on shape:
+
+    - If the record carries a top-level ``kind`` in the closed six-primitive
+      vocabulary (the upstream ``SseBus`` / ``EventLog`` record), it is mapped
+      via the primitive path — this is the normal, re-based path.
+    - Otherwise the record is treated as the legacy dotted-name envelope and
+      routed through the legacy mapping (backward compatibility).
+
+    Privacy: message bodies are NEVER included in the returned payload.
+    """
+    if event.get("kind") in _PRIMITIVE_KINDS:
+        return _from_primitive(event)
+    return _from_legacy(event)
+
+
 __all__ = [
     "AGUI_RAW",
+    "AGUI_RUN_ERROR",
     "AGUI_RUN_FINISHED",
     "AGUI_RUN_STARTED",
+    "AGUI_STATE_DELTA",
+    "AGUI_STATE_SNAPSHOT",
     "AGUI_STEP_FINISHED",
     "AGUI_STEP_STARTED",
     "AGUI_TEXT_MESSAGE_CONTENT",
+    "AGUI_TOOL_CALL_START",
     "to_agui_event",
 ]

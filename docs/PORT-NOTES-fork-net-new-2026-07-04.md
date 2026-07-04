@@ -52,6 +52,15 @@ All import cleanly against upstream's core; **52/52 ported modules import**, and
 - **Unit tests: 547 passing** across `a2a`, `acp`, `agent_card`, `cache`, `observability`, `orchestration` (206), `telemetry`, `refinery`, `services/agui_stream`, and the 3 new provider unit suites.
 - OTel exporter warnings to `localhost:4317` during tests are environmental (no collector in sandbox), not failures.
 
+### 1.4 AG-UI endpoint re-based onto `event_primitives` (follow-up, applied)
+
+The flagship AG-UI surface is now wired:
+
+- **`services/agui_stream.py` re-based** onto upstream's six-primitive vocabulary. `to_agui_event()` now maps by the normalized `kind` (`launch`/`handoff`/`a2a_delegation`/`file_mod`/`completion`/`error`/`other`) to AG-UI typed events (`RUN_STARTED`, `STEP_STARTED`/`FINISHED`, `RUN_FINISHED`/`ERROR`, `TEXT_MESSAGE_CONTENT`, `TOOL_CALL_START`, `STATE_DELTA`, `RAW`). The fork's original dotted-name mapping is retained as a non-breaking, shape-dispatched fallback.
+- **`GET /agui/v1/stream` mounted in `api/main.py`**, mirroring `/events`: same `SseBus` source (fed by `EventLogPublisher`), same default-off `_require_mcp_apps_enabled()` gate and `require_any_scope(read/write/admin)` auth. Emits *named* AG-UI SSE frames (`event: <TYPE>` + `data: <json>`). Message bodies never cross the wire (metadata-only source + redacting mapping).
+- **Verified:** 22 mapping tests pass (12 legacy + 10 re-based primitive, incl. privacy assertions); `/agui/v1/stream` is mounted and returns the identical gate/auth status as `/events` under a TestClient; upstream core still imports.
+- **Still deferred (state channel):** real `STATE_SNAPSHOT`/`STATE_DELTA` RFC-6902 patches should be sourced from `services/ui_state_service.py`; `file_mod` currently emits an empty `delta`.
+
 ---
 
 ## 2. Deliberately NOT applied (kept upstream's version)
@@ -70,7 +79,7 @@ All import cleanly against upstream's core; **52/52 ported modules import**, and
 
 These require editing upstream's **diverged, hard-to-unit-verify** core files and are best reviewed as focused follow-ups. None blocks the subsystem code from importing/testing.
 
-1. **AG-UI server endpoint (`GET /agui/v1/stream`).** The fork's handler maps the fork's *raw* event kinds. Upstream normalizes events to six `event_primitives` — so the correct move is to **re-base `agui_stream.to_agui_event()` onto `event_primitives`** (Phase 0/1 of the AG-UI roadmap), not a verbatim transplant. Wire into `api/main.py` alongside `/events`.
+1. ~~**AG-UI server endpoint (`GET /agui/v1/stream`).**~~ **✅ APPLIED** — `agui_stream.to_agui_event()` re-based onto the six `event_primitives` and `GET /agui/v1/stream` wired into `api/main.py` alongside `/events`. See §1.4. Remaining sub-item: source real `STATE_SNAPSHOT`/`STATE_DELTA` RFC-6902 patches from `ui_state_service` (currently `file_mod` emits an empty delta).
 2. **A2A / Agent Card listener + telemetry lifespan.** The fork starts `start_agent_card_listener`, `init_telemetry`/`shutdown_telemetry`, the observability span consumer, and `BudgetService` in the app lifespan (`api/main.py` lines ~318–352 in the fork). Transplant into upstream's lifespan.
 3. **ASI kill-switch + cache-stats endpoints** (`/asi/kill-switch`, `/asi/kill-switch/clear`, `/cache/stats`) and **terminal signal endpoints** (`/terminals/{id}/interrupt|pause|resume`, which emit the newly-added `PostInterrupt/Pause/Resume` events). Additive `@app` handlers.
 4. **Persistence WAL + Refinery DB rewiring.** `test/persistence/*` and `test/refinery/test_sync_submit.py` expect `clients/database.py` mutations to route through the WAL queue. Upstream's `database.py` diverged (the `flow`→`schedule`/`workflow` rename, #378), so the method set differs (`create_flow` etc.). Rewire against upstream's current DB API. WAL runs in shadow mode, so this is non-blocking.

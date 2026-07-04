@@ -618,6 +618,45 @@ async def events_history(
     return {"events": events}
 
 
+@app.get("/agui/v1/stream")
+async def agui_stream(
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+):
+    """Stream fleet events as AG-UI typed events (Server-Sent Events).
+
+    Sibling RFC: docs/rfc/cao-agui-l2-dashboard-2026-05-11-v1.md.
+
+    This is the L2 standalone-dashboard surface (consumed by ``cao_pwa/``). It
+    shares the exact same source as ``/events`` — the in-process ``SseBus`` fed
+    by the ``EventLogPublisher`` — but re-maps each normalized six-primitive
+    record onto AG-UI typed events via ``agui_stream.to_agui_event`` before it
+    hits the wire, so any AG-UI-compatible client renders CAO with no custom
+    adapter code.
+
+    Each SSE frame is a *named* AG-UI event: ``event: <AGUI_TYPE>`` +
+    ``data: <json>``. Message bodies are never carried (the ring buffer stores
+    metadata only and the mapping redacts by construction).
+
+    Default-off: returns 404 unless ``CAO_MCP_APPS_ENABLED`` is set — the AG-UI
+    stream exposes the same fleet metadata as ``/events`` and shares its posture.
+    When auth is enabled, any of ``cao:read`` / ``cao:write`` / ``cao:admin`` is
+    required (read is the floor).
+    """
+    _require_mcp_apps_enabled()
+
+    from fastapi.responses import StreamingResponse
+
+    from cli_agent_orchestrator.services.agui_stream import to_agui_event
+    from cli_agent_orchestrator.services.sse_bus import get_bus
+
+    async def event_generator():
+        async for event in get_bus().subscribe():
+            agui_type, data = to_agui_event(event)
+            yield f"event: {agui_type}\ndata: {json.dumps(data)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
 # Topology widget static bundle at /widgets/topology/ — the vanilla SSE-driven
 # view consumed alongside the /events stream above. The mount is default-off
 # (no-op unless CAO_MCP_APPS_ENABLED is set) and idempotent, so re-importing this
