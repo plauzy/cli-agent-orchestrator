@@ -39,6 +39,19 @@ flowchart TB
     TMUX --> BUS
 ```
 
+## What CAO adds on top of AG-UI — net-new, and unique in the ecosystem
+
+AG-UI standardizes the wire; it deliberately leaves everything below and around the wire to implementers. Every capability in this list is something **no current AG-UI integration provides**, and together they position cli-agent-orchestrator as the premier next-gen multi-agent orchestrator in the ecosystem:
+
+1. **A real-process agent runtime.** AG-UI assumes an addressable HTTP agent already exists. CAO supplies the entire missing lifecycle layer — spawning, persisting, resuming, and multiplexing long-lived CLI agent processes (tmux-backed), then exposing them through the protocol. No other AG-UI source manages real OS processes.
+2. **One stream over N heterogeneous runtimes.** Every existing integration is single-framework (LangGraph→AG-UI, Mastra→AG-UI, …). CAO's normalized event vocabulary makes it the first *heterogeneous* AG-UI source: Kiro CLI, Claude Code, and Codex all speak the same stream, and a new provider joins by implementing one base interface — zero protocol code.
+3. **Fleet semantics.** The protocol has multi-agent primitives but no conventions for rendering a *fleet*. CAO defines them: session/terminal hierarchy, supervisor snapshot + rolling deltas, and first-class agent-to-agent handoff and delegation events (`SupervisorDashboardStream`, `MultiAgentSessionTimeline`).
+4. **Permission prompts as standard interrupts.** CLI coding agents pause on trust/permission prompts constantly; nobody has mapped that onto AG-UI's interrupt lifecycle. CAO ships the mapping, with provider-namespaced reasons (`claude-code:permission_request`, `kiro:trust_prompt`) and approve/deny/edit resumption (`AgentHandoffWithApproval`).
+5. **Workspace semantics for coding agents.** Diffs, file trees, and terminal output have no typed representation in AG-UI today. CAO establishes the conventions: `file_mod` → RFC 6902 `STATE_DELTA` against a fleet snapshot, plus declarative diff/progress components via the `emit_ui` allow-list.
+6. **A privacy-bounded observability posture.** Metadata-only streaming — message bodies never on the wire, asserted by tests — so operators get fleet observability without conversation leakage. No existing integration draws this line.
+7. **The construct programming model itself.** Others ship adapters; CAO ships a *programming model* — typed, subclassable L2 building blocks over the L1 wire — so downstream teams compose orchestration UIs the way CDK users compose infrastructure.
+8. **Full protocol-triad coverage in one runtime.** MCP (shipped), agent-to-agent handoffs (shipped), AG-UI (this proposal) — making CAO the only place all three meet over real CLI processes.
+
 ## User Stories
 
 - As an **operator running a multi-agent session**, I want to watch my whole fleet (sessions, terminals, handoffs, file modifications, errors) stream live into any AG-UI-compatible dashboard, so that I can supervise agents without tailing tmux panes or polling REST endpoints.
@@ -103,6 +116,22 @@ flowchart LR
 2. **Phase 1 — Complete L1:** real `STATE_DELTA` payloads with debouncing, full `TOOL_CALL_*` lifecycle, `emit_ui` producer, `?since=` replay, docs. Gate: AC1–AC4.
 3. **Phase 2 — L2 constructs:** the four constructs, including bidirectional human-in-the-loop via AG-UI's interrupt-aware run lifecycle mapped to provider permission prompts (namespaced reasons, e.g. `claude-code:permission_request`). Gate: AC5.
 4. **Phase 3 — L3 reference surface:** dashboard composed purely from L2 constructs; optional authenticated team mode; AG-UI ecosystem listing. Gate: AC6.
+
+## AG-UI roadmap alignment — and a proposed partnership
+
+The [AG-UI public roadmap](https://github.com/orgs/ag-ui-protocol/projects/1/views/5) and the protocol's documented pipeline (its "upcoming building blocks" and [draft proposals](https://docs.ag-ui.com/development/updates)) line up with CAO's vision almost item for item — in each case, CAO is a natural production testbed or first implementation:
+
+| On the AG-UI roadmap | What CAO brings to it |
+|---|---|
+| **Sub-agents and composition** (upcoming building block) | CAO's handoff/delegation model is a live, shipping composition system across heterogeneous agents — real-world input for the spec, and a first implementation the day it lands |
+| **Interrupts / human-in-the-loop** (draft: interrupt-aware run lifecycle) | CLI permission and trust prompts are the highest-volume HITL workload anywhere; CAO's provider-namespaced interrupt mapping exercises the draft at scale |
+| **Agent steering** (upcoming building block) | CAO already steers live agents mid-run (input injection, inbox delivery to running terminals) — steering semantics can be validated against real processes |
+| **Tool output streaming** (upcoming building block) | Terminal output is the ultimate streaming tool output; CAO's FIFO→event-bus pipeline is a ready-made torture test |
+| **Shared state, read-write** (upcoming building block) | CAO's fleet snapshot + RFC 6902 delta channel is a working read path; the L2 constructs define the write path |
+| **Generative UI, declarative** (draft proposal) | CAO's server-validated `emit_ui` component allow-list is a concrete, security-conscious take on declarative generative UI |
+| **Background agents** (showcased in the AG-UI Dojo) | Headless/scheduled CAO agents are background agents by construction |
+
+This degree of overlap suggests more than a consumer relationship. Concretely, I'd propose CAO **partner with the AG-UI project**: an official ecosystem/integration listing, a CAO-backed demo in the AG-UI Dojo (the first driving real CLI processes), and co-design of the multi-agent fleet and workspace/diff conventions — where CAO would be the reference implementation for the sub-agents, interrupts, and steering roadmap items. **I'm happy to drive this outreach personally** and report back to this issue.
 
 ## Additional context
 
