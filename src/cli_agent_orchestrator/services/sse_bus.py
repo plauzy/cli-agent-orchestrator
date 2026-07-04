@@ -120,3 +120,10 @@ def get_bus() -> SseBus:
             if _bus is None:
                 _bus = SseBus()
     return _bus
+
+
+
+# Backward-compatible alias. The ported fork (plauzy/cao) named this class
+# ``SSEBus``; upstream uses ``SseBus``. Keep the old name importable so ported
+# consumers (e.g. services.zellij_bridge) work without edits.
+SSEBus = SseBus

@@ -18,6 +18,11 @@ class CaoEvent:
     event_type: str = ""
     timestamp: datetime = field(default_factory=_utc_now)
     session_id: str | None = None
+    # W3C trace-context (RFC 9114) for the upstream span that produced this
+    # event. Plugin hooks can re-attach to that context to emit child spans
+    # in the right place in the trace tree. Always None when telemetry is
+    # disabled or the emitter is outside an active span. (Ported: telemetry/)
+    traceparent: str | None = None
 
 
 @dataclass
@@ -73,3 +78,38 @@ class PostKillTerminalEvent(CaoEvent):
     event_type: str = "post_kill_terminal"
     terminal_id: str = ""
     agent_name: str | None = None
+
+
+# --- Ported net-new terminal-signal events (fork plauzy/cao, cao-mcp-apps v2 Phase 3) ---
+
+
+@dataclass
+class PostInterruptTerminalEvent(CaoEvent):
+    """Emitted after a tmux SIGINT (Ctrl-C) is sent to a terminal.
+
+    Operator-initiated control affordance for reining in a busy/runaway agent
+    without leaving the chat host.
+    """
+
+    event_type: str = "post_interrupt_terminal"
+    terminal_id: str = ""
+
+
+@dataclass
+class PostPauseTerminalEvent(CaoEvent):
+    """Emitted after a tmux SIGTSTP (Ctrl-Z) is sent to a terminal.
+
+    The foreground process is suspended; the pane is still reachable but
+    the agent is stopped. Inbox messages queue and flush once resumed.
+    """
+
+    event_type: str = "post_pause_terminal"
+    terminal_id: str = ""
+
+
+@dataclass
+class PostResumeTerminalEvent(CaoEvent):
+    """Emitted after `fg` is sent to a terminal to resume a paused agent."""
+
+    event_type: str = "post_resume_terminal"
+    terminal_id: str = ""

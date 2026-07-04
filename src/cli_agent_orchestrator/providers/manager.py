@@ -11,10 +11,13 @@ from cli_agent_orchestrator.providers.claude_code import ClaudeCodeProvider
 from cli_agent_orchestrator.providers.codex import CodexProvider
 from cli_agent_orchestrator.providers.copilot_cli import CopilotCliProvider
 from cli_agent_orchestrator.providers.cursor_cli import CursorCliProvider
+from cli_agent_orchestrator.providers.gemini_cli import GeminiCliProvider
 from cli_agent_orchestrator.providers.hermes import HermesProvider
 from cli_agent_orchestrator.providers.kimi_cli import KimiCliProvider
 from cli_agent_orchestrator.providers.kiro_cli import KiroCliProvider
+from cli_agent_orchestrator.providers.mock_cli import MockCliProvider
 from cli_agent_orchestrator.providers.opencode_cli import OpenCodeCliProvider
+from cli_agent_orchestrator.providers.q_cli import QCliProvider
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +125,33 @@ class ProviderManager:
                     allowed_tools,
                     model=model,
                     skill_prompt=skill_prompt,
+                )
+            # --- Ported net-new providers (fork plauzy/cao) ---
+            elif provider_type == ProviderType.Q_CLI.value:
+                if not agent_profile:
+                    raise ValueError("Q CLI provider requires agent_profile parameter")
+                provider = QCliProvider(
+                    terminal_id,
+                    tmux_session,
+                    tmux_window,
+                    agent_profile,
+                    allowed_tools,
+                )
+            elif provider_type == ProviderType.GEMINI_CLI.value:
+                provider = GeminiCliProvider(
+                    terminal_id,
+                    tmux_session,
+                    tmux_window,
+                    agent_profile,
+                    allowed_tools,
+                    skill_prompt=skill_prompt,
+                )
+            elif provider_type == ProviderType.MOCK_CLI.value:
+                provider = MockCliProvider(
+                    terminal_id,
+                    tmux_session,
+                    tmux_window,
+                    allowed_tools,
                 )
             else:
                 raise ValueError(f"Unknown provider type: {provider_type}")

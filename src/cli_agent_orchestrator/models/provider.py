@@ -13,3 +13,7 @@ class ProviderType(str, Enum):
     HERMES = "hermes"
     CURSOR_CLI = "cursor_cli"
     ANTIGRAVITY_CLI = "antigravity_cli"
+    # Ported net-new providers (fork plauzy/cao):
+    Q_CLI = "q_cli"
+    GEMINI_CLI = "gemini_cli"
+    MOCK_CLI = "mock_cli"

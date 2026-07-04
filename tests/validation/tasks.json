@@ -1,0 +1,642 @@
+[
+  {
+    "task_id": "coding-001",
+    "domain": "coding",
+    "complexity": "low",
+    "description": "Write a python script to reverse a string.",
+    "expected_output_type": "code",
+    "estimated_tokens": 100
+  },
+  {
+    "task_id": "coding-002",
+    "domain": "coding",
+    "complexity": "medium",
+    "description": "Create a simple FastAPI server with one endpoint that returns JSON data.",
+    "expected_output_type": "code",
+    "estimated_tokens": 250
+  },
+  {
+    "task_id": "coding-003",
+    "domain": "coding",
+    "complexity": "low",
+    "description": "Write a Python function to flatten a nested list to any depth.",
+    "expected_output_type": "code",
+    "estimated_tokens": 120
+  },
+  {
+    "task_id": "coding-004",
+    "domain": "coding",
+    "complexity": "low",
+    "description": "Implement a binary search function in Python with proper type hints.",
+    "expected_output_type": "code",
+    "estimated_tokens": 150
+  },
+  {
+    "task_id": "coding-005",
+    "domain": "coding",
+    "complexity": "low",
+    "description": "Create a Python class for a stack data structure with push, pop, peek, and is_empty methods.",
+    "expected_output_type": "code",
+    "estimated_tokens": 200
+  },
+  {
+    "task_id": "coding-006",
+    "domain": "coding",
+    "complexity": "medium",
+    "description": "Write a Python async function that fetches data from multiple URLs concurrently using aiohttp.",
+    "expected_output_type": "code",
+    "estimated_tokens": 400
+  },
+  {
+    "task_id": "coding-007",
+    "domain": "coding",
+    "complexity": "medium",
+    "description": "Implement a Python LRU cache decorator without using functools.lru_cache.",
+    "expected_output_type": "code",
+    "estimated_tokens": 500
+  },
+  {
+    "task_id": "coding-008",
+    "domain": "coding",
+    "complexity": "medium",
+    "description": "Write a Python script to parse CSV files and compute per-column statistics (mean, median, std).",
+    "expected_output_type": "code",
+    "estimated_tokens": 350
+  },
+  {
+    "task_id": "coding-009",
+    "domain": "coding",
+    "complexity": "low",
+    "description": "Create a Python context manager for timing code blocks that logs elapsed time to a file.",
+    "expected_output_type": "code",
+    "estimated_tokens": 200
+  },
+  {
+    "task_id": "coding-010",
+    "domain": "coding",
+    "complexity": "low",
+    "description": "Write a Python function to validate email addresses using only the re module.",
+    "expected_output_type": "code",
+    "estimated_tokens": 150
+  },
+  {
+    "task_id": "coding-011",
+    "domain": "coding",
+    "complexity": "low",
+    "description": "Implement a Python generator that yields fixed-size chunks from a large iterable.",
+    "expected_output_type": "code",
+    "estimated_tokens": 150
+  },
+  {
+    "task_id": "coding-012",
+    "domain": "coding",
+    "complexity": "medium",
+    "description": "Create a Python decorator that retries a function up to N times on specified exceptions with exponential backoff.",
+    "expected_output_type": "code",
+    "estimated_tokens": 350
+  },
+  {
+    "task_id": "coding-013",
+    "domain": "coding",
+    "complexity": "medium",
+    "description": "Write a Python CLI tool using argparse that reads a JSON file and outputs it as formatted CSV.",
+    "expected_output_type": "code",
+    "estimated_tokens": 400
+  },
+  {
+    "task_id": "coding-014",
+    "domain": "coding",
+    "complexity": "medium",
+    "description": "Implement a thread-safe singleton pattern in Python using a metaclass.",
+    "expected_output_type": "code",
+    "estimated_tokens": 300
+  },
+  {
+    "task_id": "coding-015",
+    "domain": "coding",
+    "complexity": "high",
+    "description": "Write a Python function that parses and computes arithmetic expressions (+ - * / parentheses) from a string, implementing a proper recursive descent parser instead of relying on Python's built-in expression evaluation.",
+    "expected_output_type": "code",
+    "estimated_tokens": 800
+  },
+  {
+    "task_id": "coding-016",
+    "domain": "coding",
+    "complexity": "medium",
+    "description": "Create a Python dataclass-based config loader that merges values from a YAML file and environment variables, with env vars taking precedence.",
+    "expected_output_type": "code",
+    "estimated_tokens": 450
+  },
+  {
+    "task_id": "coding-017",
+    "domain": "coding",
+    "complexity": "medium",
+    "description": "Write a Python script using watchdog that monitors a directory for file creation and modification events and logs them.",
+    "expected_output_type": "code",
+    "estimated_tokens": 350
+  },
+  {
+    "task_id": "coding-018",
+    "domain": "coding",
+    "complexity": "medium",
+    "description": "Implement a basic HTTP GET and POST client in Python using only the standard library urllib.",
+    "expected_output_type": "code",
+    "estimated_tokens": 400
+  },
+  {
+    "task_id": "coding-019",
+    "domain": "coding",
+    "complexity": "low",
+    "description": "Write pytest unit tests for a function that sorts a list of dictionaries by a specified key, covering edge cases.",
+    "expected_output_type": "code",
+    "estimated_tokens": 250
+  },
+  {
+    "task_id": "coding-020",
+    "domain": "coding",
+    "complexity": "medium",
+    "description": "Write a Python function to generate all permutations of a string without using itertools.",
+    "expected_output_type": "code",
+    "estimated_tokens": 300
+  },
+  {
+    "task_id": "coding-021",
+    "domain": "coding",
+    "complexity": "medium",
+    "description": "Implement a simple tokenizer in Python that classifies text into words, numbers, and punctuation tokens.",
+    "expected_output_type": "code",
+    "estimated_tokens": 500
+  },
+  {
+    "task_id": "coding-022",
+    "domain": "coding",
+    "complexity": "medium",
+    "description": "Create a Python class for a doubly linked list with insert, delete, and forward/backward traversal methods.",
+    "expected_output_type": "code",
+    "estimated_tokens": 600
+  },
+  {
+    "task_id": "coding-023",
+    "domain": "coding",
+    "complexity": "high",
+    "description": "Write a Python async context manager for a database connection pool that enforces a max connection limit.",
+    "expected_output_type": "code",
+    "estimated_tokens": 700
+  },
+  {
+    "task_id": "coding-024",
+    "domain": "coding",
+    "complexity": "high",
+    "description": "Implement Dijkstra's algorithm in Python for finding shortest paths in a weighted directed graph represented as an adjacency list.",
+    "expected_output_type": "code",
+    "estimated_tokens": 900
+  },
+  {
+    "task_id": "coding-025",
+    "domain": "coding",
+    "complexity": "medium",
+    "description": "Write a Python script to extract product names and prices from an HTML string using BeautifulSoup.",
+    "expected_output_type": "code",
+    "estimated_tokens": 400
+  },
+  {
+    "task_id": "coding-026",
+    "domain": "coding",
+    "complexity": "medium",
+    "description": "Create a Python function that validates a dictionary against a provided JSON schema definition using the jsonschema library.",
+    "expected_output_type": "code",
+    "estimated_tokens": 450
+  },
+  {
+    "task_id": "coding-027",
+    "domain": "coding",
+    "complexity": "medium",
+    "description": "Write a Python template renderer that replaces {{variable}} placeholders in a string with values from a dictionary.",
+    "expected_output_type": "code",
+    "estimated_tokens": 350
+  },
+  {
+    "task_id": "coding-028",
+    "domain": "coding",
+    "complexity": "high",
+    "description": "Implement a thread-safe in-memory key-value store in Python with TTL expiration and a background cleanup thread.",
+    "expected_output_type": "code",
+    "estimated_tokens": 800
+  },
+  {
+    "task_id": "coding-029",
+    "domain": "coding",
+    "complexity": "medium",
+    "description": "Write pytest fixtures for setting up and tearing down a SQLite test database, including table creation and seed data.",
+    "expected_output_type": "code",
+    "estimated_tokens": 400
+  },
+  {
+    "task_id": "coding-030",
+    "domain": "coding",
+    "complexity": "medium",
+    "description": "Write a Python function to merge multiple sorted iterables into a single sorted list using a min-heap.",
+    "expected_output_type": "code",
+    "estimated_tokens": 300
+  },
+  {
+    "task_id": "infra-001",
+    "domain": "infrastructure",
+    "complexity": "low",
+    "description": "Write a Dockerfile for a basic Node.js application.",
+    "expected_output_type": "config",
+    "estimated_tokens": 150
+  },
+  {
+    "task_id": "infra-002",
+    "domain": "infrastructure",
+    "complexity": "medium",
+    "description": "Write a docker-compose.yml for a Python FastAPI app with a PostgreSQL database and Redis cache, including health checks.",
+    "expected_output_type": "config",
+    "estimated_tokens": 400
+  },
+  {
+    "task_id": "infra-003",
+    "domain": "infrastructure",
+    "complexity": "low",
+    "description": "Create a Makefile with targets for install, test, lint, build, and clean for a Python project.",
+    "expected_output_type": "config",
+    "estimated_tokens": 200
+  },
+  {
+    "task_id": "infra-004",
+    "domain": "infrastructure",
+    "complexity": "low",
+    "description": "Write a GitHub Actions workflow that runs pytest on push to main and on pull requests.",
+    "expected_output_type": "config",
+    "estimated_tokens": 300
+  },
+  {
+    "task_id": "infra-005",
+    "domain": "infrastructure",
+    "complexity": "medium",
+    "description": "Create a bash script that backs up a PostgreSQL database to an S3 bucket with 7-day retention rotation.",
+    "expected_output_type": "code",
+    "estimated_tokens": 400
+  },
+  {
+    "task_id": "infra-006",
+    "domain": "infrastructure",
+    "complexity": "medium",
+    "description": "Write an nginx configuration for a reverse proxy with SSL termination, gzip compression, and rate limiting.",
+    "expected_output_type": "config",
+    "estimated_tokens": 500
+  },
+  {
+    "task_id": "infra-007",
+    "domain": "infrastructure",
+    "complexity": "medium",
+    "description": "Create a Terraform module for an AWS S3 bucket with versioning, server-side encryption, and a lifecycle rule to expire objects after 90 days.",
+    "expected_output_type": "config",
+    "estimated_tokens": 600
+  },
+  {
+    "task_id": "infra-008",
+    "domain": "infrastructure",
+    "complexity": "low",
+    "description": "Write a Kubernetes Deployment manifest for a containerized Python API with 3 replicas, resource requests/limits, and a liveness probe.",
+    "expected_output_type": "config",
+    "estimated_tokens": 350
+  },
+  {
+    "task_id": "infra-009",
+    "domain": "infrastructure",
+    "complexity": "low",
+    "description": "Write a crontab entry and wrapper bash script that runs a Python cleanup job every Sunday at 3 AM and logs output.",
+    "expected_output_type": "code",
+    "estimated_tokens": 120
+  },
+  {
+    "task_id": "infra-010",
+    "domain": "infrastructure",
+    "complexity": "medium",
+    "description": "Write a GitHub Actions workflow that builds a Docker image, tags it with the git SHA, and pushes it to Amazon ECR.",
+    "expected_output_type": "config",
+    "estimated_tokens": 500
+  },
+  {
+    "task_id": "infra-011",
+    "domain": "infrastructure",
+    "complexity": "low",
+    "description": "Create a Kubernetes ConfigMap for application configuration and a Secret for database credentials, both referenced in a Deployment.",
+    "expected_output_type": "config",
+    "estimated_tokens": 250
+  },
+  {
+    "task_id": "infra-012",
+    "domain": "infrastructure",
+    "complexity": "medium",
+    "description": "Write a bash healthcheck script that verifies three HTTP service endpoints return 200 OK within 2 seconds and sends an alert email on failure.",
+    "expected_output_type": "code",
+    "estimated_tokens": 350
+  },
+  {
+    "task_id": "infra-013",
+    "domain": "infrastructure",
+    "complexity": "high",
+    "description": "Create a Terraform resource block for an AWS Lambda function with an execution IAM role, CloudWatch log group, and environment variables from SSM Parameter Store.",
+    "expected_output_type": "config",
+    "estimated_tokens": 800
+  },
+  {
+    "task_id": "infra-014",
+    "domain": "infrastructure",
+    "complexity": "low",
+    "description": "Write a docker-compose.override.yml for local development that adds hot-reload, exposes debug ports, and mounts source code as a volume.",
+    "expected_output_type": "config",
+    "estimated_tokens": 250
+  },
+  {
+    "task_id": "infra-015",
+    "domain": "infrastructure",
+    "complexity": "medium",
+    "description": "Create a Kubernetes HorizontalPodAutoscaler manifest that scales a deployment between 2 and 10 replicas based on 70% CPU utilization.",
+    "expected_output_type": "config",
+    "estimated_tokens": 300
+  },
+  {
+    "task_id": "infra-016",
+    "domain": "infrastructure",
+    "complexity": "medium",
+    "description": "Write a bash log rotation script that compresses application logs older than 7 days and deletes compressed archives older than 30 days.",
+    "expected_output_type": "code",
+    "estimated_tokens": 300
+  },
+  {
+    "task_id": "infra-017",
+    "domain": "infrastructure",
+    "complexity": "high",
+    "description": "Create an AWS CDK stack in Python that provisions a DynamoDB table with a GSI, pay-per-request billing, and auto-scaling.",
+    "expected_output_type": "code",
+    "estimated_tokens": 900
+  },
+  {
+    "task_id": "infra-018",
+    "domain": "infrastructure",
+    "complexity": "medium",
+    "description": "Write a GitHub Actions workflow that runs Trivy vulnerability scanning on a Docker image and fails the build on HIGH or CRITICAL findings.",
+    "expected_output_type": "config",
+    "estimated_tokens": 400
+  },
+  {
+    "task_id": "infra-019",
+    "domain": "infrastructure",
+    "complexity": "medium",
+    "description": "Create a Kubernetes PodDisruptionBudget that ensures at least 2 pods are always available, and a NetworkPolicy that restricts ingress to pods in the same namespace.",
+    "expected_output_type": "config",
+    "estimated_tokens": 400
+  },
+  {
+    "task_id": "infra-020",
+    "domain": "infrastructure",
+    "complexity": "medium",
+    "description": "Write a bash bootstrap script for a new developer environment that installs Python deps, creates a .env from .env.example, and runs database migrations.",
+    "expected_output_type": "code",
+    "estimated_tokens": 450
+  },
+  {
+    "task_id": "docs-001",
+    "domain": "documentation",
+    "complexity": "low",
+    "description": "Write a README.md for a Python CLI tool that converts CSV files to JSON, including installation instructions, usage examples, and a feature list.",
+    "expected_output_type": "text",
+    "estimated_tokens": 400
+  },
+  {
+    "task_id": "docs-002",
+    "domain": "documentation",
+    "complexity": "medium",
+    "description": "Create an OpenAPI 3.0 YAML spec for a REST API with endpoints for creating, reading, updating, and deleting user records.",
+    "expected_output_type": "text",
+    "estimated_tokens": 800
+  },
+  {
+    "task_id": "docs-003",
+    "domain": "documentation",
+    "complexity": "low",
+    "description": "Write Google-style docstrings for a Python class that manages database connections, covering the class, __init__, and all public methods.",
+    "expected_output_type": "text",
+    "estimated_tokens": 300
+  },
+  {
+    "task_id": "docs-004",
+    "domain": "documentation",
+    "complexity": "low",
+    "description": "Write a CHANGELOG.md entry for a v2.1.0 release that includes three new features, two bug fixes, and one breaking change.",
+    "expected_output_type": "text",
+    "estimated_tokens": 250
+  },
+  {
+    "task_id": "docs-005",
+    "domain": "documentation",
+    "complexity": "medium",
+    "description": "Write an Architecture Decision Record (ADR) for choosing PostgreSQL over MongoDB as the primary data store for a multi-tenant SaaS application.",
+    "expected_output_type": "text",
+    "estimated_tokens": 600
+  },
+  {
+    "task_id": "docs-006",
+    "domain": "documentation",
+    "complexity": "medium",
+    "description": "Create a runbook for diagnosing and resolving high API latency in a Python FastAPI service, covering common causes and remediation steps.",
+    "expected_output_type": "text",
+    "estimated_tokens": 700
+  },
+  {
+    "task_id": "docs-007",
+    "domain": "documentation",
+    "complexity": "high",
+    "description": "Write an incident response runbook for a database connection pool exhaustion event, including detection, triage, mitigation, and post-mortem steps.",
+    "expected_output_type": "text",
+    "estimated_tokens": 900
+  },
+  {
+    "task_id": "docs-008",
+    "domain": "documentation",
+    "complexity": "medium",
+    "description": "Create a new developer onboarding guide for a Python microservices project using Docker Compose, covering setup, local development, and common workflows.",
+    "expected_output_type": "text",
+    "estimated_tokens": 600
+  },
+  {
+    "task_id": "docs-009",
+    "domain": "documentation",
+    "complexity": "low",
+    "description": "Write a code review checklist for Python pull requests covering security vulnerabilities, performance pitfalls, test coverage, and style guidelines.",
+    "expected_output_type": "text",
+    "estimated_tokens": 350
+  },
+  {
+    "task_id": "docs-010",
+    "domain": "documentation",
+    "complexity": "high",
+    "description": "Write a migration guide for upgrading a Python application from 3.9 to 3.12, covering deprecated features, breaking changes, and new capabilities to adopt.",
+    "expected_output_type": "text",
+    "estimated_tokens": 1000
+  },
+  {
+    "task_id": "docs-011",
+    "domain": "documentation",
+    "complexity": "low",
+    "description": "Summarize a list of git commit messages into a concise weekly changelog for a web application release.",
+    "expected_output_type": "text",
+    "estimated_tokens": 250
+  },
+  {
+    "task_id": "docs-012",
+    "domain": "documentation",
+    "complexity": "low",
+    "description": "Write CLI help text and usage examples for a command-line database migration tool with init, up, down, and status subcommands.",
+    "expected_output_type": "text",
+    "estimated_tokens": 300
+  },
+  {
+    "task_id": "docs-013",
+    "domain": "documentation",
+    "complexity": "low",
+    "description": "Write clear, user-friendly error messages for a form validation library covering required field, invalid format, and out-of-range value scenarios.",
+    "expected_output_type": "text",
+    "estimated_tokens": 250
+  },
+  {
+    "task_id": "docs-014",
+    "domain": "documentation",
+    "complexity": "low",
+    "description": "Write a pull request description for a change that adds per-route rate limiting middleware to an existing REST API.",
+    "expected_output_type": "text",
+    "estimated_tokens": 200
+  },
+  {
+    "task_id": "docs-015",
+    "domain": "documentation",
+    "complexity": "low",
+    "description": "Write five example commit messages following the Conventional Commits specification for a feature branch that adds user authentication.",
+    "expected_output_type": "text",
+    "estimated_tokens": 150
+  },
+  {
+    "task_id": "multi-001",
+    "domain": "multi_file",
+    "complexity": "high",
+    "description": "Create a minimal Flask web app with a SQLAlchemy User model, a /users CRUD REST API (GET, POST, PUT, DELETE), and pytest tests for all endpoints.",
+    "expected_output_type": "multi_file",
+    "estimated_tokens": 1500
+  },
+  {
+    "task_id": "multi-002",
+    "domain": "multi_file",
+    "complexity": "high",
+    "description": "Build a FastAPI service with a Pydantic request/response schema, a /predict endpoint that calls a stub ML model, and error handling middleware.",
+    "expected_output_type": "multi_file",
+    "estimated_tokens": 1200
+  },
+  {
+    "task_id": "multi-003",
+    "domain": "multi_file",
+    "complexity": "medium",
+    "description": "Create a TypeScript module for date range formatting with type definitions, implementation, and Jest unit tests covering edge cases.",
+    "expected_output_type": "multi_file",
+    "estimated_tokens": 800
+  },
+  {
+    "task_id": "multi-004",
+    "domain": "multi_file",
+    "complexity": "high",
+    "description": "Build a React pagination component with a usePagination custom hook, a Pagination UI component, and a Storybook story showing default and edge-case states.",
+    "expected_output_type": "multi_file",
+    "estimated_tokens": 1200
+  },
+  {
+    "task_id": "multi-005",
+    "domain": "multi_file",
+    "complexity": "medium",
+    "description": "Create a Python package with an __init__.py that exposes a public API, a core.py module with business logic, and a utils.py module with helper functions.",
+    "expected_output_type": "multi_file",
+    "estimated_tokens": 700
+  },
+  {
+    "task_id": "multi-006",
+    "domain": "multi_file",
+    "complexity": "high",
+    "description": "Build a Python CLI tool using click with a config.py module for settings, and import/export subcommands each with their own options and help text.",
+    "expected_output_type": "multi_file",
+    "estimated_tokens": 1000
+  },
+  {
+    "task_id": "multi-007",
+    "domain": "multi_file",
+    "complexity": "high",
+    "description": "Create a data pipeline with separate ingest.py, transform.py, and load.py modules, each with typed function signatures and a pipeline.py orchestrator.",
+    "expected_output_type": "multi_file",
+    "estimated_tokens": 1200
+  },
+  {
+    "task_id": "multi-008",
+    "domain": "multi_file",
+    "complexity": "high",
+    "description": "Build a REST API client with an auth.py module for token management, an endpoints.py wrapper for common operations, and a retry.py module with exponential backoff.",
+    "expected_output_type": "multi_file",
+    "estimated_tokens": 1000
+  },
+  {
+    "task_id": "multi-009",
+    "domain": "multi_file",
+    "complexity": "high",
+    "description": "Create a job queue system with a queue.py producer using Redis lists, a worker.py consumer with graceful shutdown, and a scheduler.py for cron-based job registration.",
+    "expected_output_type": "multi_file",
+    "estimated_tokens": 1500
+  },
+  {
+    "task_id": "multi-010",
+    "domain": "multi_file",
+    "complexity": "medium",
+    "description": "Write SQLAlchemy ORM models for a blog application (Post, Comment, Tag with many-to-many) and an Alembic migration script for the initial schema.",
+    "expected_output_type": "multi_file",
+    "estimated_tokens": 800
+  },
+  {
+    "task_id": "multi-011",
+    "domain": "multi_file",
+    "complexity": "high",
+    "description": "Create JWT authentication middleware with a guards.py module for token validation, a roles.py decorator for role-based access control, and unit tests.",
+    "expected_output_type": "multi_file",
+    "estimated_tokens": 1200
+  },
+  {
+    "task_id": "multi-012",
+    "domain": "multi_file",
+    "complexity": "medium",
+    "description": "Build a simple event system with an EventPublisher, EventSubscriber, and EventBus class for decoupled in-process pub/sub communication.",
+    "expected_output_type": "multi_file",
+    "estimated_tokens": 900
+  },
+  {
+    "task_id": "multi-013",
+    "domain": "multi_file",
+    "complexity": "medium",
+    "description": "Create a configuration management system with a YAML schema validator, a ConfigLoader class, and environment variable override support.",
+    "expected_output_type": "multi_file",
+    "estimated_tokens": 700
+  },
+  {
+    "task_id": "multi-014",
+    "domain": "multi_file",
+    "complexity": "high",
+    "description": "Build a plugin registry with a PluginBase abstract class, a PluginLoader that discovers plugins from a directory, and two example plugin implementations.",
+    "expected_output_type": "multi_file",
+    "estimated_tokens": 1200
+  },
+  {
+    "task_id": "multi-015",
+    "domain": "multi_file",
+    "complexity": "medium",
+    "description": "Create a Python argparse CLI with three subcommands (init, run, status), each with their own arguments, help text, and handler functions in separate modules.",
+    "expected_output_type": "multi_file",
+    "estimated_tokens": 800
+  }
+]

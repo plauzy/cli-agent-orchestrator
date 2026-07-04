@@ -161,6 +161,10 @@ LOCAL_AGENT_STORE_DIR = CAO_HOME_DIR / "agent-store"
 # Local skill store for installed CAO skills
 SKILLS_DIR = CAO_HOME_DIR / "skills"
 
+# Ported (fork plauzy/cao): per-provider workspace root for the Gemini CLI
+# provider (used when the Gemini CLI needs an isolated working directory).
+GEMINI_WORKSPACES_DIR = CAO_HOME_DIR / "gemini-workspaces"
+
 # Provider-specific agent directories
 KIRO_AGENTS_DIR = Path(os.environ.get("CAO_AGENTS_DIR", str(Path.home() / ".kiro" / "agents")))
 COPILOT_AGENTS_DIR = Path.home() / ".copilot" / "agents"  # Copilot custom agents

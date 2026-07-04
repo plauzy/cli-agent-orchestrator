@@ -1,0 +1,35 @@
+// CAO v2.5 Phase 2 — Zellij layout.
+//
+// Three-pane workflow that mirrors the tmux launch convention from
+// `cli/commands/launch.py`:
+//   * Control — operator pane running `cao session list` on a 2s loop.
+//   * Trace   — live tail of OTel/ASI events via `cao zellij tail`.
+//   * Shell   — free-form terminal in the user's $SHELL.
+//
+// The status bar is the `zellaude` plugin (vendored .wasm), fed by
+// `services/zellij_bridge.py` over `zellij pipe --name zellaude`.
+
+layout {
+    default_tab_template {
+        children
+        pane size=1 borderless=true {
+            plugin location="file:~/.config/zellij/plugins/zellaude.wasm"
+        }
+    }
+
+    tab name="cao" focus=true {
+        pane split_direction="vertical" {
+            pane name="Control" {
+                command "sh"
+                args "-c" "while true; do clear; cao session list 2>&1 || true; sleep 2; done"
+            }
+            pane split_direction="horizontal" {
+                pane name="Trace" {
+                    command "cao"
+                    args "zellij" "tail"
+                }
+                pane name="Shell"
+            }
+        }
+    }
+}
