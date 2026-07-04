@@ -5,8 +5,11 @@ from cli_agent_orchestrator.plugins.events import (
     CaoEvent,
     PostCreateSessionEvent,
     PostCreateTerminalEvent,
+    PostInterruptTerminalEvent,
     PostKillSessionEvent,
     PostKillTerminalEvent,
+    PostPauseTerminalEvent,
+    PostResumeTerminalEvent,
     PostSendMessageEvent,
 )
 from cli_agent_orchestrator.plugins.registry import PluginRegistry
@@ -20,5 +23,8 @@ __all__ = [
     "PostKillSessionEvent",
     "PostCreateTerminalEvent",
     "PostKillTerminalEvent",
+    "PostInterruptTerminalEvent",
+    "PostPauseTerminalEvent",
+    "PostResumeTerminalEvent",
     "PluginRegistry",
 ]

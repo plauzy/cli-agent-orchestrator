@@ -55,5 +55,10 @@ class TestPluginPackageAPI:
             "PostKillSessionEvent",
             "PostCreateTerminalEvent",
             "PostKillTerminalEvent",
+            # Ported (fork plauzy/cao): terminal-signal events consumed by the
+            # sse_event_publisher plugin + telemetry port.
+            "PostInterruptTerminalEvent",
+            "PostPauseTerminalEvent",
+            "PostResumeTerminalEvent",
             "PluginRegistry",
         ]

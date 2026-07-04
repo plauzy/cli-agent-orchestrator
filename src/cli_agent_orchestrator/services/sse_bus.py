@@ -127,3 +127,11 @@ def get_bus() -> SseBus:
 # ``SSEBus``; upstream uses ``SseBus``. Keep the old name importable so ported
 # consumers (e.g. services.zellij_bridge) work without edits.
 SSEBus = SseBus
+
+
+def reset_bus() -> None:
+    """Drop the singleton SSE bus (used by tests to start with a clean slate)."""
+
+    global _bus
+    with _bus_lock:
+        _bus = None

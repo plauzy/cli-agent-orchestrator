@@ -160,3 +160,9 @@ class EventLogPublisher(CaoPlugin):
             event.session_name,
             {"event_type": event.event_type, "session_name": event.session_name},
         )
+
+
+# Backward-compatible alias. The ported fork (plauzy/cao) named this class
+# ``EventLogPublisherPlugin``; upstream registers it as ``EventLogPublisher``.
+# Keep the old name importable so ported tests/consumers resolve it.
+EventLogPublisherPlugin = EventLogPublisher
