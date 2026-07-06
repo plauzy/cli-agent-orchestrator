@@ -10,13 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **AG-UI typed-event stream** — new `/agui/v1/stream` Server-Sent Events endpoint that maps CAO's normalized fleet events to [AG-UI](https://github.com/ag-ui-protocol/ag-ui) typed events (`RUN_*`, `STEP_*`, `TEXT_MESSAGE_CONTENT`, `TOOL_CALL_START`, `STATE_SNAPSHOT`, `STATE_DELTA`, `GENERATIVE_UI`, `RUN_ERROR`), so any AG-UI-compatible client renders CAO with no custom adapter. Default-off via `CAO_AGUI_ENABLED`; supports `?since=` history replay and, when auth is enabled, a `?access_token=` query-parameter JWT for browser `EventSource` clients. Message bodies are never carried (metadata-only by construction).
 
-- **Generative UI** — agents author allow-listed UI components (approval cards, choice prompts, diff summaries, progress/metrics, agent cards) via the `emit_ui` MCP tool / `POST /agui/v1/emit_ui`. Intents are validated **server-side** against a frozen allow-list (no arbitrary markup) and rendered uniformly across heterogeneous providers. See [docs/generative-ui-implementation-2026-07-04.md](docs/generative-ui-implementation-2026-07-04.md).
+- **Generative UI** — agents author allow-listed UI components (approval cards, choice prompts, diff summaries, progress/metrics, agent cards) via the `emit_ui` MCP tool / `POST /agui/v1/emit_ui`. Intents are validated **server-side** against a frozen allow-list (no arbitrary markup) and rendered uniformly across heterogeneous providers. See [docs/pwa.md](docs/pwa.md).
 
 - **Standalone dashboard PWA** (`cao_pwa/`) — a multi-instance fleet dashboard that consumes the AG-UI stream from any browser (no MCP host required), with automatic reconnection that resumes via `?since=`. See [docs/pwa.md](docs/pwa.md).
 
-- **A2A v1.0 transport + signed Agent Card** — JSON-RPC 2.0 (`task.send`/`get`/`cancel`), SSE streaming, and REST polling for agent-to-agent interop, plus an Ed25519-signed Agent Card + JWKS published on a dedicated listener. The listener is default-off (`CAO_AGENT_CARD_ENABLED`) and binds loopback (127.0.0.1) unless an operator opts into external discoverability with `CAO_AGENT_CARD_HOST`. See [docs/auth.md](docs/auth.md).
-
-- **OpenTelemetry GenAI instrumentation** — opt-in traces/metrics over OTLP following the GenAI semantic conventions. See [docs/otel-deployment.md](docs/otel-deployment.md).
+- **OpenTelemetry GenAI instrumentation** — opt-in traces/metrics over OTLP following the GenAI semantic conventions, shipped as the `[otel]` optional extra (`pip install cli-agent-orchestrator[otel]`); the base install degrades to no-ops. See [docs/otel-deployment.md](docs/otel-deployment.md).
 
 - **Native multi-agent workflow spec** — a trusted-author YAML workflow grammar with authoring/validation endpoints, a run-engine seam, and `workflow_run` / `workflow_return` / `workflow_cancel` MCP tools (#312).
 

@@ -77,6 +77,57 @@ describe("connectAGUI", () => {
     conn.close();
     expect(StubEventSource.last!.closed).toBe(true);
   });
+
+  it("reconnects with the newest seen timestamp as ?since= after an error", () => {
+    // Regression: a dropped connection leaves native EventSource CONNECTING
+    // and it retries its ORIGINAL URL — which silently loses the ?since=
+    // cursor (and with it the gap replay). connectAGUI must take over on any
+    // error: close the source and reopen with the up-to-date cursor.
+    vi.useFakeTimers();
+    try {
+      connectAGUI({
+        instanceUrl: "http://localhost:9889",
+        onEvent: () => {},
+      });
+      const first = StubEventSource.last!;
+      expect(first.url).not.toContain("since=");
+
+      // A frame arrives carrying a timestamp — this becomes the cursor.
+      first.emit("GENERATIVE_UI", {
+        component: "metric",
+        props: {},
+        timestamp: "2026-07-06T12:00:00+00:00",
+      });
+
+      // Server dies: the browser fires onerror while readyState is CONNECTING.
+      first.onerror?.(new Event("error"));
+      expect(first.closed).toBe(true); // we took over from the native retry
+
+      vi.advanceTimersByTime(1_100); // first backoff step
+      const second = StubEventSource.last!;
+      expect(second).not.toBe(first);
+      expect(decodeURIComponent(second.url)).toContain("since=2026-07-06T12:00:00+00:00");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops reconnecting after close()", () => {
+    vi.useFakeTimers();
+    try {
+      const conn = connectAGUI({
+        instanceUrl: "http://localhost:9889",
+        onEvent: () => {},
+      });
+      const first = StubEventSource.last!;
+      conn.close();
+      first.onerror?.(new Event("error"));
+      vi.advanceTimersByTime(60_000);
+      expect(StubEventSource.last).toBe(first); // no new connection was opened
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 

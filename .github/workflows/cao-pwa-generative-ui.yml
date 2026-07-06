@@ -1,23 +1,25 @@
 name: CAO PWA — Generative UI proof
 
-# Builds + unit-tests the L2 PWA and produces the generative-UI SCREEN RECORDING
-# that cannot be generated in the restricted build sandbox (the Playwright
-# browser CDN is blocked there). On GitHub-hosted runners the CDN is reachable,
-# so this job downloads chromium, drives the deterministic replay
-# (cao_pwa/demo/generative-ui-replay.html), records video + screenshots, and
-# uploads them as build artifacts attached to the run/PR.
+# Builds + unit-tests the L2 PWA and produces the generative-UI SCREEN
+# RECORDINGS: the LIVE-PATH proof (e2e/live-dashboard.spec.ts boots a real
+# cao-server and drives emit_ui through every component, the off-list refusal,
+# and the ?since= reconnect) plus the deterministic replay
+# (cao_pwa/demo/generative-ui-replay.html). Videos + screenshots upload as
+# build artifacts attached to the run/PR.
 #
-# See docs/generative-ui-implementation-2026-07-04.md.
+# See docs/pwa.md (Generative UI section).
 
 on:
   push:
     branches: [main]
     paths:
       - "cao_pwa/**"
+      - "src/cli_agent_orchestrator/**"
       - ".github/workflows/cao-pwa-generative-ui.yml"
   pull_request:
     paths:
       - "cao_pwa/**"
+      - "src/cli_agent_orchestrator/**"
       - ".github/workflows/cao-pwa-generative-ui.yml"
   # Allow manual runs so the recording can be regenerated on demand.
   workflow_dispatch:
@@ -45,6 +47,20 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # The live-path spec boots a real cao-server, so the Python toolchain is
+      # required alongside Node.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Sync Python environment
+        working-directory: .
+        run: uv sync --all-extras --dev
 
       - name: Type check
         run: npx tsc --noEmit
@@ -87,11 +103,12 @@ jobs:
         if: always()
         run: |
           {
-            echo "## Generative UI — screen recording"
+            echo "## Generative UI — screen recordings"
             echo ""
-            echo "Deterministic replay of a real \`to_agui_event\`-produced event sequence"
-            echo "across heterogeneous providers (q_cli / claude_code / codex), including the"
-            echo "off-list \`iframe\` refusal."
+            echo "Live-path proof (real cao-server + emit_ui: all six components, the"
+            echo "off-list \`iframe\` refusal, and the ?since= reconnect) plus the"
+            echo "deterministic replay across heterogeneous providers"
+            echo "(kiro_cli / claude_code / codex)."
             echo ""
             echo "Download the **generative-ui-recording** and **generative-ui-report** artifacts"
             echo "below to view the mp4/gif/webm and the full Playwright HTML report + screenshot."
