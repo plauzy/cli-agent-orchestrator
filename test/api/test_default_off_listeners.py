@@ -47,7 +47,5 @@ def test_agui_surface_defaults_off():
     """No flags => the AG-UI routes 404 (byte-identical default posture)."""
     with TestClient(app, base_url="http://localhost") as client:
         assert client.get("/agui/v1/stream").status_code == 404
-        resp = client.post(
-            "/agui/v1/emit_ui", json={"component": "progress", "props": {}}
-        )
+        resp = client.post("/agui/v1/emit_ui", json={"component": "progress", "props": {}})
         assert resp.status_code == 404

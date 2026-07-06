@@ -38,7 +38,7 @@ def _rendered(record: logging.LogRecord) -> str:
 
 class TestRedactQueryTokenFilter:
     def test_scrubs_access_token_in_plain_message(self):
-        out = _rendered(_record('GET /agui/v1/stream?access_token=eyJhbGciOi.abc.def HTTP/1.1'))
+        out = _rendered(_record("GET /agui/v1/stream?access_token=eyJhbGciOi.abc.def HTTP/1.1"))
         assert "eyJhbGciOi" not in out
         assert f"access_token={REDACTED}" in out
 
@@ -58,7 +58,7 @@ class TestRedactQueryTokenFilter:
         assert "since=x" in out
 
     def test_plain_lines_untouched(self):
-        msg = 'GET /agui/v1/stream?since=2026-07-04T00:00:00Z HTTP/1.1'
+        msg = "GET /agui/v1/stream?since=2026-07-04T00:00:00Z HTTP/1.1"
         assert _rendered(_record(msg)) == msg
 
     def test_uvicorn_access_logger_is_wired(self):

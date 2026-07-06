@@ -49,6 +49,6 @@ def test_example_profile_provider_exists(rel_path: str, meta: dict) -> None:
     # Supervisor profiles can override worker providers inline.
     for agent in meta.get("agents", []) or []:
         if isinstance(agent, dict) and "provider" in agent:
-            assert agent["provider"] in VALID_PROVIDERS, (
-                f"{rel_path}: worker provider {agent['provider']!r} is not a known ProviderType"
-            )
+            assert (
+                agent["provider"] in VALID_PROVIDERS
+            ), f"{rel_path}: worker provider {agent['provider']!r} is not a known ProviderType"
