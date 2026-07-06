@@ -18,6 +18,12 @@ export default defineConfig({
     trace: "on-first-retry",
     viewport: { width: 1100, height: 760 },
     colorScheme: "dark",
+    // Sandboxes that pre-install a Chromium (and block the Playwright CDN)
+    // can point at it instead of the version-pinned download; CI leaves this
+    // unset and uses `playwright install`.
+    launchOptions: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
+      ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE }
+      : {},
   },
   reporter: [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]],
 });
