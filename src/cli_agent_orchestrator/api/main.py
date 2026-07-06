@@ -426,8 +426,24 @@ async def lifespan(app: FastAPI):
 
             a2a_router = None
             a2a_stream_router = None
-            if os.environ.get("CAO_A2A_DISABLED", "false").lower() != "true":
-                a2a_store = InMemoryTaskStore()
+            a2a_wanted = os.environ.get("CAO_A2A_DISABLED", "false").lower() != "true"
+            # Fail closed on the dangerous combination: A2A task routes on a
+            # non-loopback bind with no auth configured would be an
+            # unauthenticated write API for any network peer. Loopback+no-auth
+            # stays allowed (the default-off dev posture).
+            a2a_bind_host = os.environ.get("CAO_AGENT_CARD_HOST", "127.0.0.1")
+            a2a_loopback = a2a_bind_host in ("127.0.0.1", "localhost", "::1")
+            if a2a_wanted and not a2a_loopback and not is_auth_enabled():
+                logger.error(
+                    "Refusing to mount the A2A task routes: CAO_AGENT_CARD_HOST=%s is "
+                    "non-loopback and auth is not configured (set AUTH0_DOMAIN / "
+                    "CAO_AUTH_JWKS_URI, or bind loopback). The Agent Card discovery "
+                    "routes are still served.",
+                    a2a_bind_host,
+                )
+                a2a_wanted = False
+            if a2a_wanted:
+                a2a_store = InMemoryTaskStore.from_env()
                 a2a_bus = InMemoryTaskEventBus()
                 a2a_router = build_a2a_router(store=a2a_store, bus=a2a_bus)
                 a2a_stream_router = build_stream_router(store=a2a_store, bus=a2a_bus)

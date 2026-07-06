@@ -18,8 +18,10 @@ the SSE handler forwards them. A ``NullBus`` is provided for tests +
 deployments where streaming isn't wired.
 
 The bus + store + transport endpoints together form the full A2A
-v1.0 server side. Authentication via the JWKS published at
-``/.well-known/jwks.json`` is enforced once auth is enabled.
+v1.0 server side. Authentication: when CAO auth is enabled, both routes
+require an ``Authorization: Bearer`` JWT carrying ``cao:read`` (validated
+against the configured JWKS via ``require_any_scope``); when auth is
+disabled (default-off) no token is required.
 """
 
 from __future__ import annotations
@@ -28,13 +30,19 @@ import asyncio
 import json
 import logging
 from collections import defaultdict
-from typing import Any, AsyncIterator, Optional, Protocol, runtime_checkable
+from typing import Any, AsyncIterator, List, Optional, Protocol, runtime_checkable
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from cli_agent_orchestrator.a2a.store import TaskStore
 from cli_agent_orchestrator.a2a.types import A2AErrorCode, TaskState
+from cli_agent_orchestrator.security.auth import (
+    SCOPE_ADMIN,
+    SCOPE_READ,
+    SCOPE_WRITE,
+    require_any_scope,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +167,10 @@ def build_stream_router(
     router = APIRouter(prefix="/a2a/v1", tags=["a2a"])
 
     @router.get("/tasks/{task_id}")
-    async def get_task(task_id: str) -> JSONResponse:
+    async def get_task(
+        task_id: str,
+        _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+    ) -> JSONResponse:
         task = await store.get(task_id)
         if task is None:
             return JSONResponse(
@@ -174,7 +185,10 @@ def build_stream_router(
         return JSONResponse({"task": task.to_dict()})
 
     @router.get("/stream/{task_id}")
-    async def stream(task_id: str) -> StreamingResponse:
+    async def stream(
+        task_id: str,
+        _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+    ) -> StreamingResponse:
         async def gen() -> AsyncIterator[bytes]:
             # 1. Initial state (or 404-equivalent + close).
             task = await store.get(task_id)

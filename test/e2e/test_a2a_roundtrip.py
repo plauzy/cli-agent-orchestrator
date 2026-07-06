@@ -208,3 +208,72 @@ async def test_a2a_round_trip_two_peers():
         terminal_payload = terminal_events[0]["data"]
         assert terminal_payload.get("task", {}).get("id") == "rt-task-1"
         assert terminal_payload.get("task", {}).get("state") == TaskState.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_a2a_round_trip_authenticated(monkeypatch, jwt_factory, jwks_server):
+    """Same round-trip with auth enforced: 401 untokened, full flow with JWTs.
+
+    Added with the #387 review remediation — the transport now gates
+    task.send/cancel on ``cao:write`` and task.get/stream on ``cao:read``
+    against a live JWKS, so the e2e proves the authenticated path end-to-end.
+    """
+    from cli_agent_orchestrator.security import auth as auth_mod
+
+    monkeypatch.setenv("AUTH0_DOMAIN", jwt_factory.domain)
+    monkeypatch.setenv("AUTH0_AUDIENCE", jwt_factory.audience)
+    monkeypatch.setenv("CAO_AUTH_JWKS_URI", jwks_server.url)
+    auth_mod.reset_jwks_cache()
+    try:
+        app_b, _, _ = _build_peer(with_executor=True)
+        transport_b = httpx.ASGITransport(app=app_b)
+        write_h = {"Authorization": f"Bearer {jwt_factory.mint(scopes='cao:write')}"}
+        read_h = {"Authorization": f"Bearer {jwt_factory.mint(scopes='cao:read')}"}
+        send_req = {
+            "jsonrpc": "2.0",
+            "id": "rt-auth-1",
+            "method": "task.send",
+            "params": {"task": {"id": "rt-auth-task", "messages": []}},
+        }
+        async with httpx.AsyncClient(transport=transport_b, base_url="http://peer-b") as client_b:
+            # Untokened peer is rejected before any task work happens.
+            anon = await client_b.post("/a2a/v1/rpc", json=send_req)
+            assert anon.status_code == 401
+
+            # Authorized peer runs the full lifecycle.
+            sent = await client_b.post("/a2a/v1/rpc", json=send_req, headers=write_h)
+            assert sent.status_code == 200, sent.text
+            assert "error" not in sent.json()
+
+            deadline = asyncio.get_event_loop().time() + 5.0
+            final_state = None
+            while asyncio.get_event_loop().time() < deadline:
+                got = await client_b.post(
+                    "/a2a/v1/rpc",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": "rt-auth-get",
+                        "method": "task.get",
+                        "params": {"id": "rt-auth-task"},
+                    },
+                    headers=read_h,
+                )
+                assert got.status_code == 200
+                task_payload = got.json()["result"]["task"]
+                if TaskState.is_terminal(task_payload["state"]):
+                    final_state = task_payload["state"]
+                    break
+                await asyncio.sleep(0.05)
+            assert final_state == TaskState.COMPLETED
+
+            # Stream also requires the read scope.
+            anon_stream = await client_b.get("/a2a/v1/stream/rt-auth-task")
+            assert anon_stream.status_code == 401
+            async with client_b.stream(
+                "GET", "/a2a/v1/stream/rt-auth-task", headers=read_h, timeout=5.0
+            ) as stream_resp:
+                assert stream_resp.status_code == 200
+                events = await _read_sse_events(stream_resp.aiter_bytes(), max_events=2)
+            assert any(e["event"] in ("task.terminal", "task.update") for e in events)
+    finally:
+        auth_mod.reset_jwks_cache()

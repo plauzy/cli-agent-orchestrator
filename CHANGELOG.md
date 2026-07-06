@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Standalone dashboard PWA** (`cao_pwa/`) — a multi-instance fleet dashboard that consumes the AG-UI stream from any browser (no MCP host required), with automatic reconnection that resumes via `?since=`. See [docs/pwa.md](docs/pwa.md).
 
-- **A2A v1.0 transport + signed Agent Card** — JSON-RPC 2.0 (`task.send`/`get`/`cancel`), SSE streaming, and REST polling for agent-to-agent interop, plus an Ed25519-signed Agent Card + JWKS published on a dedicated listener. The listener is default-off (`CAO_AGENT_CARD_ENABLED`) and binds loopback (127.0.0.1) unless an operator opts into external discoverability with `CAO_AGENT_CARD_HOST`. See [docs/auth.md](docs/auth.md).
+- **A2A v1.0 transport + signed Agent Card** — JSON-RPC 2.0 (`task.send`/`get`/`cancel`), SSE streaming, and REST polling for agent-to-agent interop, plus an Ed25519-signed Agent Card + JWKS published on a dedicated listener. The listener is default-off (`CAO_AGENT_CARD_ENABLED`) and binds loopback (127.0.0.1) unless an operator opts into external discoverability with `CAO_AGENT_CARD_HOST`. When auth is enabled, every task route is scope-gated (`task.send`/`cancel` → `cao:write`; `task.get`/stream → `cao:read`) with 401/403 carried as both HTTP status and JSON-RPC error; a non-loopback bind without auth refuses to mount the task routes (fail-closed); and the in-memory task store is bounded (`CAO_A2A_MAX_TASKS`, `CAO_A2A_TASK_TTL`). See [docs/auth.md](docs/auth.md).
 
 - **OpenTelemetry GenAI instrumentation** — opt-in traces/metrics over OTLP following the GenAI semantic conventions. See [docs/otel-deployment.md](docs/otel-deployment.md).
 

@@ -192,6 +192,50 @@ token is a full operator.
 is byte-identical to prior releases — loopback peer check only, no token
 required, no subprotocol echoed.
 
+## A2A transport auth (the :9890 listener)
+
+The A2A task routes (`POST /a2a/v1/rpc`, `GET /a2a/v1/tasks/{id}`,
+`GET /a2a/v1/stream/{id}`) enforce the same JWT scheme per method:
+`task.send` / `task.cancel` require `cao:write`; `task.get` and the
+stream/REST reads require `cao:read`. Failures return 401 (missing /
+malformed / expired bearer) or 403 (insufficient scope), carried both as
+the HTTP status and as a JSON-RPC error body.
+
+Two hard safety properties:
+
+- **Fail-closed mount**: with `CAO_AGENT_CARD_HOST` set to a non-loopback
+  address and auth *not* configured, CAO refuses to mount the task routes
+  (discovery — Agent Card + JWKS — still serves). An external-facing,
+  unauthenticated task API is never a reachable configuration.
+- **Bounded task store**: the in-memory store is capped
+  (`CAO_A2A_MAX_TASKS`, default 1000) and time-windowed
+  (`CAO_A2A_TASK_TTL`, default 3600 s). On overflow the oldest terminal
+  tasks are evicted; when full of live tasks, `task.send` returns the
+  `TASK_LIMIT_EXCEEDED` JSON-RPC error so peers back off.
+
+Walkthrough (auth enabled):
+
+```sh
+# 1. No token -> 401 with a JSON-RPC UNAUTHENTICATED error
+curl -si http://localhost:9890/a2a/v1/rpc \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":"1","method":"task.send","params":{"task":{"id":"t1","messages":[]}}}'
+# HTTP/1.1 401 Unauthorized
+# {"jsonrpc":"2.0","id":null,"error":{"code":3,"message":"missing bearer token"}}
+
+# 2. cao:read token cannot submit work -> 403 PERMISSION_DENIED
+curl -si http://localhost:9890/a2a/v1/rpc \
+  -H "Authorization: Bearer $READ_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":"1","method":"task.send","params":{"task":{"id":"t1","messages":[]}}}'
+# HTTP/1.1 403 Forbidden
+
+# 3. cao:write token -> 200 with the task envelope
+curl -s http://localhost:9890/a2a/v1/rpc \
+  -H "Authorization: Bearer $WRITE_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":"1","method":"task.send","params":{"task":{"id":"t1","messages":[]}}}' | jq .result.task.state
+# "submitted"
+```
+
 ## Gaps (deferred to follow-up sibling-PRs)
 
 - **OBO token exchange** (RFC 8693) — if your MCP host wants to swap
