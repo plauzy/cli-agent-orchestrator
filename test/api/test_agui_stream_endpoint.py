@@ -49,9 +49,25 @@ def test_stream_replays_history_and_emits_state_frames(monkeypatch):
         "detail": {"sender": "a", "receiver": "b", "orchestration_type": "handoff"},
     }
 
+    # An older event that a correct ``since=`` pass-through must exclude: the
+    # endpoint forwards the query param to ``EventLog.history(since=...)`` and
+    # this fake honors it with the same strictly-greater-than contract, so the
+    # replay wiring in main.py is exercised end-to-end rather than stubbed out.
+    stale_event = {
+        "id": "evt-stale",
+        "kind": "completion",
+        "terminal_id": "t-0",
+        "session_name": "s",
+        "timestamp": "2026-07-03T23:59:58Z",
+        "detail": {"agent_name": "old", "provider": "mock_cli"},
+    }
+
     class _FakeLog:
-        def history(self, **kwargs):
-            return [replay_event]
+        def history(self, since=None, **kwargs):
+            events = [stale_event, replay_event]
+            if since is None:
+                return events
+            return [e for e in events if str(e["timestamp"]) > since]
 
     # A single live event, then the subscription completes so the stream closes.
     live_event = {
@@ -76,7 +92,7 @@ def test_stream_replays_history_and_emits_state_frames(monkeypatch):
         lambda: _FakeBus(),
     )
 
-    with client.stream("GET", "/agui/v1/stream", params={"since": "2026-07-04T00:00:00Z"}) as resp:
+    with client.stream("GET", "/agui/v1/stream", params={"since": "2026-07-03T23:59:59Z"}) as resp:
         assert resp.status_code == 200
         body = "".join(resp.iter_text())
 
@@ -84,3 +100,7 @@ def test_stream_replays_history_and_emits_state_frames(monkeypatch):
     assert "STATE_SNAPSHOT" in body
     assert "STEP_STARTED" in body  # from the live launch event
     assert "event:" in body and "data:" in body
+    # The ?since= boundary is enforced through the endpoint: the newer replay
+    # event is present, the older one is filtered out before hitting the wire.
+    assert "evt-old" in body
+    assert "evt-stale" not in body
