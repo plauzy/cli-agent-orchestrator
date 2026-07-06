@@ -88,6 +88,23 @@ https://cao-dashboard.example.com/?access_token=eyJhbGc...
 
 A dedicated token-input UX (rather than a URL parameter) is a follow-up.
 
+### Query-parameter tokens and log hygiene
+
+Because the token rides in the URL, it can otherwise leak into access logs,
+reverse-proxy logs, and `Referer` headers, where it is replayable until `exp`.
+Two mitigations:
+
+- **CAO scrubs it server-side.** `cao-server` installs a log filter that masks
+  `?access_token=` (and `?ticket=`) values in uvicorn's access log, so the
+  token is not written to disk while normal access logging stays on.
+- **Use short token TTLs.** Configure your IdP to issue short-lived
+  `cao:read` tokens for dashboard use so a leaked URL has a small replay window.
+
+A short-lived, single-use **ticket handshake** — `POST /agui/v1/ticket` with a
+header-borne JWT that returns an opaque `?ticket=` good for one connection — is
+a planned follow-up that removes the standing bearer from the URL entirely. It
+is intentionally **not** part of this change.
+
 ## Connection resilience
 
 The client manages reconnection itself: on a dropped connection it backs off
@@ -110,6 +127,63 @@ Not yet included:
   command surface.
 - Cross-instance aggregation — one tab per instance.
 - mDNS / Bonjour discovery — manual entry only.
+
+## Generative UI
+
+CAO orchestrates a heterogeneous fleet of CLI coding agents (Claude Code, Kiro,
+Codex, Antigravity, Cursor, Copilot, OpenCode, Kimi, Hermes). Generative UI lets
+**any** of them author a UI intent that renders **uniformly on one surface** —
+the operator can't tell (and doesn't need to) which provider produced which
+card.
+
+What makes this shippable over *untrusted* agents — and the key difference from
+arbitrary-HTML approaches — is the safety model: an agent may only emit a
+**closed allow-list of named components with JSON props**. No HTML, no script,
+no `eval`, no iframe. An off-list component is **refused, never rendered**.
+
+### Wire path
+
+An agent authors a UI intent that rides a CAO event as a `ui` block
+(`{component, props}`) → the AG-UI adapter maps it to a typed `GENERATIVE_UI`
+frame → `GET /agui/v1/stream` emits it → any AG-UI client renders it. Agents
+author intents via the `emit_ui` MCP tool / `POST /agui/v1/emit_ui`.
+
+- **Backend** (`services/agui_stream.py`): the typed `GENERATIVE_UI` event and a
+  closed allow-list `GENERATIVE_UI_COMPONENTS = {approval_card, choice_prompt,
+  diff_summary, progress, metric, agent_card}`. `to_agui_event` maps a record
+  carrying `ui.component` (top-level or in `detail`) to a `GENERATIVE_UI` frame;
+  unknown components are **refused → `RAW` with `rejected_component`**; props are
+  validated JSON-serializable and size-bounded (8 KB), degrading safely.
+- **Frontend** (`cao_pwa/src/components/GenerativeUI.tsx`): a React renderer with
+  a **client-side mirror of the allow-list** (defense in depth). Each component
+  renders from JSON props only — no `dangerouslySetInnerHTML`, no `eval`. Unknown
+  components render as an inert placeholder.
+
+### Safety model
+
+| Threat | Mitigation |
+|---|---|
+| Agent emits arbitrary HTML/script | No HTML on the wire — only named components + JSON props |
+| Agent names an off-list component (e.g. `iframe`) | Refused server-side (→ `RAW`) **and** client-side (inert placeholder) |
+| Agent floods the bus with a huge payload | Props capped at 8 KB → `{_truncated: true}` |
+| Non-serializable props | Degrade to `{}` rather than crashing the stream |
+| Message-body leakage | Bodies never enter the props path (metadata-only contract) |
+
+The refusal is asserted at three layers — the Python adapter, the React
+component, and the browser-openable replay artifact
+(`cao_pwa/demo/generative-ui-replay.html`) — so an off-list component cannot slip
+through any of them. The Playwright harness (`cao_pwa/e2e/generative-ui.spec.ts`)
+drives that replay in CI, asserting every allow-listed component renders and the
+`iframe` intent is refused.
+
+### Follow-ups
+
+- **Bidirectional generative UI** — approve/choose actions POST `submit_command`
+  (needs the Bearer-input UX from the auth work).
+- **`STATE_DELTA` debounce/cache** — the `/agui/v1/stream` snapshot recompute is
+  per-event today.
+- **In-host (MCP Apps) parity** — render the same allow-list inside the MCP Apps
+  iframe so the in-host and standalone surfaces match.
 
 ## Privacy boundary
 

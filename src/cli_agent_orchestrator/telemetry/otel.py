@@ -57,13 +57,25 @@ def init_telemetry(service_name: str) -> None:
     if _provider is not None:
         return
 
-    # Imports are deferred so the OTel packages do not have to be loaded when
+    # Imports are deferred so the OTel SDK does not have to be loaded when
     # telemetry is off — keeps cold start fast and keeps test isolation simple.
+    # The SDK + OTLP exporter ship as the opt-in ``[otel]`` extra; if telemetry
+    # is enabled without that extra installed, degrade to a logged no-op rather
+    # than crashing the server.
     from opentelemetry import trace
-    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-    from opentelemetry.sdk.resources import Resource
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+    try:
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    except ImportError:
+        logger.warning(
+            "OTEL_SDK_DISABLED=false but the OpenTelemetry SDK is not installed; "
+            "telemetry stays off. Install the extra: pip install "
+            "cli-agent-orchestrator[otel]"
+        )
+        return
 
     resource = Resource.create(
         {

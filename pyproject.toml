@@ -45,15 +45,22 @@ dependencies = [
     # verification and provides `jwt.PyJWKClient`. See spec task 9.1 research note.
     "pyjwt[crypto]>=2.8.0",
     "jsonschema>=4.25",
-    # Ported net-new subsystems (fork plauzy/cao):
-    # OpenTelemetry GenAI telemetry (telemetry/, observability/span_consumer).
+    # OpenTelemetry GenAI telemetry API (telemetry/). The lightweight API is a
+    # core dependency so the span/context helpers import cleanly and act as
+    # zero-overhead no-ops when telemetry is disabled. The heavy SDK + OTLP
+    # exporter are an opt-in extra (see [project.optional-dependencies].otel)
+    # and are imported lazily, only when telemetry is explicitly enabled.
     "opentelemetry-api>=1.27.0",
+]
+
+[project.optional-dependencies]
+# Opt-in OpenTelemetry SDK + OTLP/gRPC exporter. Only required to actually
+# export spans/metrics (OTEL_SDK_DISABLED=false); keeping them out of the base
+# install avoids pulling grpcio/protobuf for the default, telemetry-off path.
+# Install with: pip install cli-agent-orchestrator[otel]
+otel = [
     "opentelemetry-sdk>=1.27.0",
     "opentelemetry-exporter-otlp-proto-grpc>=1.27.0",
-    # A2A JSON-RPC + signed Agent Card OAuth PRM (a2a/, agent_card/).
-    "authlib>=1.7.1",
-    # multipart form parsing for the A2A/agent-card listener endpoints.
-    "python-multipart>=0.0.27",
 ]
 
 [project.scripts]
@@ -95,6 +102,12 @@ artifacts = [
 
 [dependency-groups]
 dev = [
+    # Test-only: the JWT/JWKS fixtures (test/fixtures/jwt_factory.py,
+    # test/fixtures/cao_server.py) mint keys via authlib.jose to exercise the
+    # WebSocket + AG-UI query-token auth paths. Runtime code does not import
+    # authlib (it verifies tokens via pyjwt[crypto]); it returns as a runtime
+    # dependency with the A2A/Agent-Card follow-up PR.
+    "authlib>=1.7.1",
     "pytest>=9.0.3",
     "pytest-asyncio>=0.26.0",
     "pytest-mock>=3.11.1",
@@ -116,7 +129,10 @@ profile = "black"
 line_length = 100
 
 [tool.mypy]
-python_version = "3.11"
+# Match the package's minimum supported runtime (requires-python = ">=3.10")
+# so type-checking catches 3.11-only typing/runtime features that would break
+# on the lowest supported interpreter.
+python_version = "3.10"
 strict = true
 warn_return_any = true
 warn_unused_configs = true

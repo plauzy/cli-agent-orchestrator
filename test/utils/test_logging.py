@@ -121,3 +121,70 @@ class TestSetupLogging:
             assert "%(asctime)s" in call_kwargs["format"]
             assert "%(name)s" in call_kwargs["format"]
             assert "%(levelname)s" in call_kwargs["format"]
+
+
+class TestRedactQueryTokenFilter:
+    """Tests for the access-log query-token redaction filter."""
+
+    def _record(self, msg, args):
+        return logging.LogRecord(
+            name="uvicorn.access",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg=msg,
+            args=args,
+            exc_info=None,
+        )
+
+    def test_redacts_access_token_in_args(self):
+        from cli_agent_orchestrator.utils.logging import RedactQueryTokenFilter
+
+        f = RedactQueryTokenFilter()
+        # Mirrors uvicorn's access record: request line (with query) is an arg.
+        record = self._record(
+            '%s - "%s %s HTTP/%s" %d',
+            ("127.0.0.1:5555", "GET", "/agui/v1/stream?access_token=eyJhbGciSECRET", "1.1", 200),
+        )
+        assert f.filter(record) is True
+        rendered = record.getMessage()
+        assert "eyJhbGciSECRET" not in rendered
+        assert "access_token=REDACTED" in rendered
+        # The rest of the request line is preserved.
+        assert "/agui/v1/stream" in rendered and "GET" in rendered
+
+    def test_redacts_ticket_param(self):
+        from cli_agent_orchestrator.utils.logging import RedactQueryTokenFilter
+
+        f = RedactQueryTokenFilter()
+        record = self._record("%s", ("/agui/v1/stream?ticket=abc123DEF&x=1",))
+        f.filter(record)
+        rendered = record.getMessage()
+        assert "abc123DEF" not in rendered
+        assert "ticket=REDACTED" in rendered
+        assert "x=1" in rendered  # non-sensitive params untouched
+
+    def test_leaves_plain_lines_untouched(self):
+        from cli_agent_orchestrator.utils.logging import RedactQueryTokenFilter
+
+        f = RedactQueryTokenFilter()
+        record = self._record(
+            '%s - "%s %s HTTP/%s" %d', ("127.0.0.1", "GET", "/health", "1.1", 200)
+        )
+        f.filter(record)
+        assert record.getMessage().endswith('"GET /health HTTP/1.1" 200')
+
+    def test_install_is_idempotent(self):
+        from cli_agent_orchestrator.utils.logging import (
+            RedactQueryTokenFilter,
+            install_access_log_redaction,
+        )
+
+        access_logger = logging.getLogger("uvicorn.access")
+        before = [f for f in access_logger.filters if isinstance(f, RedactQueryTokenFilter)]
+        for existing in before:
+            access_logger.removeFilter(existing)
+        install_access_log_redaction()
+        install_access_log_redaction()
+        matches = [f for f in access_logger.filters if isinstance(f, RedactQueryTokenFilter)]
+        assert len(matches) == 1

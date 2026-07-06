@@ -71,6 +71,12 @@ body,
   border-color: var(--accent);
 }
 
+.cao-pwa-tab-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .cao-pwa-remove {
   font-size: 14px;
   color: var(--muted);
