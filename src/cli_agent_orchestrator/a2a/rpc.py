@@ -21,8 +21,19 @@ Methods:
     the task to ``canceled`` if it isn't terminal yet; otherwise
     returns ``TASK_ALREADY_TERMINAL``.
 
-Authentication is enforced via the JWKS published at
-``/.well-known/jwks.json`` once auth is enabled.
+Authorization (enforced when the auth layer is enabled — ``AUTH0_DOMAIN``
+or ``CAO_AUTH_JWKS_URI`` set): every call must carry a valid
+``Authorization: Bearer <JWT>``, verified via the configured JWKS
+(RS256 + issuer + audience + expiry). Scope is enforced **per method**:
+``task.send`` / ``task.cancel`` require ``cao:write``; ``task.get``
+requires ``cao:read`` (``cao:admin`` satisfies any). A missing/invalid
+token → HTTP 401 ``UNAUTHENTICATED``; a valid token lacking the required
+scope → HTTP 403 ``PERMISSION_DENIED`` — both returned as JSON-RPC error
+bodies with the matching HTTP status (auth failures are NOT tunnelled
+through 200 OK). When the auth layer is default-off no token is required
+(the localhost posture is byte-for-byte unchanged); that is why the
+dedicated listener refuses to mount this router on a non-loopback bind
+while auth is disabled (see ``api/main.py``).
 
 Per the JSON-RPC 2.0 spec:
   * Parse errors return id=null with code -32700.
@@ -45,7 +56,7 @@ from typing import Any, Awaitable, Callable, Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from cli_agent_orchestrator.a2a.store import InMemoryTaskStore, TaskStore
+from cli_agent_orchestrator.a2a.store import InMemoryTaskStore, TaskStore, TaskStoreFull
 from cli_agent_orchestrator.a2a.stream import NullEventBus, TaskEventBus
 from cli_agent_orchestrator.a2a.types import (
     A2AErrorCode,
@@ -56,8 +67,26 @@ from cli_agent_orchestrator.a2a.types import (
     Task,
     TaskState,
 )
+from cli_agent_orchestrator.security.auth import (
+    SCOPE_ADMIN,
+    SCOPE_READ,
+    SCOPE_WRITE,
+    extract_scopes_from_token,
+    is_auth_enabled,
+)
 
 logger = logging.getLogger(__name__)
+
+# Per-method scope requirement. Mutations (send/cancel) need cao:write;
+# the read-only state query (get) needs cao:read. cao:admin satisfies any.
+# Unknown methods default to cao:read so an authenticated reader still gets a
+# clean METHOD_NOT_FOUND rather than the method surface leaking to anonymous
+# callers.
+_METHOD_REQUIRED_SCOPE: dict[str, str] = {
+    "task.send": SCOPE_WRITE,
+    "task.cancel": SCOPE_WRITE,
+    "task.get": SCOPE_READ,
+}
 
 
 # A peer-supplied task → final-state task. The executor is responsible
@@ -137,7 +166,12 @@ async def _handle_task_send(
         task.state = TaskState.SUBMITTED
     if task.created_at is None:
         task.created_at = time.time()
-    await store.upsert(task)
+    try:
+        await store.upsert(task)
+    except TaskStoreFull as exc:
+        # Bounded store at capacity with no evictable (terminal) task: refuse
+        # the new task with a clean 429 instead of growing without limit.
+        raise _app_error(A2AErrorCode.RESOURCE_EXHAUSTED, str(exc), http_status=429)
     await bus.publish(task.id, {"task": task.to_dict()})
 
     if executor is not None:
@@ -206,21 +240,79 @@ _METHODS: dict[
 
 
 class _RpcException(Exception):
-    """Raised by handlers to signal a JSON-RPC error response."""
+    """Raised by handlers to signal a JSON-RPC error response.
 
-    def __init__(self, code: int, message: str, data: Any = None) -> None:
+    ``http_status`` defaults to 200 (JSON-RPC application errors ride a 200 OK
+    with the error in the body); handlers may raise a non-200 status for
+    transport-level conditions (e.g. 429 when the store is exhausted).
+    """
+
+    def __init__(self, code: int, message: str, data: Any = None, http_status: int = 200) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.data = data
+        self.http_status = http_status
 
 
 def _invalid_params(message: str) -> _RpcException:
     return _RpcException(int(A2AErrorCode.INVALID_PARAMS), message)
 
 
-def _app_error(code: A2AErrorCode, message: str) -> _RpcException:
-    return _RpcException(int(code), message)
+def _app_error(code: A2AErrorCode, message: str, *, http_status: int = 200) -> _RpcException:
+    return _RpcException(int(code), message, http_status=http_status)
+
+
+def _extract_bearer(authorization: Optional[str]) -> Optional[str]:
+    """Pull the bearer token out of an ``Authorization`` header value."""
+    if not authorization:
+        return None
+    parts = authorization.split(None, 1)
+    if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1].strip():
+        return parts[1].strip()
+    return None
+
+
+def _authorize(request: Request, method: str, req_id: JsonRpcId) -> Optional[JSONResponse]:
+    """Enforce authentication + per-method scope.
+
+    Returns ``None`` when the caller is authorized (or the auth layer is
+    default-off). Otherwise returns a JSON-RPC error ``JSONResponse`` with the
+    matching HTTP status: 401 for a missing/invalid token, 403 for a valid
+    token that lacks the scope ``method`` requires.
+    """
+    if not is_auth_enabled():
+        return None
+    token = _extract_bearer(request.headers.get("authorization"))
+    if not token:
+        return JSONResponse(
+            _error_response(req_id, int(A2AErrorCode.UNAUTHENTICATED), "missing bearer token"),
+            status_code=401,
+        )
+    try:
+        scopes = set(extract_scopes_from_token(token))
+    except Exception as exc:
+        return JSONResponse(
+            _error_response(req_id, int(A2AErrorCode.UNAUTHENTICATED), f"invalid token: {exc}"),
+            status_code=401,
+        )
+    required = _METHOD_REQUIRED_SCOPE.get(method, SCOPE_READ)
+    granted = (
+        SCOPE_ADMIN in scopes
+        or required in scopes
+        # A write grant implies the ability to read.
+        or (required == SCOPE_READ and SCOPE_WRITE in scopes)
+    )
+    if not granted:
+        return JSONResponse(
+            _error_response(
+                req_id,
+                int(A2AErrorCode.PERMISSION_DENIED),
+                f"requires scope {required!r}",
+            ),
+            status_code=403,
+        )
+    return None
 
 
 def _error_response(req_id: JsonRpcId, code: int, message: str, data: Any = None) -> dict[str, Any]:
@@ -308,6 +400,13 @@ def build_a2a_router(
                 status_code=400,
             )
 
+        # Authenticate + authorize before dispatch (and before method lookup,
+        # so the method surface does not leak to anonymous callers). No-op when
+        # the auth layer is default-off.
+        auth_error = _authorize(request, req.method, req.id)
+        if auth_error is not None:
+            return auth_error
+
         handler = _METHODS.get(req.method)
         if handler is None:
             return JSONResponse(
@@ -323,8 +422,12 @@ def build_a2a_router(
             result = await handler(task_store, event_bus, req.params, executor)
             return JSONResponse(_success_response(req.id, result))
         except _RpcException as exc:
-            # Application-level errors are still 200 OK per JSON-RPC.
-            return JSONResponse(_error_response(req.id, exc.code, exc.message, exc.data))
+            # Application-level errors ride a 200 OK per JSON-RPC unless the
+            # handler set a transport status (e.g. 429 for a full store).
+            return JSONResponse(
+                _error_response(req.id, exc.code, exc.message, exc.data),
+                status_code=exc.http_status,
+            )
         except Exception as exc:  # pragma: no cover - defensive, internal bug
             logger.exception("A2A RPC handler crashed: method=%s", req.method)
             return JSONResponse(

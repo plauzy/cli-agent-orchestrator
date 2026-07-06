@@ -72,6 +72,10 @@ class A2AErrorCode(IntEnum):
     TASK_ALREADY_TERMINAL = 2
     UNAUTHENTICATED = 3
     UNSUPPORTED_OPERATION = 4
+    # Caller authenticated but lacks the scope the method requires (HTTP 403).
+    PERMISSION_DENIED = 5
+    # Task store is at capacity and cannot accept a new task (HTTP 429).
+    RESOURCE_EXHAUSTED = 6
 
 
 @dataclass

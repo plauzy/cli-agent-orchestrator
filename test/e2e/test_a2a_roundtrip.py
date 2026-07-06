@@ -208,3 +208,81 @@ async def test_a2a_round_trip_two_peers():
         terminal_payload = terminal_events[0]["data"]
         assert terminal_payload.get("task", {}).get("id") == "rt-task-1"
         assert terminal_payload.get("task", {}).get("state") == TaskState.COMPLETED
+
+
+# ---------------------------------------------------------------------------
+# Authenticated round-trip (auth layer enabled)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a2a_round_trip_authenticated(monkeypatch):
+    """Same peer-to-peer lifecycle, but with the auth layer enabled: an
+    anonymous ``task.send`` is rejected 401, a write-scoped token drives the
+    task to completion, and a read-scoped token can poll it back."""
+    import cli_agent_orchestrator.a2a.rpc as rpc_mod
+    import cli_agent_orchestrator.security.auth as auth_mod
+
+    scopes = {"tok-write": ["cao:write"], "tok-read": ["cao:read"]}
+
+    def _extract(token: str):
+        if token in scopes:
+            return list(scopes[token])
+        raise ValueError("unknown token")
+
+    for mod in (rpc_mod, auth_mod):
+        monkeypatch.setattr(mod, "is_auth_enabled", lambda: True)
+        monkeypatch.setattr(mod, "extract_scopes_from_token", _extract)
+
+    app_b, store_b, _ = _build_peer(with_executor=True)
+    transport_b = httpx.ASGITransport(app=app_b)
+    async with httpx.AsyncClient(transport=transport_b, base_url="http://peer-b") as client_b:
+        send_body = {
+            "jsonrpc": "2.0",
+            "id": "auth-1",
+            "method": "task.send",
+            "params": {
+                "task": {"id": "auth-task-1", "messages": [{"role": "user", "content": "ping"}]}
+            },
+        }
+
+        # 1. Anonymous send is rejected before dispatch.
+        anon = await client_b.post("/a2a/v1/rpc", json=send_body)
+        assert anon.status_code == 401, anon.text
+
+        # 2. Write-scoped token is accepted.
+        authed = await client_b.post(
+            "/a2a/v1/rpc", json=send_body, headers={"authorization": "Bearer tok-write"}
+        )
+        assert authed.status_code == 200, authed.text
+        assert "error" not in authed.json()
+
+        # 3. Read-scoped token polls the task to a terminal state.
+        deadline = asyncio.get_event_loop().time() + 5.0
+        final_state = None
+        while asyncio.get_event_loop().time() < deadline:
+            get_resp = await client_b.post(
+                "/a2a/v1/rpc",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": "auth-get",
+                    "method": "task.get",
+                    "params": {"id": "auth-task-1"},
+                },
+                headers={"authorization": "Bearer tok-read"},
+            )
+            assert get_resp.status_code == 200
+            state = get_resp.json()["result"]["task"]["state"]
+            if TaskState.is_terminal(state):
+                final_state = state
+                break
+            await asyncio.sleep(0.05)
+        assert final_state == TaskState.COMPLETED
+
+        # 4. REST poll: anonymous 401, read-scoped 200.
+        assert (await client_b.get("/a2a/v1/tasks/auth-task-1")).status_code == 401
+        rest = await client_b.get(
+            "/a2a/v1/tasks/auth-task-1", headers={"authorization": "Bearer tok-read"}
+        )
+        assert rest.status_code == 200
+        assert rest.json()["task"]["id"] == "auth-task-1"
