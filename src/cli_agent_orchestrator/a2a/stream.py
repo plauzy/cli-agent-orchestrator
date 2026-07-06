@@ -18,8 +18,12 @@ the SSE handler forwards them. A ``NullBus`` is provided for tests +
 deployments where streaming isn't wired.
 
 The bus + store + transport endpoints together form the full A2A
-v1.0 server side. Authentication via the JWKS published at
-``/.well-known/jwks.json`` is enforced once auth is enabled.
+v1.0 server side. Both routes are read-only task queries, so when the
+auth layer is enabled they require ``cao:read`` (``cao:write`` /
+``cao:admin`` also satisfy it) via ``Depends(require_any_scope(...))`` —
+a missing/invalid token yields HTTP 401, an insufficient scope HTTP 403.
+When the auth layer is default-off the dependency resolves to the full
+scope set, so the localhost posture is byte-for-byte unchanged.
 """
 
 from __future__ import annotations
@@ -30,11 +34,17 @@ import logging
 from collections import defaultdict
 from typing import Any, AsyncIterator, Optional, Protocol, runtime_checkable
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from cli_agent_orchestrator.a2a.store import TaskStore
 from cli_agent_orchestrator.a2a.types import A2AErrorCode, TaskState
+from cli_agent_orchestrator.security.auth import (
+    SCOPE_ADMIN,
+    SCOPE_READ,
+    SCOPE_WRITE,
+    require_any_scope,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +166,13 @@ def build_stream_router(
       bus-driven events in isolation.
     """
     event_bus = bus or NullEventBus()
-    router = APIRouter(prefix="/a2a/v1", tags=["a2a"])
+    # Read-only routes: require cao:read (write/admin also satisfy). No-op when
+    # the auth layer is default-off. Router-level so both routes are covered.
+    router = APIRouter(
+        prefix="/a2a/v1",
+        tags=["a2a"],
+        dependencies=[Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN))],
+    )
 
     @router.get("/tasks/{task_id}")
     async def get_task(task_id: str) -> JSONResponse:

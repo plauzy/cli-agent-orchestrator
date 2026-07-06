@@ -192,6 +192,68 @@ token is a full operator.
 is byte-identical to prior releases — loopback peer check only, no token
 required, no subprotocol echoed.
 
+## A2A transport authorization
+
+The A2A v1.0 transport (`POST /a2a/v1/rpc`, `GET /a2a/v1/stream/{id}`,
+`GET /a2a/v1/tasks/{id}`) is served on the dedicated Agent Card listener
+(`:9890`, default-off via `CAO_AGENT_CARD_ENABLED`). When the auth layer is
+enabled it enforces **per-method scope**, verified against the same JWKS used
+everywhere else:
+
+| Method | Required scope |
+|---|---|
+| `task.send`, `task.cancel` | `cao:write` |
+| `task.get`, `GET /stream/{id}`, `GET /tasks/{id}` | `cao:read` |
+
+`cao:admin` satisfies any method; a `cao:write` grant implies read. Auth
+failures are returned as JSON-RPC error bodies with the **matching HTTP
+status** — `401 UNAUTHENTICATED` for a missing/invalid token, `403
+PERMISSION_DENIED` for a valid token without the scope — never tunnelled
+through a 200.
+
+**Fail-closed mount guard.** The transport is a task *write* API, so the
+listener **refuses to mount it** when `CAO_AGENT_CARD_HOST` is non-loopback
+(e.g. `0.0.0.0`) *and* the auth layer is disabled — exposing an
+unauthenticated task API to the network is never allowed silently. The
+read-only Agent Card discovery document still publishes. Loopback + no-auth
+stays allowed for local development.
+
+**Bounded task store.** The in-memory store is capped (`CAO_A2A_MAX_TASKS`,
+default 1000) and TTL-evicting (`CAO_A2A_TASK_TTL` seconds, default 3600). On
+overflow the oldest *terminal* task is reclaimed first; if every slot holds a
+live, non-terminal task a new `task.send` is refused with `RESOURCE_EXHAUSTED`
+(HTTP 429) — a remote peer cannot drive unbounded memory growth.
+
+### Walkthrough (401 → token → 200)
+
+With auth enabled (`CAO_AUTH_JWKS_URI` or `AUTH0_DOMAIN` set) and the listener
+on loopback:
+
+```bash
+# 1. No token → 401 UNAUTHENTICATED (JSON-RPC error body, HTTP 401).
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  http://localhost:9890/a2a/v1/rpc \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":"1","method":"task.send","params":{"task":{"id":"","messages":[]}}}'
+# → 401
+
+# 2. A read-scoped token cannot write → 403 PERMISSION_DENIED.
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  http://localhost:9890/a2a/v1/rpc \
+  -H "authorization: Bearer $READ_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":"1","method":"task.send","params":{"task":{"id":"","messages":[]}}}'
+# → 403
+
+# 3. A write-scoped token succeeds → 200 with the task envelope.
+curl -s -X POST \
+  http://localhost:9890/a2a/v1/rpc \
+  -H "authorization: Bearer $WRITE_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":"1","method":"task.send","params":{"task":{"id":"","messages":[]}}}' | jq .result.task.state
+# → "submitted"
+```
+
 ## Gaps (deferred to follow-up sibling-PRs)
 
 - **OBO token exchange** (RFC 8693) — if your MCP host wants to swap

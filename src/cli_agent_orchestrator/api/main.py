@@ -328,6 +328,29 @@ class CreateFlowRequest(BaseModel):
         return v
 
 
+# Hosts treated as loopback for the A2A mount guard.
+_A2A_LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost")
+
+
+def _should_mount_a2a(*, bind_host: str, a2a_disabled: bool, auth_enabled: bool) -> bool:
+    """Decide whether to mount the A2A transport routers on the listener.
+
+    Fail-closed: the A2A JSON-RPC surface is a task *write* API, so it must not
+    be mounted on a non-loopback bind while the auth layer is disabled — that
+    combination would expose an unauthenticated, peer-controllable task API
+    (the exact finding the review reproduced). Loopback + no-auth stays allowed
+    for local dev; any bind with auth enabled is allowed; ``CAO_A2A_DISABLED``
+    always wins. Pure function so the decision is unit-testable without binding
+    a socket.
+    """
+    if a2a_disabled:
+        return False
+    loopback = bind_host in _A2A_LOOPBACK_HOSTS
+    if not loopback and not auth_enabled:
+        return False
+    return True
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
@@ -426,7 +449,24 @@ async def lifespan(app: FastAPI):
 
             a2a_router = None
             a2a_stream_router = None
-            if os.environ.get("CAO_A2A_DISABLED", "false").lower() != "true":
+            _bind_host = os.environ.get("CAO_AGENT_CARD_HOST", "127.0.0.1")
+            _a2a_disabled_flag = os.environ.get("CAO_A2A_DISABLED", "false").lower() == "true"
+            mount_a2a = _should_mount_a2a(
+                bind_host=_bind_host,
+                a2a_disabled=_a2a_disabled_flag,
+                auth_enabled=is_auth_enabled(),
+            )
+            if not _a2a_disabled_flag and not mount_a2a:
+                # The only reason mount was refused (given the flag is off) is
+                # the fail-closed guard: non-loopback bind with auth disabled.
+                logger.warning(
+                    "A2A transport NOT mounted: CAO_AGENT_CARD_HOST=%s is non-loopback but "
+                    "the auth layer is disabled (set CAO_AUTH_JWKS_URI or AUTH0_DOMAIN). "
+                    "Refusing to expose an unauthenticated task API. The Agent Card "
+                    "discovery document is still published.",
+                    _bind_host,
+                )
+            if mount_a2a:
                 a2a_store = InMemoryTaskStore()
                 a2a_bus = InMemoryTaskEventBus()
                 a2a_router = build_a2a_router(store=a2a_store, bus=a2a_bus)

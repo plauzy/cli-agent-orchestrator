@@ -6,7 +6,7 @@ alongside SSE streaming and a REST polling fallback.
 """
 
 from cli_agent_orchestrator.a2a.rpc import TaskExecutor, build_a2a_router
-from cli_agent_orchestrator.a2a.store import InMemoryTaskStore, TaskStore
+from cli_agent_orchestrator.a2a.store import InMemoryTaskStore, TaskStore, TaskStoreFull
 from cli_agent_orchestrator.a2a.stream import (
     InMemoryTaskEventBus,
     NullEventBus,
@@ -35,6 +35,7 @@ __all__ = [
     "TaskExecutor",
     "TaskState",
     "TaskStore",
+    "TaskStoreFull",
     "build_a2a_router",
     "build_stream_router",
 ]
