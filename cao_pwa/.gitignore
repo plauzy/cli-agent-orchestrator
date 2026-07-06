@@ -3,6 +3,8 @@ dist/
 .vite/
 *.log
 test-results/
+test-results-live/
 playwright-report/
+playwright-report-live/
 e2e/__screenshots__/
 recordings/

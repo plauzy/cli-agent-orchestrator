@@ -55,33 +55,28 @@ export function InstancePicker({ instances, activeId, onActivate, onChanged }: P
     <>
       <nav className="cao-pwa-nav" aria-label="CAO instances">
         {instances.map((inst) => (
-          <button
-            key={inst.id}
-            type="button"
-            className={inst.id === activeId ? "active" : ""}
-            onClick={() => onActivate(inst.id)}
-            aria-current={inst.id === activeId ? "page" : undefined}
-          >
-            {inst.label}
-            <span
-              role="button"
-              tabIndex={0}
+          // Two sibling <button>s rather than a remove control nested inside the
+          // tab button: nested interactive elements are invalid HTML and break
+          // keyboard / screen-reader behaviour. Native buttons also handle
+          // Enter/Space activation without manual key handlers.
+          <span key={inst.id} className="cao-pwa-tab-group">
+            <button
+              type="button"
+              className={inst.id === activeId ? "cao-pwa-tab-label active" : "cao-pwa-tab-label"}
+              onClick={() => onActivate(inst.id)}
+              aria-current={inst.id === activeId ? "page" : undefined}
+            >
+              {inst.label}
+            </button>
+            <button
+              type="button"
               className="cao-pwa-remove"
               aria-label={`Remove instance ${inst.label}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                void remove(inst.id);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  void remove(inst.id);
-                }
-              }}
+              onClick={() => void remove(inst.id)}
             >
               ×
-            </span>
-          </button>
+            </button>
+          </span>
         ))}
         <button type="button" onClick={open} aria-label="Add CAO instance">
           + Add instance

@@ -4,8 +4,12 @@ Invokes ``examples/headless-ci/run.sh`` against the ``ci_developer`` profile
 and asserts the script exits 0 (agent reached IDLE/COMPLETED) within the
 configured timeout.
 
+Under pytest the CAO server is started automatically by the managed
+``cao_server`` fixture (test/e2e/conftest.py) — no manual startup needed.
+Manual ``uv run cao-server`` is only required when running ``run.sh`` directly,
+outside the e2e harness.
+
 Requires:
-- Running CAO server (``uv run cao-server``)
 - tmux
 - A working CLI provider on PATH and authenticated (defaults to kiro_cli)
 - ``ci_developer`` agent profile installed

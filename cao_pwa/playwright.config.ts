@@ -10,6 +10,9 @@ import { defineConfig } from "@playwright/test";
 // "screen recording" proof referenced in docs/generative-ui-*.md.
 export default defineConfig({
   testDir: "./e2e",
+  // The live-server spec runs under playwright.live.config.ts (it needs a real
+  // cao-server + PWA preview); keep it out of the default deterministic replay.
+  testIgnore: /live-dashboard\.spec\.ts/,
   outputDir: "./test-results",
   timeout: 30_000,
   use: {
