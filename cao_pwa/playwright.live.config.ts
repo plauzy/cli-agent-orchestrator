@@ -32,7 +32,14 @@ export default defineConfig({
   webServer: [
     {
       // Real cao-server from the repo root, AG-UI enabled, on an isolated port.
-      command: `bash -c 'cd .. && CAO_AGUI_ENABLED=1 CAO_API_PORT=${CAO_PORT} uv run cao-server'`,
+      // The PWA preview is a *different* origin, so its origin must be in the
+      // server's CORS allow-list or the in-browser EventSource (and /health
+      // ping) is blocked and never reaches the "open" state. page.request POSTs
+      // aren't browser-CORS-bound, so only the browser-side needs this.
+      command:
+        `bash -c 'cd .. && CAO_AGUI_ENABLED=1 CAO_API_PORT=${CAO_PORT} ` +
+        `CAO_CORS_ORIGINS=http://localhost:${PWA_PORT},http://127.0.0.1:${PWA_PORT} ` +
+        `uv run cao-server'`,
       url: `http://localhost:${CAO_PORT}/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
