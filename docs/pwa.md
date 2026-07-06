@@ -199,8 +199,8 @@ replay):
 - **Real video (CI):** the `live-dashboard` job in
   [`.github/workflows/cao-pwa-generative-ui.yml`](../.github/workflows/cao-pwa-generative-ui.yml)
   runs `cao_pwa/e2e/live-dashboard.spec.ts` against a real `cao-server` + the real
-  PWA, records a `.webm` of the six cards rendering + the refusal + an
-  offline→online `?since=` reconnect, and uploads it as the
+  PWA, records a `.webm` of the six cards rendering + the refusal + a
+  reconnect-after-reload, and uploads it as the
   **`agui-live-remediation-demo`** artifact. (The Playwright browser CDN is
   blocked in the build sandbox, so the video is produced on CI runners rather
   than committed as a binary.)
