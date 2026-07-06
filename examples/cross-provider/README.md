@@ -36,6 +36,7 @@ if you want to use other providers:
 |---------|------------------|
 | `data_analyst_codex.md` | `codex` |
 | `data_analyst_copilot_cli.md` | `copilot_cli` |
+| `data_analyst_antigravity_cli.md` | `antigravity_cli` |
 
 ### Report Generator (handoff — sequential)
 
