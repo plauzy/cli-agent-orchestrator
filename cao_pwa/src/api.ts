@@ -85,9 +85,13 @@ export function connectAGUI(opts: AGUIConnectOptions): AGUIConnection {
     };
     es.onerror = (err) => {
       opts.onError?.(err);
-      if (!closed && es && es.readyState === EventSource.CLOSED) {
-        scheduleReconnect();
-      }
+      if (closed) return;
+      // Always take over reconnection. A dropped connection leaves the native
+      // EventSource in CONNECTING and it retries its ORIGINAL URL — which
+      // would silently drop the ?since= cursor and lose the gap replay. Close
+      // it and reopen with the up-to-date cursor instead.
+      es?.close();
+      scheduleReconnect();
     };
 
     for (const type of AGUI_EVENT_TYPES) {
