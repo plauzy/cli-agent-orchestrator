@@ -117,3 +117,94 @@ jobs:
           path: cao_pwa/playwright-report/**
           if-no-files-found: warn
           retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # LIVE recording: drives a REAL cao-server (AG-UI enabled) + the REAL PWA,
+  # not the canned replay. Produces the "live path" video the review asked for.
+  # Needs both a Python/uv env (to run cao-server) and Node + chromium.
+  # ---------------------------------------------------------------------------
+  live-dashboard:
+    name: Live dashboard (real server + real video)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python + uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install CAO (for cao-server)
+        run: uv sync
+
+      - name: Install tmux (terminal backend)
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: cao_pwa/package-lock.json
+
+      - name: Install PWA dependencies
+        working-directory: cao_pwa
+        run: npm ci
+
+      - name: Build PWA
+        working-directory: cao_pwa
+        run: npm run build
+
+      - name: Install Playwright chromium
+        working-directory: cao_pwa
+        run: npm run test:e2e:install
+
+      - name: Run LIVE Playwright e2e (real cao-server + real PWA)
+        working-directory: cao_pwa
+        env:
+          CI: "true"
+        run: npm run test:e2e:live
+
+      - name: Convert live recording to mp4 + gif (best-effort)
+        if: always()
+        working-directory: cao_pwa
+        run: |
+          set -e
+          shopt -s globstar nullglob
+          mkdir -p recordings
+          for webm in test-results-live/**/*.webm; do
+            echo "Converting $webm -> recordings/agui-live-remediation-demo.*"
+            ffmpeg -y -i "$webm" -movflags +faststart -pix_fmt yuv420p recordings/agui-live-remediation-demo.mp4 || true
+            ffmpeg -y -i "$webm" -vf "fps=8,scale=1200:-1:flags=lanczos" recordings/agui-live-remediation-demo.gif || true
+            cp "$webm" recordings/agui-live-remediation-demo.webm || true
+            break
+          done
+          ls -la recordings || true
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## AG-UI live dashboard — real screen recording"
+            echo ""
+            echo "Drove a **real** cao-server (CAO_AGUI_ENABLED) and the **real** cao_pwa"
+            echo "dashboard: registered the instance, emitted the six allow-listed components"
+            echo "through \`POST /agui/v1/emit_ui\`, asserted each card renders, asserted the"
+            echo "off-list \`iframe\` is refused (400, never rendered), and exercised the"
+            echo "offline→online reconnect (\`?since=\` resume)."
+            echo ""
+            echo "Download **agui-live-remediation-demo** for the mp4/gif/webm."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload live recording
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agui-live-remediation-demo
+          path: |
+            cao_pwa/recordings/**
+            cao_pwa/test-results-live/**/*.webm
+            cao_pwa/e2e/__screenshots__/live-dashboard-final.png
+          if-no-files-found: warn
+          retention-days: 30

@@ -185,6 +185,26 @@ drives that replay in CI, asserting every allow-listed component renders and the
 - **In-host (MCP Apps) parity** — render the same allow-list inside the MCP Apps
   iframe so the in-host and standalone surfaces match.
 
+## Live demo & recording
+
+Two ways to see the generative-UI path against a **live** server (not a canned
+replay):
+
+- **Runnable, headless (no browser needed):**
+  [`examples/agui-dashboard/`](../examples/agui-dashboard/) — `run.sh` starts a
+  real `cao-server` with the AG-UI surface enabled; `showcase.sh` drives all six
+  allow-listed components through `POST /agui/v1/emit_ui` and tails
+  `GET /agui/v1/stream`, printing the real `GENERATIVE_UI` frames and showing the
+  off-list `iframe` refused with HTTP 400.
+- **Real video (CI):** the `live-dashboard` job in
+  [`.github/workflows/cao-pwa-generative-ui.yml`](../.github/workflows/cao-pwa-generative-ui.yml)
+  runs `cao_pwa/e2e/live-dashboard.spec.ts` against a real `cao-server` + the real
+  PWA, records a `.webm` of the six cards rendering + the refusal + an
+  offline→online `?since=` reconnect, and uploads it as the
+  **`agui-live-remediation-demo`** artifact. (The Playwright browser CDN is
+  blocked in the build sandbox, so the video is produced on CI runners rather
+  than committed as a binary.)
+
 ## Privacy boundary
 
 `/agui/v1/stream` redacts message bodies (same contract as the SSE bus and the
