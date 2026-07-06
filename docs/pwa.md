@@ -86,7 +86,14 @@ EventSource connection, so pasting a token into the address bar works:
 https://cao-dashboard.example.com/?access_token=eyJhbGc...
 ```
 
-A dedicated token-input UX (rather than a URL parameter) is a follow-up.
+**Keep these tokens short-lived.** A query-string credential can surface in
+places an `Authorization` header never would (browser history, proxy logs,
+`Referer` headers), and it stays replayable until `exp`. CAO scrubs
+`access_token` values from its own access log, but that doesn't cover
+intermediaries — so mint tokens with a short TTL (minutes, not hours) for
+dashboard use. A short-lived single-use ticket handshake
+(`POST /agui/v1/ticket` with header auth → `?ticket=`) and a dedicated
+token-input UX are follow-ups.
 
 ## Connection resilience
 
@@ -110,6 +117,66 @@ Not yet included:
   command surface.
 - Cross-instance aggregation — one tab per instance.
 - mDNS / Bonjour discovery — manual entry only.
+
+## Generative UI
+
+Any agent in the fleet — regardless of provider — can author a UI intent and
+have it rendered uniformly on this surface. The safety model is what makes
+that shippable over *untrusted* agents: an agent may only emit a **closed
+allow-list of named components with JSON props** — no HTML, no script, no
+`eval`, no iframe. An off-list component is **refused, never rendered**.
+
+**Wire path.** An agent calls the `emit_ui` MCP tool (or
+`POST /agui/v1/emit_ui`) → the intent rides a CAO event as a `ui` block
+(`{component, props}`) → the AG-UI adapter maps it to a typed
+`GENERATIVE_UI` frame → `GET /agui/v1/stream` emits it → any AG-UI client
+renders it.
+
+**Backend** (`services/agui_stream.py`): the closed allow-list
+`GENERATIVE_UI_COMPONENTS = {approval_card, choice_prompt, diff_summary,
+progress, metric, agent_card}`; unknown components are refused (mapped to
+`RAW` with `rejected_component`); props must be JSON-serializable and are
+size-bounded (8 KB), degrading safely.
+
+**Frontend** (`cao_pwa/src/components/GenerativeUI.tsx`): a React renderer
+with a client-side mirror of the allow-list (defense in depth). Each
+component renders from JSON props only — no `dangerouslySetInnerHTML`, no
+`eval`. Unknown → inert placeholder.
+
+### Safety model
+
+| Threat | Mitigation | Verified by |
+|---|---|---|
+| Agent emits arbitrary HTML/script | No HTML on the wire — only named components + JSON props | `TestGenerativeUI` (py) + `GenerativeUI.test.tsx` |
+| Agent names an off-list component (e.g. `iframe`) | Refused server-side (→ RAW) *and* client-side (inert placeholder) | `test_unknown_component_is_refused_not_rendered`; `REFUSES an unknown/unsafe component` |
+| Agent floods the bus with a huge payload | Props capped at 8 KB → `{_truncated: true}` | `test_oversized_props_are_truncated` |
+| Non-serializable props crash the stream | Degrade to `{}` | `test_non_serializable_props_degrade_to_empty` |
+| Message-body leakage | Bodies never in the props path (metadata-only contract) | privacy tests |
+
+The refusal is asserted at three layers — the Python adapter, the React
+component, and the e2e spec — so an off-list component cannot slip through
+any of them.
+
+### Visual proof
+
+- **Live-path recording** — `cao_pwa/e2e/live-dashboard.spec.ts` boots a real
+  `cao-server`, drives `emit_ui` through every allow-listed component plus an
+  off-list refusal, exercises the `?since=` reconnect, and records video
+  (`playwright.config.ts` has `video: on`). CI
+  (`.github/workflows/cao-pwa-generative-ui.yml`) uploads the `.webm`/`.mp4`/
+  `.gif` as build artifacts.
+- **Self-contained replay** — `cao_pwa/demo/generative-ui-replay.html` renders
+  a canned sequence (produced by the real adapter) in any browser with no
+  server; useful for offline demos, not a substitute for the live path.
+
+### Follow-ups
+
+- **Bidirectional generative UI** — approve/choose actions POST
+  `submit_command` (needs the Bearer-input UX from the auth work).
+- **`STATE_DELTA` debounce/cache** — the `/agui/v1/stream` snapshot recompute
+  is per-event today.
+- **In-host (MCP Apps) parity** — render the same allow-list inside the MCP
+  Apps iframe so the in-host and standalone surfaces match.
 
 ## Privacy boundary
 

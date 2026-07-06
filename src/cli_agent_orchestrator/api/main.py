@@ -103,7 +103,7 @@ from cli_agent_orchestrator.services.status_monitor import status_monitor
 from cli_agent_orchestrator.services.terminal_service import OutputMode, TerminalInputBlockedError
 from cli_agent_orchestrator.telemetry import init_telemetry, shutdown_telemetry
 from cli_agent_orchestrator.utils.agent_profiles import load_agent_profile, resolve_provider
-from cli_agent_orchestrator.utils.logging import setup_logging
+from cli_agent_orchestrator.utils.logging import install_access_log_redaction, setup_logging
 from cli_agent_orchestrator.utils.skills import (
     SkillNameError,
     load_skill_content,
@@ -564,12 +564,20 @@ def _require_mcp_apps_enabled() -> None:
 
 
 def _agui_enabled() -> bool:
-    """Whether the AG-UI SSE surface (``/agui/v1/stream``) is enabled.
+    """Whether the AG-UI SSE surface (``/agui/v1/stream``, ``emit_ui``) is enabled.
 
-    AG-UI has its own dedicated flag, ``CAO_AGUI_ENABLED``, so it can be turned
-    on independently of the MCP Apps iframe surface. For backward compatibility
-    it is also treated as enabled when the MCP Apps surface is on (they share
-    the same in-process event source and the same default-off posture).
+    Two enablement paths, both deliberate (documented in docs/pwa.md):
+
+    * ``CAO_AGUI_ENABLED`` — the dedicated flag, so AG-UI can be turned on
+      independently of the MCP Apps iframe surface.
+    * ``CAO_MCP_APPS_ENABLED`` (via ``_mcp_apps_enabled()``) — the pre-existing
+      MCP Apps flag also enables AG-UI, because the two surfaces are read-outs
+      of the same in-process event source (``EventLogPublisher`` → ``SseBus``)
+      with the same privacy boundary; an operator who exposed that data to the
+      iframe has already made the disclosure decision AG-UI relies on.
+
+    With neither flag set the surface is absent (404s) and the server is
+    byte-identical to a build without this feature.
     """
 
     if os.environ.get("CAO_AGUI_ENABLED", "").strip().lower() in ("1", "true", "yes"):
@@ -700,7 +708,19 @@ async def agui_stream(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="access_token query parameter required when auth is enabled",
             )
-        scopes = extract_scopes_from_token(access_token)
+        try:
+            scopes = extract_scopes_from_token(access_token)
+        except HTTPException:
+            raise
+        except Exception:
+            # PyJWTError subclasses (malformed/expired/bad signature) or a JWKS
+            # fetch failure. Fails closed either way; map to a clean 401 instead
+            # of an opaque 500 so auth telemetry stays trustworthy.
+            logger.info("agui_stream: token validation failed", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="invalid or expired access_token",
+            )
         if not any(s in scopes for s in (SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -1815,7 +1835,12 @@ def _extract_ws_scopes(websocket: WebSocket) -> Optional[List[str]]:
             return None
         try:
             return extract_scopes_from_token(token)
-        except HTTPException:
+        except Exception:
+            # HTTPException from the auth layer, PyJWTError subclasses
+            # (malformed/expired/bad signature), or a JWKS fetch failure — all
+            # mean "not authorized". Returning None lets the caller close with
+            # a clean 4401 instead of an opaque handshake error.
+            logger.info("terminal_ws: token validation failed", exc_info=True)
             return None
     return None
 
@@ -2464,6 +2489,10 @@ def main():
     # literal ``*`` is honoured and disables the check (matches the
     # existing CAO_WS_ALLOWED_CLIENTS="*" semantics).
     forwarded_ips = "*" if "*" in TRUSTED_FORWARDER_IPS else ",".join(TRUSTED_FORWARDER_IPS)
+    # /agui/v1/stream authenticates via ?access_token= (EventSource cannot set
+    # an Authorization header), so scrub credential query params from uvicorn's
+    # access log before the first request can persist a replayable JWT.
+    install_access_log_redaction()
     uvicorn.run(
         app,
         host=host,
