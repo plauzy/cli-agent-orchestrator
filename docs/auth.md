@@ -66,7 +66,7 @@ Don't enable auth when:
 
 5. **Verify.**
    ```sh
-   curl -s http://localhost:9890/.well-known/oauth-protected-resource | jq
+   curl -s http://localhost:9889/.well-known/oauth-protected-resource | jq
    # Returns {resource, authorization_servers, scopes_supported, ...}
    ```
 
@@ -115,7 +115,7 @@ doesn't match `AUTH0_AUDIENCE`. Check both values match exactly. The
 PRM endpoint advertises the expected audience under `resource`:
 
 ```sh
-curl -s http://localhost:9890/.well-known/oauth-protected-resource | jq .resource
+curl -s http://localhost:9889/.well-known/oauth-protected-resource | jq .resource
 ```
 
 **`401 Invalid token: token is expired`** — clock skew between your

@@ -14,9 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Standalone dashboard PWA** (`cao_pwa/`) — a multi-instance fleet dashboard that consumes the AG-UI stream from any browser (no MCP host required), with automatic reconnection that resumes via `?since=`. See [docs/pwa.md](docs/pwa.md).
 
-- **A2A v1.0 transport + signed Agent Card** — JSON-RPC 2.0 (`task.send`/`get`/`cancel`), SSE streaming, and REST polling for agent-to-agent interop, plus an Ed25519-signed Agent Card + JWKS published on a dedicated listener. The listener is default-off (`CAO_AGENT_CARD_ENABLED`) and binds loopback (127.0.0.1) unless an operator opts into external discoverability with `CAO_AGENT_CARD_HOST`. See [docs/auth.md](docs/auth.md).
-
-- **OpenTelemetry GenAI instrumentation** — opt-in traces/metrics over OTLP following the GenAI semantic conventions. See [docs/otel-deployment.md](docs/otel-deployment.md).
+- **OpenTelemetry GenAI instrumentation** — opt-in traces/metrics over OTLP following the GenAI semantic conventions, shipped as the `[otel]` optional extra (`pip install cli-agent-orchestrator[otel]`); the base install degrades to no-ops. See [docs/otel-deployment.md](docs/otel-deployment.md).
 
 - **Native multi-agent workflow spec** — a trusted-author YAML workflow grammar with authoring/validation endpoints, a run-engine seam, and `workflow_run` / `workflow_return` / `workflow_cancel` MCP tools (#312).
 

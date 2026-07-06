@@ -32,13 +32,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, Field, field_validator
 
-from cli_agent_orchestrator.a2a import (
-    InMemoryTaskEventBus,
-    InMemoryTaskStore,
-    build_a2a_router,
-    build_stream_router,
-)
-from cli_agent_orchestrator.agent_card import start_agent_card_listener
 from cli_agent_orchestrator.backends import TerminalNotFoundError
 from cli_agent_orchestrator.backends.herdr_backend import HerdrBackend
 from cli_agent_orchestrator.backends.registry import get_backend
@@ -49,8 +42,6 @@ from cli_agent_orchestrator.clients.database import (
     init_db,
 )
 from cli_agent_orchestrator.constants import (
-    AGENT_CARD_KEY_DIR,
-    AGENT_CARD_PORT,
     ALLOWED_HOSTS,
     API_BASE_URL,
     CAO_HOME_DIR,
@@ -388,76 +379,7 @@ async def lifespan(app: FastAPI):
         herdr_inbox_task = asyncio.create_task(svc.start())
         logger.info("Herdr inbox service started")
 
-    # Agent Card / A2A listener (DEFAULT-OFF).
-    #
-    # Optionally starts a dedicated read-only Agent Card listener on its own
-    # port (AGENT_CARD_PORT, default :9890). It is off unless explicitly
-    # enabled, binds loopback (127.0.0.1) by default, and is failure-isolated.
-    #   - CAO_AGENT_CARD_ENABLED=true starts the listener (off by default). It
-    #     does NOT inherit the main app's TrustedHostMiddleware, so operators
-    #     opt in knowingly; it binds 127.0.0.1 unless CAO_AGENT_CARD_HOST is
-    #     set (e.g. 0.0.0.0 for external A2A discoverability — a deliberate
-    #     network-exposure choice).
-    #   - CAO_A2A_DISABLED=true publishes the Agent Card but skips mounting the
-    #     A2A v1.0 JSON-RPC + stream routers on the listener.
-    agent_card_listener = None
-    if os.environ.get("CAO_AGENT_CARD_ENABLED", "false").lower() == "true":
-        try:
-            from cli_agent_orchestrator.services import settings_service
-
-            def _agent_card_metadata() -> Dict:
-                """Operator-supplied Agent Card metadata (best-effort).
-
-                Prefers a ``get_agent_card_metadata`` on settings_service if the
-                (ported) implementation is present; otherwise falls back to the
-                unified config ``agent_card`` key, then an empty dict (the
-                builder produces a valid default card from an empty mapping).
-                """
-                getter = getattr(settings_service, "get_agent_card_metadata", None)
-                if callable(getter):
-                    try:
-                        return getter() or {}
-                    except Exception:
-                        return {}
-                try:
-                    return ConfigService.get("agent_card", default={}) or {}
-                except Exception:
-                    return {}
-
-            a2a_router = None
-            a2a_stream_router = None
-            if os.environ.get("CAO_A2A_DISABLED", "false").lower() != "true":
-                a2a_store = InMemoryTaskStore()
-                a2a_bus = InMemoryTaskEventBus()
-                a2a_router = build_a2a_router(store=a2a_store, bus=a2a_bus)
-                a2a_stream_router = build_stream_router(store=a2a_store, bus=a2a_bus)
-                app.state.a2a_store = a2a_store
-                app.state.a2a_bus = a2a_bus
-
-            agent_card_listener = await start_agent_card_listener(
-                AGENT_CARD_KEY_DIR,
-                _agent_card_metadata,
-                port=AGENT_CARD_PORT,
-                a2a_router=a2a_router,
-                a2a_stream_router=a2a_stream_router,
-            )
-            logger.info("Agent Card / A2A listener started on :%s", AGENT_CARD_PORT)
-        except Exception:
-            logger.warning("Agent Card listener failed to start; continuing", exc_info=True)
-
-    # Expose the listener handle (None when default-off) so tests can assert no
-    # extra listener is opened without the explicit enable flag.
-    app.state.agent_card_listener = agent_card_listener
-
     yield
-
-    # Stop Agent Card / A2A listener (best-effort).
-    if agent_card_listener is not None:
-        try:
-            await agent_card_listener.stop()
-            logger.info("Agent Card / A2A listener stopped")
-        except Exception:
-            logger.warning("Error stopping Agent Card listener", exc_info=True)
 
     # Stop herdr inbox service on shutdown
     if herdr_inbox_task is not None:
