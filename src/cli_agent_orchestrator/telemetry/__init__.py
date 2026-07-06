@@ -39,7 +39,9 @@ except ImportError:  # opentelemetry not installed (base install, no [otel] extr
         """No-op: no recording span can exist without the [otel] extra."""
         return None
 
-    def extract_traceparent(traceparent: Optional[str], tracestate: Optional[str] = None) -> None:
+    def extract_traceparent(  # type: ignore[misc]  # real variant returns opentelemetry Context
+        traceparent: Optional[str], tracestate: Optional[str] = None
+    ) -> Any:
         """No-op: there is no OTel Context type without the [otel] extra."""
         return None
 
