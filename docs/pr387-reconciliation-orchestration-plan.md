@@ -8,9 +8,11 @@
 
 > **Read this section first.** It is a self-contained runbook written for a **brand-new Kiro session with zero memory** of the conversation that produced this plan. Everything needed to execute cold is here or cross-referenced by section number. Read the whole document once before touching any code.
 
+> **Operative handoff:** the authoritative, self-contained kickoff for the fresh Kiro session is [`docs/reviews/pr387-kiro-handoff.md`](reviews/pr387-kiro-handoff.md). Read it first; this plan (Sections 1–11) is the supporting detail/audit reference.
+
 ### 0.1 Mission (one paragraph)
 
-Produce **two professional-ready, upstream-submittable pull requests** — **PR-A (AG-UI core)** first, then **PR-B (A2A hardened)** — that resolve **every** review comment on upstream [awslabs/cli-agent-orchestrator#387](https://github.com/awslabs/cli-agent-orchestrator/pull/387). Get there by **auditing all existing work** — every Kiro branch **and all five Claude-drafted PRs (#11, #12, #17, #19, #20)** — and building the definitive **"sum total" reconciliation** that takes the strongest form of every win, closes every remaining gap (including the post-hoc review `4638092590` findings), and ships mandatory media evidence. The two Claude-executed reconciliations **#19** (`reconcile/pr387-agui-core`) and **#20** (`reconcile/pr387-a2a-hardened`) are the **strongest existing baseline** to audit and beat — not branches to regenerate from scratch.
+The evaluation and reconciliation phases are **DONE**. The two reconciled branches — **PR #19** (`reconcile/pr387-agui-core`) and **PR #20** (`reconcile/pr387-a2a-hardened`) — **already exist and are fully gated**. Kiro's job is **not** to build a fresh reconciliation, but to **finish and author the merged result**: (1) **independently verify** #19/#20 by re-running every gate and spot-verifying the load-bearing properties in code; (2) **fix anything wrong directly on those `reconcile/*` branches** with focused commits — **do not fork new variants** and **do not build a fresh "sum total" reconciliation**; (3) **author the final upstream submission** — rewrite the PR bodies in Kiro's voice truthful to the final diffs (review finding I1: no oversell, no unverified claims) and finalize the upstream reply `docs/reviews/pr387-agui-response-draft-v2.md`; then, **with maintainer approval**, retarget PR-A upstream, followed by PR-B. The final artifacts carry Kiro's authorship. Full step-by-step ownership is in the [operative handoff](reviews/pr387-kiro-handoff.md).
 
 ### 0.2 Environment Setup
 
@@ -39,17 +41,18 @@ Produce **two professional-ready, upstream-submittable pull requests** — **PR-
 
 ### 0.4 Ordered Start Sequence (with section cross-references)
 
-1. **Audit all five Claude-drafted PRs — #11, #12, #17, #19, #20 — per [Section 2.1](#21-mandatory-audit-of-all-claude-drafted-prs-11-12-17-19-20).** Read each full diff (not just PR bodies), verify every PR-body claim against the actual code/tests (claims-vs-code fidelity), and **independently re-run the full gate suite on #19 and #20**, recording **real** pass/skip/fail counts vs. the numbers claimed. Confirm the review `4638092590` fixes (RC-03/RC-05) are actually present and tested in #20.
-2. **Treat #19 and #20 as the strongest existing baseline ([Section 6](#6-variant-generation-approach)).** Audit them **line-by-line** against the reconciliation spec. **Do not modify them** — they are read-only audit inputs.
-3. **Build the definitive final `reconcile/*` result** that closes any remaining gap, including review `4638092590` — **RC-03** (task-id injection → idempotent-create `task.send`) and **RC-05** (`Task.from_dict` uses `data.get("id", "")`). See the resolution registry in [Section 3](#3-upstream-review-comment-registry) and the cherry-pick spec in [Section 6](#6-variant-generation-approach).
-4. **Produce the mandatory media deliverables per [Section 8](#8-media--visual-evidence-requirements)** for every major feature update (both tracks).
-5. **Score candidates via `/cao-eval` per [Section 7](#7-cao-eval-criteria-and-success-gates)** — the final build wins only if it matches or exceeds the #19/#20 baseline after their claims are independently verified.
-6. **Submit upstream: PR-A first, then PR-B ([Section 9](#9-reconciliation-workflow), Step 10).**
+1. **Independently verify #19 and #20.** Fetch `reconcile/pr387-agui-core` (#19) and `reconcile/pr387-a2a-hardened` (#20) and **re-run the full gate suite on each** ([Section 7](#7-cao-eval-criteria-and-success-gates)), recording **real** pass/skip/fail counts vs. the numbers claimed — never inherit a number you did not reproduce. Then **spot-verify the five load-bearing properties in code, not just tests**: (1) `import cli_agent_orchestrator.a2a` raises ImportError on A; (2) `cao_pwa/src/api.ts` always takes over reconnection; (3) `rpc.py` authenticates before body parse; (4) store-full → HTTP 429 + JSON-RPC body; (5) `task.send` refuses an existing id (review `4638092590`, RC-03/RC-05). The mandatory-audit checklist in [Section 2.1](#21-mandatory-audit-of-all-claude-drafted-prs-11-12-17-19-20) remains the reference detail for what to check.
+2. **Fix anything wrong directly on the `reconcile/*` branches** with focused commits. **Do not fork new variants and do not build a fresh reconciliation** — #19/#20 are the result branches to finish, not baselines to beat or regenerate.
+3. **Author the final submission.** Rewrite the PR bodies (#19/#20 now; upstream #387 body at retarget time) in Kiro's voice, **truthful to the final diffs** (review finding I1 — no oversell, no unverified claims; credit both source implementations neutrally), and **finalize the upstream reply** `docs/reviews/pr387-agui-response-draft-v2.md`, verifying every number in it against your own Phase-1 runs. See the resolution registry in [Section 3](#3-upstream-review-comment-registry).
+4. **Produce the mandatory media deliverables per [Section 8](#8-media--visual-evidence-requirements)** for every major feature update (both tracks) where applicable.
+5. **With the maintainer's explicit go-ahead, retarget upstream: PR-A first, then PR-B ([Section 9](#9-reconciliation-workflow), Step 10).** Reshape upstream #387 in place with PR-A's content; after it merges, rebase PR-B mechanically onto the new head (no pyproject diff by design) and open it as the follow-up upstream PR.
+6. **File the four follow-up issues and close out superseded fork artifacts.** File the follow-ups the reply commits to (short-lived-ticket handshake, `STATE_DELTA` debounce, `emit_ui` rate limiting, the fixed-path `term-42.mcp.json` test race), then mark **#11–#16 and #18** as **superseded** (comment + close — **do not delete branches**), keeping **#17** as the evaluation record.
 
 ### 0.5 Hard Constraints (restated up front)
 
-- **Never commit to** `feat/agentic-protocols-generative-ui`, any `kiro/*` branch, or any `claude/*` branch. All work lands on `reconcile/*` branches.
-- **Treat #19 and #20 as read-only audit inputs** — audit and re-verify them, but do not modify them; the final authoritative result is a separate `reconcile/*` branch.
+- **Never commit to** `feat/agentic-protocols-generative-ui`, any `kiro/*` branch, or any `claude/*` branch, and **never force-push or rewrite** `kiro/*`, `claude/*`, or the evaluation branches — they are the audit trail. All work lands on `reconcile/*` branches.
+- **#19 and #20 are the result branches to finish, not fresh baselines.** Verify them independently, then **fix any issue directly on those `reconcile/*` branches** with focused commits — **do not fork new variants and do not build a separate "sum total" reconciliation branch.**
+- **Nothing goes to `feat/agentic-protocols-generative-ui` or upstream without the maintainer's explicit approval in this session.**
 - **PR-A lands before PR-B** (upstream reviewer sequencing: PR-B's A2A layer consumes PR-A's streaming surface).
 - **Media is a pass/fail gate for every major feature update:** a full-quality `.mp4` of the live feature path (canonical), a derived looping `.gif`, and annotated screenshots — the **mp4 embedded as a plain markdown link, never `![]()` image syntax** — in both the feature docs and the PR body. See [Section 8](#8-media--visual-evidence-requirements).
 
@@ -62,9 +65,9 @@ Produce **two professional-ready, upstream-submittable pull requests** — **PR-
 - [ ] Media deliverables present and **correctly embedded** (mp4 as plain link; gif/png inline with alt text + captions) in **both** the docs and the PR body, for both tracks ([Section 8](#8-media--visual-evidence-requirements), checklist [8.5](#85-media-deliverables-checklist-required-in-every-reconciled-pr-description)).
 - [ ] **Two upstream PRs opened in order** (PR-A then PR-B) against `awslabs/cli-agent-orchestrator`, each with the completed media checklist.
 
-### 0.7 Where This Plan Lives
+### 0.7 Where This Plan Lives (and its status)
 
-This document is maintained on branch **`reconcile/pr387-orchestration-plan`** (fork **PR #18**) for reference. It is the FINAL handoff artifact; the sections below (1–11) are its detailed body.
+This document is maintained on branch **`reconcile/pr387-orchestration-plan`** (fork **PR #18**) for reference. **This orchestration plan (#18) is itself superseded by the executed reconcile branches #19/#20** — the reconciliation it originally planned to build has already been done — and is retained as **supporting detail / audit reference**. The **operative document** for the fresh Kiro session is the self-contained [`docs/reviews/pr387-kiro-handoff.md`](reviews/pr387-kiro-handoff.md); read it first, then use Sections 1–11 below as the detailed body. Per [Section 0.4, Step 6](#04-ordered-start-sequence-with-section-cross-references), #18 is one of the artifacts to be closed out as superseded (comment + close, do not delete the branch).
 
 ---
 
