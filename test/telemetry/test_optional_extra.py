@@ -17,15 +17,16 @@ import sys
 
 _BLOCK_OTEL_AND_PROBE = """
 import sys
+from importlib.abc import MetaPathFinder
 
-class _BlockOtel:
-    def find_module(self, name, path=None):
+class _BlockOtel(MetaPathFinder):
+    # find_spec, not the legacy find_module/load_module pair: the legacy
+    # finder protocol was removed in Python 3.12, where a legacy blocker
+    # silently stops blocking and this probe fails.
+    def find_spec(self, name, path=None, target=None):
         if name == "opentelemetry" or name.startswith("opentelemetry."):
-            return self
+            raise ImportError(f"blocked for test: {name}")
         return None
-
-    def load_module(self, name):
-        raise ImportError(f"blocked for test: {name}")
 
 sys.meta_path.insert(0, _BlockOtel())
 
@@ -45,6 +46,31 @@ with t.execute_tool_span("tool-1") as span:
 with t.chat_span("model-1") as span:
     assert span is None
 
+print("OK")
+"""
+
+# Same blocked-import environment, but telemetry is explicitly requested:
+# the operator must get an actionable warning, not a silent no-op.
+_WARN_WHEN_REQUESTED_PROBE = """
+import logging
+import os
+import sys
+from importlib.abc import MetaPathFinder
+
+class _BlockOtel(MetaPathFinder):
+    def find_spec(self, name, path=None, target=None):
+        if name == "opentelemetry" or name.startswith("opentelemetry."):
+            raise ImportError(f"blocked for test: {name}")
+        return None
+
+sys.meta_path.insert(0, _BlockOtel())
+os.environ["OTEL_SDK_DISABLED"] = "false"
+logging.basicConfig(level=logging.WARNING)
+
+import cli_agent_orchestrator.telemetry as t
+
+assert t.OTEL_AVAILABLE is False
+t.init_telemetry("cao")
 print("OK")
 """
 
@@ -75,3 +101,18 @@ def test_api_main_imports_without_otel_sdk() -> None:
     )
     assert proc.returncode == 0, f"stderr:\n{proc.stderr}\nstdout:\n{proc.stdout}"
     assert "OK" in proc.stdout
+
+
+def test_requested_telemetry_without_extra_warns() -> None:
+    """OTEL_SDK_DISABLED=false + no [otel] extra → actionable warning, not silence."""
+    proc = subprocess.run(
+        [sys.executable, "-c", _WARN_WHEN_REQUESTED_PROBE],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, f"stderr:\n{proc.stderr}\nstdout:\n{proc.stdout}"
+    assert "OK" in proc.stdout
+    assert "cli-agent-orchestrator[otel]" in proc.stderr, (
+        f"expected the install hint on stderr; got:\n{proc.stderr}"
+    )

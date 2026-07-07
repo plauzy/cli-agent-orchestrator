@@ -13,6 +13,8 @@ Without the extra, every helper below degrades to a no-op with the same
 signature, so callers never need to guard their imports.
 """
 
+import logging
+import os
 from contextlib import contextmanager
 from typing import Any, Iterator, Optional
 
@@ -29,8 +31,20 @@ try:
 except ImportError:  # opentelemetry not installed (base install, no [otel] extra)
     OTEL_AVAILABLE = False
 
+    _logger = logging.getLogger(__name__)
+
     def init_telemetry(service_name: str) -> None:
-        """No-op: the [otel] extra is not installed."""
+        """No-op: the [otel] extra is not installed.
+
+        An operator who explicitly asked for telemetry gets told why nothing
+        is exported, instead of a silent no-op.
+        """
+        if os.environ.get("OTEL_SDK_DISABLED", "true").lower() == "false":
+            _logger.warning(
+                "OTEL_SDK_DISABLED=false but the OpenTelemetry packages are not "
+                "installed; telemetry stays off. Install the extra: "
+                "pip install cli-agent-orchestrator[otel]"
+            )
 
     def shutdown_telemetry() -> None:
         """No-op: the [otel] extra is not installed."""
