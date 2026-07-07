@@ -13,7 +13,7 @@
 
 This sequencing follows the upstream reviewer recommendation (@fanhongy): PR-A provides the streaming surface that PR-B's agent-to-agent layer consumes, so PR-A must land first.
 
-**Approach:** Use CAO's parallel multi-provider orchestration (`/cao`) to generate competing reconciled variants from existing Kiro and Claude branches, then run `/cao-eval` to select the best result per PR shape before submitting upstream.
+**Approach:** Audit **all** existing work first — every Kiro branch **and every Claude-drafted PR (#11, #12, #17, #19, #20)** per the mandatory checklist in [Section 2.1](#21-mandatory-audit-of-all-claude-drafted-prs-11-12-17-19-20). Because Claude has **already executed** its "best of both" reconciliations in **#19** (`reconcile/pr387-agui-core`) and **#20** (`reconcile/pr387-a2a-hardened`), those two PRs are treated as the **strongest existing baseline**, not as branches to regenerate from scratch. Kiro's definitive final build audits #19/#20 line-by-line, independently re-runs their gates, closes anything they still miss, and produces the authoritative final `reconcile/*` result. CAO's parallel multi-provider orchestration (`/cao`) and `/cao-eval` are then used to score the candidates and confirm the winner per PR shape before submitting upstream.
 
 **Visual evidence mandate:** Every major feature update produced by this plan MUST ship visual evidence — a full-quality `.mp4` screen recording of the live feature path (the canonical artifact), a derived looping `.gif`, and comprehensive annotated screenshots — embedded in both the project documentation and the PR description. This is an enforceable gate, not an aspiration: see [Section 8 (Media & Visual Evidence Requirements)](#8-media--visual-evidence-requirements). It applies to GUI surfaces (Track A / PR-A) and non-GUI surfaces (Track B / PR-B) alike.
 
@@ -21,18 +21,39 @@ This sequencing follows the upstream reviewer recommendation (@fanhongy): PR-A p
 
 ## 2. Branch Inventory
 
-All PRs are open against `plauzy/cli-agent-orchestrator` and target `feat/agentic-protocols-generative-ui` as the base branch.
+All PRs are open against `plauzy/cli-agent-orchestrator` and target `feat/agentic-protocols-generative-ui` as the base branch. **There are currently 10 open PRs/branches in scope (PR #9 base + 9 work/eval branches).** Five of them are **Claude-drafted** — **#11, #12, #17, #19, #20** — and every one is a **mandatory audit input** for this plan (see [Section 2.1](#21-mandatory-audit-of-all-claude-drafted-prs-11-12-17-19-20)). PR #19 and PR #20 are the newest and most consequential: they are Claude's **already-executed** "best of both" reconciliations — i.e., Claude has already built the `reconcile/*` result branches this plan originally proposed to generate from #11–#14.
 
 | PR# | Branch | Shape | Provider | Description | Status |
 |-----|--------|-------|----------|-------------|--------|
 | 9 | `feat/agentic-protocols-generative-ui` | Original | plauzy | Original monolithic PR (feat: agentic protocol surface + generative UI) | Open - base for decomposition |
-| 11 | `claude/pr387-agui-core` | PR-A | Claude | AG-UI core implementation | Open - evaluation candidate |
-| 12 | `claude/pr387-a2a-hardened` | PR-B | Claude | A2A hardened implementation | Open - evaluation candidate |
+| 11 | `claude/pr387-agui-core` | PR-A | Claude | AG-UI core implementation | Open - **Claude draft — mandatory audit input** |
+| 12 | `claude/pr387-a2a-hardened` | PR-B | Claude | A2A hardened implementation | Open - **Claude draft — mandatory audit input** |
 | 13 | `kiro/pr387-a2a-hardened` | PR-B | Kiro | A2A hardened implementation | Open - evaluation candidate |
 | 14 | `kiro/pr387-agui-core` | PR-A | Kiro | AG-UI core + live demo | Open - evaluation candidate |
 | 15 | `docs/pr387-reconciliation` | Eval | docs | Kiro x Claude evaluation and reconciliation plan | Open - reference |
 | 16 | `docs/pr387-reconciliation-2` | Eval | docs | Independent Linux/Py3.12 evaluation run | Open - reference |
-| 17 | `claude/pr387-remediation-reconcile-jlcpmy` | Eval | Claude | Remediation scorecard + reconciliation plan | Open - reference |
+| 17 | `claude/pr387-remediation-reconcile-jlcpmy` | Eval | Claude | Remediation scorecard + reconciliation plan (docs-only; the plan #19/#20 were built from) | Open - **Claude draft — mandatory audit input** |
+| 19 | `reconcile/pr387-agui-core` | PR-A | Claude | **EXECUTED reconciled PR-A** ("best of both") — built on `claude/pr387-agui-core`, ports Kiro wins (skill governance, renderer-true demo vocab, Py3.12-safe OTel, union live spec, merged showcase/run) | Open - **Claude draft — mandatory audit input** |
+| 20 | `reconcile/pr387-a2a-hardened` | PR-B | Claude | **EXECUTED reconciled PR-B** ("best of both" + closes review 4638092590) — built on `claude/pr387-a2a-hardened`, ports Kiro wins (reverts dep hunk for clean A-first rebase, `RESOURCE_EXHAUSTED`+429+`Retry-After`, `_should_mount_a2a()` + decision table, union ~40-case JWT matrix) plus idempotent-create `task.send` and `Task.from_dict` KeyError fix | Open - **Claude draft — mandatory audit input** |
+
+---
+
+### 2.1 Mandatory Audit of All Claude-Drafted PRs (#11, #12, #17, #19, #20)
+
+**Guarantee:** This plan **explicitly reviews and audits every Claude-drafted PR** — **#11, #12, #17, #19, and #20** — with no exception. No reconciled `reconcile/*-final` result may be selected, and no upstream PR may be submitted, until each of these five PRs has been through the mandatory audit checklist below and the findings recorded. This requirement is a hard gate alongside the [media gate (Section 8)](#8-media--visual-evidence-requirements).
+
+**Why #19 and #20 are the priority.** #19 (`reconcile/pr387-agui-core`) and #20 (`reconcile/pr387-a2a-hardened`) are Claude's **own already-executed** "best of both" reconciliations — the result branches this plan set out to produce. They therefore become the **strongest existing baseline** that Kiro's definitive final build must audit, independently re-verify, and improve on — *not* branches to be regenerated from scratch (see [Section 6](#6-variant-generation-approach)). #17 is the docs-only scorecard/plan they were built from; #11 and #12 are the underlying PR-A/PR-B implementations they descend from. Auditing all five gives full provenance from source implementation → plan → executed reconciliation.
+
+**Per-PR mandatory audit checklist (apply to EACH of #11, #12, #17, #19, #20):**
+
+- **(a) Read the full diff, not just the PR body.** Review the complete `git diff` of the branch against base `f40933d` (`feat/agentic-protocols-generative-ui`), every changed file, not just the PR description or commit messages.
+- **(b) Verify every PR-body claim against the actual code/tests.** Treat each assertion in the PR body as a hypothesis to confirm against the diff. **Flag any unverified or contradicted claim** — exactly as the #17 evaluation did when it caught the "props verified against the actual renderers" falsehood in #11. Record a claims-vs-code fidelity result per PR.
+- **(c) Run the full gate suite on the branch and record REAL pass/fail counts vs. claimed.** Independently execute the [gate command suite (Section 7)](#7-cao-eval-criteria-and-success-gates) on the branch and record actual pytest passed/skipped/failed, vitest, mypy, e2e, and showcase results, then compare them to the numbers claimed in the PR body (e.g., #19 claims 3,537 passed / 22 skipped / 0 failed, 24 vitest, live e2e 1 passed, 6-frame showcase PASS, WS auth 5 passed; #20 claims 3,609 passed / 21 skipped / 0 failed, e2e 2 passed, mypy 142, auth 17 + store 8 + id-integrity 4 + guard 11). Note any discrepancy.
+- **(d) Catalog wins, regressions vs. base `f40933d`, and remaining gaps.** Record what each PR does better than its peers, any regression introduced relative to the base branch, and anything still missing (e.g., #11's known 2 telemetry subprocess tests failing on Py3.12 via legacy `find_module`).
+- **(e) Confirm the review 4638092590 fixes are actually present and tested in #20.** Verify the idempotent-create `task.send` behavior (resubmitting an existing id → `INVALID_PARAMS`), that `Task.from_dict` uses `data.get("id", "")` (RC-05), and that `test/a2a/test_task_id_integrity.py` exists and passes. Do not accept the PR body's word — confirm in the diff and by running the test.
+- **(f) Verify media deliverables (Section 8) for #19 and #20.** Confirm the required `.mp4` + derived `.gif` + annotated screenshots exist under `docs/media/`, are embedded correctly (mp4 as a plain link, never `![]()`), and actually depict the live feature path — for #19's AG-UI/PWA surface and #20's A2A CLI walkthroughs (`401 → 403 → 200` auth flow and store-full `429` path).
+
+**Output of the audit:** a per-PR record (wins / regressions / gaps / claims-vs-code fidelity / real gate counts) that feeds the [audit matrix (Section 4)](#4-head-to-head-branch-audit-matrix) and the [/cao-eval scoring (Section 7)](#7-cao-eval-criteria-and-success-gates). These records are the authoritative inputs to Kiro's definitive final "sum total" implementation.
 
 ---
 
@@ -70,15 +91,19 @@ Every comment from [awslabs/cli-agent-orchestrator#387](https://github.com/awsla
 
 ## 4. Head-to-Head Branch Audit Matrix
 
+> **Scope of this matrix:** the columns below now cover the underlying implementations **and** Claude's executed reconciliation, PR **#19** (`reconcile/pr387-agui-core`). Every `Yes`/`No`/`Partial` for #19 must be **verified against its diff and a real gate run** per the [Section 2.1 audit checklist](#21-mandatory-audit-of-all-claude-drafted-prs-11-12-17-19-20) — do not copy the PR body's claims.
+
 ### PR-A Resolution Status
 
-| ID | Issue | `kiro/pr387-agui-core` | `claude/pr387-agui-core` | Notes |
-|----|-------|:---:|:---:|-------|
-| RC-07 | Stray `tests/__init__.py` | Partial | Partial | Neither explicitly removes; needs verification |
-| RC-08 | mypy `python_version` mismatch | Yes | No | Kiro sets 3.10; Claude leaves 3.11 |
-| RC-09 | Wrong RFC citation | Yes | Yes | Both fix the reference |
-| RC-10 | Nested interactive elements | No | Partial | Claude restructures but introduces different a11y pattern |
-| RC-11 | Stale docstring | Yes | Yes | Both update |
+| ID | Issue | `kiro/pr387-agui-core` (#14) | `claude/pr387-agui-core` (#11) | `reconcile/pr387-agui-core` (#19, executed) | Notes |
+|----|-------|:---:|:---:|:---:|-------|
+| RC-07 | Stray `tests/__init__.py` | Partial | Partial | Verify in diff | #19 claims a clean tree; confirm removal |
+| RC-08 | mypy `python_version` mismatch | Yes | No | Verify in diff | Kiro sets 3.10; Claude #11 leaves 3.11; confirm #19 carries the fix |
+| RC-09 | Wrong RFC citation | Yes | Yes | Verify in diff | Both fix the reference |
+| RC-10 | Nested interactive elements | No | Partial | Verify in diff | Confirm #19's renderer-true refactor is a11y-clean |
+| RC-11 | Stale docstring | Yes | Yes | Verify in diff | Both update |
+
+> **#19 claims to verify (real gate run required):** 3,537 passed / 22 skipped / 0 failed; 24 vitest; `npm run test:e2e:live` 1 passed; showcase 6-frame gate PASS; WS auth 5 passed; wheel ships `agui-author`; `sync_skills --check` 10 in sync; default-off ImportError. Also confirm #19 **retracts** the "props verified against the actual renderers" falsehood that #11 carried, and check whether #11's 2 Py3.12 telemetry subprocess failures (legacy `find_module`) are resolved via `find_spec`.
 
 **PR-A Provider Wins:**
 
@@ -94,14 +119,18 @@ Every comment from [awslabs/cli-agent-orchestrator#387](https://github.com/awsla
 
 ### PR-B Resolution Status
 
-| ID | Issue | `kiro/pr387-a2a-hardened` | `claude/pr387-a2a-hardened` | Notes |
-|----|-------|:---:|:---:|-------|
-| RC-01 | Auth bypass | Partial | Yes | Claude enforces auth-before-parse; Kiro wires scopes but parse order differs |
-| RC-02 | Unbounded store | Yes | Yes | Both implement cap + eviction; Kiro adds RESOURCE_EXHAUSTED + HTTP 429 |
-| RC-03 | Task id injection | No | No | **Both missed** - post-remediation finding |
-| RC-04 | Listener no auth | Yes | Yes | Both add `Depends()` guard |
-| RC-05 | `Task.from_dict` KeyError | No | No | **Both missed** |
-| RC-06 | `authlib` dep placement | Partial | Yes | Claude moves cleanly; Kiro has dep sequencing issue |
+The columns below cover the underlying implementations **and** Claude's executed reconciliation, PR **#20** (`reconcile/pr387-a2a-hardened`). As with PR-A, every entry for #20 must be **verified against its diff and a real gate run** per [Section 2.1](#21-mandatory-audit-of-all-claude-drafted-prs-11-12-17-19-20).
+
+| ID | Issue | `kiro/pr387-a2a-hardened` (#13) | `claude/pr387-a2a-hardened` (#12) | `reconcile/pr387-a2a-hardened` (#20, executed) | Notes |
+|----|-------|:---:|:---:|:---:|-------|
+| RC-01 | Auth bypass | Partial | Yes | Verify in diff | Claude #12 enforces auth-before-parse; Kiro wires scopes but parse order differs; confirm #20's router-level stream auth |
+| RC-02 | Unbounded store | Yes | Yes | Verify in diff | Both implement cap + eviction; confirm #20 folds in Kiro's `RESOURCE_EXHAUSTED` + HTTP 429 + `Retry-After: 30` |
+| RC-03 | Task id injection | No | No | **Claimed fixed in #20** | #11/#12 both missed; **verify** #20's idempotent-create `task.send` (resubmitted id → `INVALID_PARAMS`) actually present + tested (review 4638092590) |
+| RC-04 | Listener no auth | Yes | Yes | Verify in diff | Both add `Depends()` guard |
+| RC-05 | `Task.from_dict` KeyError | No | No | **Claimed fixed in #20** | #11/#12 both missed; **verify** #20 uses `data.get("id", "")` |
+| RC-06 | `authlib` dep placement | Partial | Yes | Verify in diff | Confirm #20 reverts the dep hunk for a clean A-first rebase |
+
+> **#20 claims to verify (real gate run required):** 3,609 passed / 21 skipped / 0 failed; e2e 2 passed; mypy 142; auth 17 + store 8 + id-integrity 4 + guard 11. Confirm the extracted `_should_mount_a2a()` + 8-case decision table + 3 lifespan integration tests, the union ~40-case real-JWT auth matrix (incl. admin/unknown-method + bearer edges), and `test/a2a/test_task_id_integrity.py`.
 
 **PR-B Provider Wins:**
 
@@ -116,15 +145,17 @@ Every comment from [awslabs/cli-agent-orchestrator#387](https://github.com/awsla
 | 28-case test matrix | Kiro | Comprehensive parametrized coverage |
 | Correct dep sequencing in pyproject.toml | Kiro | Proper optional dependency ordering |
 
-### Both Missed (Gaps Found Across All Evaluations)
+### Gaps Found Across Evaluations (status now that #19/#20 exist)
 
-| Gap | Severity | Source | Notes |
+The "both missed" gaps below predate Claude's executed reconciliations. #19 and #20 **claim** to close several of them; each "closed" claim is **pending verification** under the [Section 2.1 audit](#21-mandatory-audit-of-all-claude-drafted-prs-11-12-17-19-20) — Kiro's final build must confirm or re-open it.
+
+| Gap | Severity | Source | Status / Notes |
 |-----|----------|--------|-------|
-| Task id upsert injection (RC-03) | Blocking | Post-remediation review | Neither branch prevents id collision |
-| `Task.from_dict` KeyError (RC-05) | Important | Review comment | Neither branch uses `.get()` |
-| WS 4401 never asserted e2e on malformed token | Medium | Evaluation PR #16 | No branch tests WebSocket auth rejection path |
-| Equal-timestamp `?since=` boundary | Medium | Evaluation PR #15 | Race condition at exact boundary not handled |
-| `STATE_DELTA` debounce / `emit_ui` rate limiting | Follow-up | All evaluations agree | Out of scope for this PR stack |
+| Task id upsert injection (RC-03) | Blocking | Post-remediation review | #11/#12 both missed; **#20 claims fixed** (idempotent-create `task.send`, review 4638092590) — verify present + tested |
+| `Task.from_dict` KeyError (RC-05) | Important | Review comment | #11/#12 both missed; **#20 claims fixed** (`data.get("id", "")`) — verify in diff |
+| WS 4401 never asserted e2e on malformed token | Medium | Evaluation PR #16 | **#19 claims a malformed-token WS 4401 e2e** — verify the test exists and passes |
+| Equal-timestamp `?since=` boundary | Medium | Evaluation PR #15 | **#19 claims an equal-timestamp `?since=` boundary assertion** — verify in the union spec |
+| `STATE_DELTA` debounce / `emit_ui` rate limiting | Follow-up | All evaluations agree | Out of scope for this PR stack (confirm neither #19 nor #20 silently changes this) |
 
 ---
 
@@ -199,6 +230,8 @@ Phase 4: /cao-eval PR-B
 
 ## 6. Variant Generation Approach
 
+> **Reframed now that #19/#20 exist.** Claude has **already executed** the "best of both" reconciliations this section originally described generating from #11–#14: **#19** (`reconcile/pr387-agui-core`) is the executed PR-A and **#20** (`reconcile/pr387-a2a-hardened`) is the executed PR-B. The cherry-pick tables below (which Kiro win ports to which base) remain the **specification of what a correct reconciliation must contain** — use them as the audit rubric against #19/#20, not as a from-scratch build recipe. Concretely, Kiro's definitive final implementation: (1) takes #19 (PR-A) and #20 (PR-B) as the **strongest existing baseline**; (2) audits each **line-by-line** and **independently re-runs their full gate suites** per [Section 2.1](#21-mandatory-audit-of-all-claude-drafted-prs-11-12-17-19-20); (3) confirms every item in the tables below is actually present (flagging anything missing or overclaimed); (4) closes any remaining gap; and (5) produces the authoritative final `reconcile/*` result with the [Section 8](#8-media--visual-evidence-requirements) media deliverables. **Constraints still apply:** no commits to `feat/*`, `kiro/*`, or `claude/*` branches; **#19 and #20 themselves are audit inputs and must not be modified**; PR-A lands before PR-B; media is mandatory.
+
 ### PR-A Reconciliation
 
 **Base:** `kiro/pr387-agui-core` (rationale: green on Py3.10, skill governance, minimal/clean diff). Note: the reconciled PR-A must still add the required demo media under `docs/media/` per [Section 8](#8-media--visual-evidence-requirements) — the media mandate reframes "no committed artifacts" as "only the *required* feature-prefixed media, nothing stray."
@@ -248,14 +281,15 @@ Phase 4: /cao-eval PR-B
 
 ### Evaluation Rubric
 
-Each variant is scored against the following criteria (weighted):
+Each candidate is scored against the following criteria (weighted). **Candidates scored include the Kiro/Claude variants AND Claude's executed reconciliations #19 (PR-A) and #20 (PR-B)** — the executed reconciliations are audited and scored on the same rubric, since they are the baseline Kiro's final build must beat or match.
 
 | Category | Weight | Criteria |
 |----------|--------|----------|
-| **Blocking comments resolved** | 35% | All RC-01 through RC-04 (for PR-B), or relevant nits (PR-A) fully addressed |
-| **Important comments resolved** | 15% | RC-05 and RC-06 (PR-B) correctly fixed |
+| **Blocking comments resolved** | 30% | All RC-01 through RC-04 (for PR-B), or relevant nits (PR-A) fully addressed |
+| **Important comments resolved** | 10% | RC-05 and RC-06 (PR-B) correctly fixed |
 | **Nits addressed** | 10% | RC-07 through RC-11 (PR-A) all fixed |
-| **Gate commands pass** | 20% | Full gate suite green (see below) |
+| **Gate commands pass** | 20% | Full gate suite green, run **independently on the branch** with real counts recorded (see below) |
+| **Claims-vs-code fidelity** | 10% | **Every assertion in the PR body is verified against the actual diff/tests.** Any unverified or contradicted claim is flagged and docked (Claude PRs have a history of one-off overclaims — e.g., #11's "props verified against the actual renderers" falsehood). A candidate with material overclaims cannot score full marks here. |
 | **Visual evidence / media deliverables** | 15% | mp4 + derived gif + comprehensive screenshots exist under `docs/media/` and are correctly embedded per [Section 8](#8-media--visual-evidence-requirements) (mp4 as plain link; gif/png inline with alt text + caption) in BOTH the feature docs and the PR description |
 | **Clean diff** | 5% | No unrelated changes, minimal diff vs base (note: demo media under `docs/media/` is expected and required, not counted as unrelated) |
 
@@ -301,8 +335,9 @@ A variant **passes** if:
 3. No regressions introduced vs. `main` (diff-test against main's test suite)
 4. Diff is scoped to the PR shape's files (no cross-contamination between PR-A and PR-B concerns)
 5. **Media deliverables present and correct (hard gate):** a full-quality `.mp4` of the live feature path, a derived looping `.gif`, and comprehensive annotated screenshots all exist under `docs/media/` and are embedded per [Section 8](#8-media--visual-evidence-requirements) — mp4 as a plain link, gif/png inline with alt text + caption — in both the feature docs and the PR description. A variant missing any artifact, or embedding the mp4 with `![]()` image syntax, **fails** regardless of code quality.
+6. **Claims-vs-code fidelity verified (hard gate):** every claim in the PR body has been checked against the actual diff/tests and the gate suite has been re-run on the branch with real counts recorded. Any **material** unverified or contradicted claim must be flagged and resolved (corrected in the final build or documented) before the candidate can pass.
 
-A variant **wins** if it scores highest on the weighted rubric across all passing variants.
+A variant **wins** if it scores highest on the weighted rubric across all passing variants. **Because #19 and #20 are Claude's executed reconciliations, they are the incumbent baseline: Kiro's final build wins only if it matches or exceeds them on the rubric after their claims have been independently verified.**
 
 ---
 
@@ -484,6 +519,8 @@ Step 10: Submit upstream
 ### Hard Constraints
 
 - **Do NOT commit to `feat/agentic-protocols-generative-ui` directly.** All reconciliation work happens on `reconcile/*` branches.
+- **Audit ALL Claude-drafted PRs — #11, #12, #17, #19, #20 — with no exception** ([Section 2.1](#21-mandatory-audit-of-all-claude-drafted-prs-11-12-17-19-20)). No `reconcile/*-final` may be selected and no upstream PR submitted until each has passed the mandatory audit checklist (full-diff read, claims-vs-code verification, real gate run, wins/regressions/gaps catalog, and — for #20 — confirmed review 4638092590 fixes).
+- **Do NOT modify #19 or #20 (or any `kiro/*` / `claude/*` branch).** They are audit inputs. Kiro's final build consumes them read-only and produces a separate authoritative `reconcile/*` result.
 - **PR-A lands before PR-B.** This is the agreed sequencing per upstream reviewer recommendation.
 - **All gate commands must pass** before any PR is submitted upstream.
 - **Pull latest `main`** into all branches before beginning reconciliation.
@@ -524,7 +561,9 @@ These items were identified during evaluation but are out of scope for this PR s
 | PR #14 (Kiro PR-A) | [kiro/pr387-agui-core](https://github.com/plauzy/cli-agent-orchestrator/pull/14) |
 | PR #15 (Eval 1) | [docs/pr387-reconciliation](https://github.com/plauzy/cli-agent-orchestrator/pull/15) |
 | PR #16 (Eval 2) | [docs/pr387-reconciliation-2](https://github.com/plauzy/cli-agent-orchestrator/pull/16) |
-| PR #17 (Eval 3) | [claude/pr387-remediation-reconcile-jlcpmy](https://github.com/plauzy/cli-agent-orchestrator/pull/17) |
+| PR #17 (Eval 3, Claude) | [claude/pr387-remediation-reconcile-jlcpmy](https://github.com/plauzy/cli-agent-orchestrator/pull/17) |
+| PR #19 (Claude executed reconciled PR-A) | [reconcile/pr387-agui-core](https://github.com/plauzy/cli-agent-orchestrator/pull/19) |
+| PR #20 (Claude executed reconciled PR-B) | [reconcile/pr387-a2a-hardened](https://github.com/plauzy/cli-agent-orchestrator/pull/20) |
 
 ### CAO Primitives Reference
 
