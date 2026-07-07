@@ -1,92 +1,107 @@
 ---
 name: agui-author
-description: Use when a CAO agent should surface structured UI to the operator dashboard — approvals, choices, diffs, progress, metrics, or agent status — via the emit_ui MCP tool. Covers the six allow-listed components, their props schemas, the 8 KB bound, and the refusal behavior. Do NOT use for building the dashboard itself — that's cao_pwa/.
-allowed-tools: [Bash, Read, Grep, Glob]
-user-invocable: true
+description: Author live dashboard UI from an agent via the `emit_ui` MCP tool. Emit
+  one of six allow-listed components (approval_card, choice_prompt, diff_summary,
+  progress, metric, agent_card) with JSON props and it renders in any AG-UI client
+  watching the fleet. Use when you want the operator to see a decision, a diff, or a
+  status readout instead of scrolling terminal text. Arbitrary HTML/markup is refused.
 ---
 
-# Authoring Generative UI from any CAO agent
+# Authoring generative UI over AG-UI
 
-Any agent in a CAO fleet — regardless of provider — can render structured UI
-on the operator dashboard by calling the **`emit_ui`** MCP tool. The card
-appears live on every connected AG-UI client (the `cao_pwa/` dashboard, or any
-stock AG-UI consumer of `GET /agui/v1/stream`).
+CAO exposes an **AG-UI** stream (`GET /agui/v1/stream`) that any dashboard — the
+bundled `cao_pwa`, CopilotKit, the AG-UI Dojo, or a plain `EventSource` — renders
+without CAO-specific code. As an agent you can push a **declarative UI intent**
+onto that stream with the `emit_ui` MCP tool. The operator sees a rendered card,
+not raw text — and because every provider's intents render uniformly, they can't
+tell (and don't need to) which CLI agent produced which card.
 
-Requires the AG-UI surface to be enabled on the server (`CAO_AGUI_ENABLED=true`
-or `CAO_MCP_APPS_ENABLED=true`). When disabled, `emit_ui` returns
-`{"ok": false, "reason": "AG-UI surface disabled …"}` — treat that as a no-op,
-not an error.
+The surface must be enabled on the server (`CAO_AGUI_ENABLED=true` or
+`CAO_MCP_APPS_ENABLED=true` — the two surfaces share one event source). When it
+is disabled, `emit_ui` returns `{"ok": false, "reason": "AG-UI surface disabled…"}`
+— treat that as a no-op, not an error.
 
-## The contract
+## Safety model (why this is always safe to call)
 
-- You may emit **only** the six allow-listed components below, with **JSON
-  props** — no HTML, no markup, no scripts. Anything off-list is refused
-  server-side (400) and never rendered.
-- Props must be JSON-serializable and **under 8 KB** once serialized; larger
-  payloads are truncated to `{_truncated: true}`. Summarize — don't dump.
-- Never put message bodies, credentials, or file contents in props. The AG-UI
-  stream is metadata-only by contract; keep your UI intents the same.
+You may emit **only** a closed allow-list of named components with JSON props.
+There is **no HTML, no script, no `eval`, no iframe**. The intent is validated
+**server-side** against the allow-list before it reaches the stream:
 
-## When to emit which component
+- An **off-list** component (e.g. `iframe`, `script`) is **refused** — the tool
+  raises a `ValueError`; nothing is rendered.
+- `props` must be **JSON-serializable** and are **bounded to 8 KB** (an oversized
+  payload is replaced with `{"_truncated": true}` rather than flooding the bus).
+- If the AG-UI surface is disabled on the server, the tool **degrades gracefully**
+  (no error) — so calling it is never fatal.
+- The AG-UI stream is **metadata-only by contract**: never put message bodies,
+  credentials, or file contents in props. Reference paths, not contents.
 
-| Component | Emit when… | Core props |
+## The tool
+
+```
+emit_ui(component: str, props: dict) -> {"ok", "event_id", "component"}
+```
+
+`component` must be one of: `approval_card`, `choice_prompt`, `diff_summary`,
+`progress`, `metric`, `agent_card`.
+
+## When to use which component
+
+Props below are what the reference renderers
+(`cao_pwa/src/components/GenerativeUI.tsx`) actually display; unknown extra keys
+are ignored, not refused.
+
+| Component | Use it when… | Props |
 |---|---|---|
-| `approval_card` | you need a human go/no-go before a risky step | `title` (str), `detail` (str), `risk` (`"low"\|"medium"\|"high"`) |
-| `choice_prompt` | the operator should pick between options | `question` (str), `choices` (list of str or `{label,value}`) |
-| `diff_summary` | you changed files and want the change surfaced | `files` (list of `{path, additions, deletions}`), `summary` (str) |
-| `progress` | a long task should show liveness | `label` (str), `value` (0–100 number) or omit for indeterminate |
-| `metric` | one number tells the story (coverage %, latency, cost) | `label` (str), `value` (number/str), `unit` (str) |
-| `agent_card` | you want your identity/status pinned on the board | `name` (str), `provider` (str), `status` (str) |
-
-Props are free-form JSON — the table lists what the reference renderers
-(`cao_pwa/src/components/GenerativeUI.tsx`) display; unknown extra keys are
-ignored, not refused.
+| `approval_card` | you need a human to approve/reject a risky action before you proceed | `title` (str), `detail` (str, optional), `risk` (`"low"`/`"medium"`/`"high"`, optional) |
+| `choice_prompt` | you want the operator to pick among options | `question` (str), `choices` (list of `{"label", "value"}` or plain strings) |
+| `diff_summary` | you changed files and want a compact review | `title` (str), `files` (list of `{"path", "additions", "deletions"}`) |
+| `progress` | a long step is running | `label` (str), `value` (0.0–1.0; omit for an indeterminate bar) |
+| `metric` | you want to surface a single number | `label` (str), `value` (str/number), `unit` (str, optional) |
+| `agent_card` | you want to advertise your identity/status in the fleet view | `name` (str), `provider` (str), `status` (str, optional) |
 
 ## Examples
 
-Announce yourself when you start:
+```python
+# Gate a risky action on human approval.
+emit_ui("approval_card", {
+    "title": "Deploy to production?",
+    "detail": "3 files changed, 1 DB migration",
+    "risk": "high",
+})
 
-```
-emit_ui(component="agent_card",
-        props={"name": "data_analyst", "provider": "kiro_cli", "status": "working"})
-```
+# Ask the operator to choose.
+emit_ui("choice_prompt", {
+    "question": "Which base branch?",
+    "choices": [{"label": "main", "value": "main"},
+                {"label": "release", "value": "release"}],
+})
 
-Show progress during a long analysis, then the result:
+# Summarize a change set.
+emit_ui("diff_summary", {
+    "title": "Refactor auth",
+    "files": [{"path": "security/auth.py", "additions": 74, "deletions": 3}],
+})
 
-```
-emit_ui(component="progress", props={"label": "Analyzing dataset", "value": 60})
-emit_ui(component="metric", props={"label": "Mean latency", "value": 42.1, "unit": "ms"})
-```
-
-Ask for a go/no-go before something destructive:
-
-```
-emit_ui(component="approval_card",
-        props={"title": "Drop 3 stale tables?",
-               "detail": "backup verified 2026-07-06", "risk": "high"})
-```
-
-Surface a code change:
-
-```
-emit_ui(component="diff_summary",
-        props={"summary": "auth hardening",
-               "files": [{"path": "api/main.py", "additions": 18, "deletions": 2}]})
+# Show progress / a metric / your identity.
+emit_ui("progress", {"label": "Indexing repository", "value": 0.42})
+emit_ui("metric", {"label": "tokens used", "value": 12840, "unit": "tok"})
+emit_ui("agent_card", {"name": "reviewer", "provider": "claude_code", "status": "working"})
 ```
 
-## What NOT to do
+## Guidance
 
-- Do not try `iframe`, `html`, `script`, `markdown`, or any component not in
-  the table — the server refuses it (400) and dashboards show nothing. There
-  is no escape hatch by design.
-- Do not encode HTML inside string props expecting it to render — renderers
-  treat every prop as plain text.
-- Do not emit in a tight loop; one `progress` update per meaningful step is
-  plenty (the stream is drop-on-slow, so spam only hurts your own updates).
-- Approval/choice cards are **display + operator-side actions**; today the
+- Prefer an `approval_card` over asking for confirmation in prose when an action
+  is destructive — it gives the operator an explicit approve/reject affordance in
+  the dashboard. Note the card is **display + operator-side actions**: today the
   action routes to the dashboard's command surface, not back to you as a tool
-  result. Pair an `approval_card` with your provider's own wait-for-input
-  mechanism.
+  result — pair it with your provider's own wait-for-input mechanism.
+- Keep `props` small and structured; do not embed large blobs (the 8 KB bound will
+  truncate them). Reference file paths, not file contents.
+- Do **not** try to smuggle markup through props — there is no HTML sink; strings
+  render as text.
+- One intent per meaningful UI moment (a decision, a diff, a milestone). Don't emit
+  a `progress` card on every token.
 
 ## Verifying locally
 
@@ -100,8 +115,14 @@ curl -N 'http://localhost:9889/agui/v1/stream'
 # 3. Emit from anywhere (the MCP tool does exactly this)
 curl -sX POST http://localhost:9889/agui/v1/emit_ui \
   -H 'Content-Type: application/json' \
-  -d '{"component":"metric","props":{"label":"demo","value":1}}'
+  -d '{"component":"progress","props":{"label":"demo","value":0.5}}'
 ```
 
-A `GENERATIVE_UI` frame with your component appears on the stream; an
-off-list component returns `{"detail":"unknown component …"}` with 400.
+A `GENERATIVE_UI` frame with your component appears on the stream; an off-list
+component is refused with HTTP 400.
+
+## See also
+
+- `examples/agui-dashboard/` — a runnable demo (`run.sh` + `showcase.sh`) that
+  drives all six components live and shows the off-list refusal.
+- `docs/pwa.md` — the dashboard that renders these components.

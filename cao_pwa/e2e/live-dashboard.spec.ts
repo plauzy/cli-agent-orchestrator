@@ -103,11 +103,14 @@ test("live dashboard renders real emit_ui traffic, refuses off-list, resumes via
   // 2. Every allow-listed component, emitted through the real producer
   //    endpoint, renders live off the SSE stream.
   expect(await emitUI("agent_card", { name: "fleet_worker", provider: "mock_cli", status: "working" })).toBe(200);
-  expect(await emitUI("progress", { label: "Analyzing dataset", value: 60 })).toBe(200);
+  // Renderer-true props: progress value is 0.0–1.0 (the renderer clamps to
+  // [0,1]) and diff_summary titles via `title` — asserted below so a
+  // vocabulary/renderer drift fails this spec instead of hiding behind a 200.
+  expect(await emitUI("progress", { label: "Analyzing dataset", value: 0.6 })).toBe(200);
   expect(await emitUI("metric", { label: "Coverage", value: 99, unit: "%" })).toBe(200);
   expect(
     await emitUI("diff_summary", {
-      summary: "auth hardening",
+      title: "auth hardening",
       files: [{ path: "api/main.py", additions: 18, deletions: 2 }],
     }),
   ).toBe(200);
@@ -122,7 +125,11 @@ test("live dashboard renders real emit_ui traffic, refuses off-list, resumes via
 
   await expect(page.getByText("fleet_worker").first()).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("Analyzing dataset")).toBeVisible();
+  // The rendered <progress> carries the un-clamped value — pins the 0–1 scale.
+  await expect(page.locator(".gen-ui-progress progress")).toHaveAttribute("aria-valuenow", "0.6");
   await expect(page.getByText("Coverage")).toBeVisible();
+  // The diff card's heading comes from `title` (not `summary`) — pins the prop name.
+  await expect(page.getByRole("heading", { name: "auth hardening" })).toBeVisible();
   await expect(page.getByText("api/main.py")).toBeVisible();
   await expect(page.getByText("Pick a deploy target")).toBeVisible();
   await expect(page.getByText("Approve handoff to prod?")).toBeVisible();
