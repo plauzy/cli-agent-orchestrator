@@ -21,12 +21,6 @@ from unittest.mock import patch
 
 import pytest
 
-# Skip starting the dedicated :9890 Agent Card listener during tests.
-# Lifespan tests that previously bound the port now just log a "skipped"
-# trace. Real listener behavior is covered by test/agent_card/test_router.py
-# which exercises the FastAPI app directly via TestClient.
-os.environ.setdefault("CAO_AGENT_CARD_DISABLED", "true")
-
 # Make the `mock_cli` test-fixture binary discoverable for the pytest
 # session so MockCliProvider can `shlex.join(["mock_cli", ...])` without
 # an absolute path. Not on PATH outside the test session — production

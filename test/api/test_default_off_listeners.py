@@ -1,8 +1,10 @@
 """Regression: `cao-server` with no flags opens no listener beyond :9889.
 
-The Agent Card / A2A listener is an opt-in surface. This asserts the
-default-off contract: without ``CAO_AGENT_CARD_ENABLED`` the lifespan must not
-start the dedicated :9890 listener, and it binds loopback when enabled.
+The A2A / Agent Card transport was split out of the AG-UI core PR (review
+feedback on awslabs/cli-agent-orchestrator#387): it must not exist on this
+branch at all — no module, no lifespan wiring, no ``/a2a`` routes. This
+asserts that stronger contract, plus the AG-UI surface's own default-off
+behavior (no flags => 404).
 """
 
 from __future__ import annotations
@@ -14,31 +16,36 @@ from cli_agent_orchestrator.api.main import app
 
 
 @pytest.fixture(autouse=True)
-def _no_agent_card_env(monkeypatch):
-    # Ensure a clean env: neither enable nor legacy disable flags set.
-    monkeypatch.delenv("CAO_AGENT_CARD_ENABLED", raising=False)
-    monkeypatch.delenv("CAO_AGENT_CARD_DISABLED", raising=False)
+def _no_surface_env(monkeypatch):
+    # Ensure a clean env: no AG-UI / MCP Apps / legacy agent-card flags set.
+    for var in (
+        "CAO_AGENT_CARD_ENABLED",
+        "CAO_AGENT_CARD_DISABLED",
+        "CAO_AGUI_ENABLED",
+        "CAO_MCP_APPS_ENABLED",
+    ):
+        monkeypatch.delenv(var, raising=False)
 
 
-def test_no_agent_card_listener_without_flag():
-    """Default (no flag) => the :9890 Agent Card listener is not started."""
-    with TestClient(app):
-        assert getattr(app.state, "agent_card_listener", "unset") is None
+def test_a2a_surface_absent_from_this_build():
+    """The A2A/Agent Card transport is not part of this branch."""
+    with pytest.raises(ImportError):
+        import cli_agent_orchestrator.a2a  # noqa: F401
+    with pytest.raises(ImportError):
+        import cli_agent_orchestrator.agent_card  # noqa: F401
 
 
-def test_listener_binds_loopback_by_default():
-    """When enabled without CAO_AGENT_CARD_HOST, the listener binds 127.0.0.1."""
-    import os
+def test_no_agent_card_listener_state_without_flag():
+    """Default (no flag) => no listener handle and no /a2a routes are mounted."""
+    with TestClient(app, base_url="http://localhost"):
+        assert getattr(app.state, "agent_card_listener", None) is None
+        paths = {getattr(route, "path", "") for route in app.routes}
+        assert not any(p.startswith("/a2a") for p in paths)
 
-    from cli_agent_orchestrator.agent_card import listener as _listener
 
-    # The bind-host resolution is the security-relevant line; assert its default
-    # is loopback rather than 0.0.0.0 (exercised without actually binding).
-    os.environ.pop("CAO_AGENT_CARD_HOST", None)
-    resolved = None or os.environ.get("CAO_AGENT_CARD_HOST", "127.0.0.1")
-    assert resolved == "127.0.0.1"
-    # Guard against a regression of the module default back to 0.0.0.0.
-    src = (_listener.__file__ or "").rstrip("c")
-    with open(src, encoding="utf-8") as fh:
-        text = fh.read()
-    assert 'os.environ.get("CAO_AGENT_CARD_HOST", "127.0.0.1")' in text
+def test_agui_surface_defaults_off():
+    """No flags => the AG-UI routes 404 (byte-identical default posture)."""
+    with TestClient(app, base_url="http://localhost") as client:
+        assert client.get("/agui/v1/stream").status_code == 404
+        resp = client.post("/agui/v1/emit_ui", json={"component": "progress", "props": {}})
+        assert resp.status_code == 404

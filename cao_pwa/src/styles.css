@@ -71,13 +71,30 @@ body,
   border-color: var(--accent);
 }
 
-.cao-pwa-remove {
+/* Instance tab = activate button + sibling remove button (a11y: interactive
+   content may not nest inside a <button>). The wrapper keeps the pair visually
+   fused into one pill. */
+.cao-pwa-tabitem {
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.cao-pwa-tabitem button:first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.cao-pwa-nav button.cao-pwa-remove {
   font-size: 14px;
   color: var(--muted);
   cursor: pointer;
+  border-left: none;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  padding: 4px 6px;
 }
 
-.cao-pwa-remove:hover {
+.cao-pwa-nav button.cao-pwa-remove:hover {
   color: var(--status-err);
 }
 

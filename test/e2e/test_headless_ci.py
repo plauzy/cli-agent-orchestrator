@@ -5,11 +5,14 @@ and asserts the script exits 0 (agent reached IDLE/COMPLETED) within the
 configured timeout.
 
 Requires:
-- Running CAO server (``uv run cao-server``)
 - tmux
 - A working CLI provider on PATH and authenticated (defaults to kiro_cli)
 - ``ci_developer`` agent profile installed
   (``cao install examples/headless-ci/ci_developer.md``)
+
+The CAO server itself is started automatically by the session-scoped
+``require_cao_server`` fixture in ``test/e2e/conftest.py`` — no manual
+``cao-server`` is needed.
 
 Run:
     uv run pytest -m e2e test/e2e/test_headless_ci.py -v

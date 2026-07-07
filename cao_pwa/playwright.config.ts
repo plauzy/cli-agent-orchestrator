@@ -10,6 +10,10 @@ import { defineConfig } from "@playwright/test";
 // "screen recording" proof referenced in docs/generative-ui-*.md.
 export default defineConfig({
   testDir: "./e2e",
+  // The live spec boots a real cao-server (uv/python) — run it via
+  // `npm run test:e2e:live` (playwright.live.config.ts); the default e2e run
+  // stays hermetic (deterministic replay only, no server toolchain needed).
+  testIgnore: /live-dashboard\.spec\.ts/,
   outputDir: "./test-results",
   timeout: 30_000,
   use: {
@@ -18,6 +22,12 @@ export default defineConfig({
     trace: "on-first-retry",
     viewport: { width: 1100, height: 760 },
     colorScheme: "dark",
+    // Sandboxes that pre-install a Chromium (and block the Playwright CDN)
+    // can point at it instead of the version-pinned download; CI leaves this
+    // unset and uses `playwright install`.
+    launchOptions: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
+      ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE }
+      : {},
   },
   reporter: [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]],
 });

@@ -238,6 +238,30 @@ async def test_auth_enabled_no_token_closes_4401(
     ), f"WS close took {elapsed_ms:.0f}ms — target is <200ms (allow <1500ms in CI)"
 
 
+async def test_auth_enabled_malformed_token_closes_4401(
+    cao_server_with_auth: AuthCaoServer,
+) -> None:
+    """Auth-enabled + malformed bearer → clean ``close 4401``, not an opaque error.
+
+    Closes the loop on the #387 review's token-parse finding end-to-end: the
+    garbage token travels the real subprotocol slot into
+    ``extract_scopes_from_token``, whose failure must surface as the same
+    clean 4401 as the no-token case (previously only pinned at the
+    helper-returns-None layer).
+    """
+    url = _ws_url(cao_server_with_auth.server.url, "abcd1234")
+    code: int | None = None
+    try:
+        async with ws_connect(url, token="not-a-jwt") as ws:
+            with contextlib.suppress(ConnectionClosed):
+                await asyncio.wait_for(ws.recv(), timeout=2.0)
+            code = ws.close_code
+    except ConnectionClosed as exc:
+        code = exc.code
+
+    assert code == 4401, f"expected close code 4401 for a malformed token, got {code!r}"
+
+
 # ---------------------------------------------------------------------------
 # Scenarios 3 + 4 — share one auth-enabled terminal
 # ---------------------------------------------------------------------------

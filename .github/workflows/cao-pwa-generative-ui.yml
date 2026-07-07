@@ -1,23 +1,25 @@
 name: CAO PWA — Generative UI proof
 
-# Builds + unit-tests the L2 PWA and produces the generative-UI SCREEN RECORDING
-# that cannot be generated in the restricted build sandbox (the Playwright
-# browser CDN is blocked there). On GitHub-hosted runners the CDN is reachable,
-# so this job downloads chromium, drives the deterministic replay
-# (cao_pwa/demo/generative-ui-replay.html), records video + screenshots, and
-# uploads them as build artifacts attached to the run/PR.
+# Builds + unit-tests the L2 PWA and produces the generative-UI SCREEN
+# RECORDINGS: the LIVE-PATH proof (e2e/live-dashboard.spec.ts boots a real
+# cao-server and drives emit_ui through every component, the off-list refusal,
+# and the ?since= reconnect) plus the deterministic replay
+# (cao_pwa/demo/generative-ui-replay.html). Videos + screenshots upload as
+# build artifacts attached to the run/PR.
 #
-# See docs/generative-ui-implementation-2026-07-04.md.
+# See docs/pwa.md (Generative UI section).
 
 on:
   push:
     branches: [main]
     paths:
       - "cao_pwa/**"
+      - "src/cli_agent_orchestrator/**"
       - ".github/workflows/cao-pwa-generative-ui.yml"
   pull_request:
     paths:
       - "cao_pwa/**"
+      - "src/cli_agent_orchestrator/**"
       - ".github/workflows/cao-pwa-generative-ui.yml"
   # Allow manual runs so the recording can be regenerated on demand.
   workflow_dispatch:
@@ -46,6 +48,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The live-path spec boots a real cao-server, so the Python toolchain is
+      # required alongside Node.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Sync Python environment
+        working-directory: .
+        run: uv sync --all-extras --dev
+
       - name: Type check
         run: npx tsc --noEmit
 
@@ -59,8 +75,11 @@ jobs:
       - name: Install Playwright chromium
         run: npm run test:e2e:install
 
-      - name: Run Playwright e2e (records video + screenshots)
+      - name: Run Playwright e2e (deterministic replay; records video + screenshots)
         run: npm run test:e2e
+
+      - name: Run LIVE Playwright e2e (real cao-server; records the live-path video)
+        run: npm run test:e2e:live
 
       - name: Convert recording to mp4 + gif (best-effort)
         if: always()
@@ -81,17 +100,26 @@ jobs:
             break
           done
           if [ "$found" = "0" ]; then echo "No .webm recording found under test-results/"; fi
+          for webm in test-results-live/**/*.webm; do
+            base="recordings/agui-live-remediation-demo"
+            echo "Converting $webm -> $base.mp4 / $base.gif"
+            ffmpeg -y -i "$webm" -movflags +faststart -pix_fmt yuv420p "$base.mp4" || true
+            ffmpeg -y -i "$webm" -vf "fps=8,scale=1000:-1:flags=lanczos" "$base.gif" || true
+            cp "$webm" "$base.webm" || true
+            break
+          done
           ls -la recordings || true
 
       - name: Write job summary
         if: always()
         run: |
           {
-            echo "## Generative UI — screen recording"
+            echo "## Generative UI — screen recordings"
             echo ""
-            echo "Deterministic replay of a real \`to_agui_event\`-produced event sequence"
-            echo "across heterogeneous providers (q_cli / claude_code / codex), including the"
-            echo "off-list \`iframe\` refusal."
+            echo "Live-path proof (real cao-server + emit_ui: all six components, the"
+            echo "off-list \`iframe\` refusal, and the ?since= reconnect) plus the"
+            echo "deterministic replay across heterogeneous providers"
+            echo "(kiro_cli / claude_code / codex)."
             echo ""
             echo "Download the **generative-ui-recording** and **generative-ui-report** artifacts"
             echo "below to view the mp4/gif/webm and the full Playwright HTML report + screenshot."
@@ -105,6 +133,7 @@ jobs:
           path: |
             cao_pwa/recordings/**
             cao_pwa/test-results/**/*.webm
+            cao_pwa/test-results-live/**/*.webm
             cao_pwa/e2e/__screenshots__/**
           if-no-files-found: warn
           retention-days: 30
@@ -114,6 +143,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: generative-ui-report
-          path: cao_pwa/playwright-report/**
+          path: |
+            cao_pwa/playwright-report/**
+            cao_pwa/playwright-report-live/**
           if-no-files-found: warn
           retention-days: 30

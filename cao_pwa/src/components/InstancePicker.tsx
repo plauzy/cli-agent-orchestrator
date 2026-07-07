@@ -54,34 +54,28 @@ export function InstancePicker({ instances, activeId, onActivate, onChanged }: P
   return (
     <>
       <nav className="cao-pwa-nav" aria-label="CAO instances">
+        {/* The activate and remove controls are sibling <button>s (grouped by
+            the wrapper) — interactive content inside a <button> is invalid
+            HTML and unreachable for keyboard/AT users. */}
         {instances.map((inst) => (
-          <button
-            key={inst.id}
-            type="button"
-            className={inst.id === activeId ? "active" : ""}
-            onClick={() => onActivate(inst.id)}
-            aria-current={inst.id === activeId ? "page" : undefined}
-          >
-            {inst.label}
-            <span
-              role="button"
-              tabIndex={0}
+          <span key={inst.id} className="cao-pwa-tabitem" role="group" aria-label={inst.label}>
+            <button
+              type="button"
+              className={inst.id === activeId ? "active" : ""}
+              onClick={() => onActivate(inst.id)}
+              aria-current={inst.id === activeId ? "page" : undefined}
+            >
+              {inst.label}
+            </button>
+            <button
+              type="button"
               className="cao-pwa-remove"
               aria-label={`Remove instance ${inst.label}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                void remove(inst.id);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  void remove(inst.id);
-                }
-              }}
+              onClick={() => void remove(inst.id)}
             >
               ×
-            </span>
-          </button>
+            </button>
+          </span>
         ))}
         <button type="button" onClick={open} aria-label="Add CAO instance">
           + Add instance
