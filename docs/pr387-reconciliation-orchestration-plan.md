@@ -1,5 +1,73 @@
 # PR #387 Reconciliation & Orchestration Plan
 
+**Status: FINAL — ready for execution handoff.** Version **v1.0**. This finalized runbook supersedes all earlier drafts of this plan; it is the single authoritative document to execute the #387 reconciliation.
+
+---
+
+## 0. Kickoff for a Fresh Kiro Session (Start Here)
+
+> **Read this section first.** It is a self-contained runbook written for a **brand-new Kiro session with zero memory** of the conversation that produced this plan. Everything needed to execute cold is here or cross-referenced by section number. Read the whole document once before touching any code.
+
+### 0.1 Mission (one paragraph)
+
+Produce **two professional-ready, upstream-submittable pull requests** — **PR-A (AG-UI core)** first, then **PR-B (A2A hardened)** — that resolve **every** review comment on upstream [awslabs/cli-agent-orchestrator#387](https://github.com/awslabs/cli-agent-orchestrator/pull/387). Get there by **auditing all existing work** — every Kiro branch **and all five Claude-drafted PRs (#11, #12, #17, #19, #20)** — and building the definitive **"sum total" reconciliation** that takes the strongest form of every win, closes every remaining gap (including the post-hoc review `4638092590` findings), and ships mandatory media evidence. The two Claude-executed reconciliations **#19** (`reconcile/pr387-agui-core`) and **#20** (`reconcile/pr387-a2a-hardened`) are the **strongest existing baseline** to audit and beat — not branches to regenerate from scratch.
+
+### 0.2 Environment Setup
+
+- **Clone via the GitHub Power**, never raw `git clone` / `git push` — the `plauzy` origin gateway requires the Power's auth (direct `git fetch` / `git ls-remote` / `git push` fail with an auth error). Use the Power's `repo_set_up` / `clone_repository` / `pull_repository` to fetch and `push_to_remote` to push.
+- **Repo:** `plauzy/cli-agent-orchestrator` (a fork of `awslabs/cli-agent-orchestrator`).
+- **Base branch / commit for all reconciliation work:** `feat/agentic-protocols-generative-ui` — the PR #387 head is commit **`f40933d`**. All branch diffs are measured against this base.
+- **Toolchain:**
+  - Python: `uv` (e.g., `uv run pytest`, `uv run mypy src/`), plus `black` and `isort` for formatting gates.
+  - PWA (`cao_pwa/`): `npm` with `tsc --noEmit`, `vitest`/`npm test`, and `vite`/`npm run build`.
+- **Working discipline:** do all work on `reconcile/*` branches only (see hard constraints in 0.5).
+
+### 0.3 Branches to Fetch and Their Roles
+
+| Role | PR# | Branch |
+|------|-----|--------|
+| **Base** (PR #387 head `f40933d`) | 9 | `feat/agentic-protocols-generative-ui` |
+| **Kiro impl — PR-A** | 14 | `kiro/pr387-agui-core` |
+| **Kiro impl — PR-B** | 13 | `kiro/pr387-a2a-hardened` |
+| **Claude impl — PR-A** | 11 | `claude/pr387-agui-core` |
+| **Claude impl — PR-B** | 12 | `claude/pr387-a2a-hardened` |
+| **Claude eval / plan** (docs-only scorecard) | 17 | `claude/pr387-remediation-reconcile-jlcpmy` |
+| **Claude EXECUTED reconciliation — PR-A (baseline)** | 19 | `reconcile/pr387-agui-core` |
+| **Claude EXECUTED reconciliation — PR-B (baseline)** | 20 | `reconcile/pr387-a2a-hardened` |
+| **Docs eval 1** | 15 | `docs/pr387-reconciliation` |
+| **Docs eval 2** (Linux / Py3.12 run) | 16 | `docs/pr387-reconciliation-2` |
+
+### 0.4 Ordered Start Sequence (with section cross-references)
+
+1. **Audit all five Claude-drafted PRs — #11, #12, #17, #19, #20 — per [Section 2.1](#21-mandatory-audit-of-all-claude-drafted-prs-11-12-17-19-20).** Read each full diff (not just PR bodies), verify every PR-body claim against the actual code/tests (claims-vs-code fidelity), and **independently re-run the full gate suite on #19 and #20**, recording **real** pass/skip/fail counts vs. the numbers claimed. Confirm the review `4638092590` fixes (RC-03/RC-05) are actually present and tested in #20.
+2. **Treat #19 and #20 as the strongest existing baseline ([Section 6](#6-variant-generation-approach)).** Audit them **line-by-line** against the reconciliation spec. **Do not modify them** — they are read-only audit inputs.
+3. **Build the definitive final `reconcile/*` result** that closes any remaining gap, including review `4638092590` — **RC-03** (task-id injection → idempotent-create `task.send`) and **RC-05** (`Task.from_dict` uses `data.get("id", "")`). See the resolution registry in [Section 3](#3-upstream-review-comment-registry) and the cherry-pick spec in [Section 6](#6-variant-generation-approach).
+4. **Produce the mandatory media deliverables per [Section 8](#8-media--visual-evidence-requirements)** for every major feature update (both tracks).
+5. **Score candidates via `/cao-eval` per [Section 7](#7-cao-eval-criteria-and-success-gates)** — the final build wins only if it matches or exceeds the #19/#20 baseline after their claims are independently verified.
+6. **Submit upstream: PR-A first, then PR-B ([Section 9](#9-reconciliation-workflow), Step 10).**
+
+### 0.5 Hard Constraints (restated up front)
+
+- **Never commit to** `feat/agentic-protocols-generative-ui`, any `kiro/*` branch, or any `claude/*` branch. All work lands on `reconcile/*` branches.
+- **Treat #19 and #20 as read-only audit inputs** — audit and re-verify them, but do not modify them; the final authoritative result is a separate `reconcile/*` branch.
+- **PR-A lands before PR-B** (upstream reviewer sequencing: PR-B's A2A layer consumes PR-A's streaming surface).
+- **Media is a pass/fail gate for every major feature update:** a full-quality `.mp4` of the live feature path (canonical), a derived looping `.gif`, and annotated screenshots — the **mp4 embedded as a plain markdown link, never `![]()` image syntax** — in both the feature docs and the PR body. See [Section 8](#8-media--visual-evidence-requirements).
+
+### 0.6 Definition of Done (checklist)
+
+- [ ] All 11 review comments **RC-01 … RC-11** resolved and **verified in the diff** ([Section 3](#3-upstream-review-comment-registry)).
+- [ ] Review `4638092590` fixes present **and tested** (RC-03 idempotent-create `task.send` → `INVALID_PARAMS` on id stomp; RC-05 `Task.from_dict` uses `data.get("id", "")`; `test/a2a/test_task_id_integrity.py` passes).
+- [ ] Full gate suite green with **real, recorded counts** (pytest / mypy / black / isort / vitest / tsc / build / e2e / showcase — [Section 7](#7-cao-eval-criteria-and-success-gates)).
+- [ ] **Every PR-body claim verified against the code** (claims-vs-code fidelity) — no unverified or contradicted assertion ships.
+- [ ] Media deliverables present and **correctly embedded** (mp4 as plain link; gif/png inline with alt text + captions) in **both** the docs and the PR body, for both tracks ([Section 8](#8-media--visual-evidence-requirements), checklist [8.5](#85-media-deliverables-checklist-required-in-every-reconciled-pr-description)).
+- [ ] **Two upstream PRs opened in order** (PR-A then PR-B) against `awslabs/cli-agent-orchestrator`, each with the completed media checklist.
+
+### 0.7 Where This Plan Lives
+
+This document is maintained on branch **`reconcile/pr387-orchestration-plan`** (fork **PR #18**) for reference. It is the FINAL handoff artifact; the sections below (1–11) are its detailed body.
+
+---
+
 ## 1. Executive Summary
 
 **Goal:** Produce professional-ready, upstream-submittable pull requests that address every review comment on [awslabs/cli-agent-orchestrator#387](https://github.com/awslabs/cli-agent-orchestrator/pull/387).
