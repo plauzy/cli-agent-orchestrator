@@ -10,11 +10,9 @@ configured — discovery (Agent Card + JWKS) still serves, the task API doesn't.
 from __future__ import annotations
 
 import pytest
-
-from cli_agent_orchestrator.api.main import _should_mount_a2a
 from fastapi.testclient import TestClient
 
-from cli_agent_orchestrator.api.main import app
+from cli_agent_orchestrator.api.main import _should_mount_a2a, app
 
 
 @pytest.fixture(autouse=True)
@@ -77,8 +75,6 @@ def test_default_off_no_listener(monkeypatch):
 )
 def test_mount_decision(bind_host, a2a_disabled, auth_enabled, expected):
     assert (
-        _should_mount_a2a(
-            bind_host=bind_host, a2a_disabled=a2a_disabled, auth_enabled=auth_enabled
-        )
+        _should_mount_a2a(bind_host=bind_host, a2a_disabled=a2a_disabled, auth_enabled=auth_enabled)
         is expected
     )

@@ -197,9 +197,7 @@ class TestScopeMatrixCompletion:
     as real RS256 JWTs (that matrix ran on a stubbed token layer), plus the
     bearer-parsing edges neither suite covered."""
 
-    def test_admin_scope_satisfies_every_method(
-        self, client: TestClient, auth_on, jwt_factory
-    ):
+    def test_admin_scope_satisfies_every_method(self, client: TestClient, auth_on, jwt_factory):
         admin = _bearer(jwt_factory.mint(scopes="cao:admin"))
         sent = _send(client, headers=admin)
         assert sent.status_code == 200 and "error" not in sent.json()
@@ -233,9 +231,7 @@ class TestScopeMatrixCompletion:
         assert resp.status_code == 404  # matching HTTP status, like 401/403/429
         assert resp.json()["error"]["code"] == int(A2AErrorCode.METHOD_NOT_FOUND)
 
-    def test_bearer_scheme_is_case_insensitive(
-        self, client: TestClient, auth_on, jwt_factory
-    ):
+    def test_bearer_scheme_is_case_insensitive(self, client: TestClient, auth_on, jwt_factory):
         token = jwt_factory.mint(scopes="cao:write")
         resp = _send(client, headers={"Authorization": f"BEARER {token}"})
         assert resp.status_code == 200 and "error" not in resp.json()
