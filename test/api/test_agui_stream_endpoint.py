@@ -61,10 +61,27 @@ def test_stream_replays_history_and_emits_state_frames(monkeypatch):
         "timestamp": "2026-07-03T23:59:58Z",
         "detail": {"agent_name": "old", "provider": "mock_cli"},
     }
+    # Exactly AT the ?since= cursor: the contract is strictly-greater-than, so
+    # this one must be EXCLUDED (a >= replay would re-deliver the event the
+    # client already saw).
+    boundary_event = {
+        "id": "evt-boundary",
+        "kind": "completion",
+        "terminal_id": "t-1",
+        "session_name": "s",
+        "timestamp": "2026-07-03T23:59:59Z",
+        "detail": {"agent_name": "edge", "provider": "mock_cli"},
+    }
+
+    seen: dict = {}
 
     class _FakeLog:
         def history(self, since=None, **kwargs):
-            events = [stale_event, replay_event]
+            # Capture the forwarded value so the test can pin that main.py
+            # passes the query param through verbatim (not just that some
+            # filtering happened).
+            seen["since"] = since
+            events = [stale_event, boundary_event, replay_event]
             if since is None:
                 return events
             return [e for e in events if str(e["timestamp"]) > since]
@@ -101,6 +118,10 @@ def test_stream_replays_history_and_emits_state_frames(monkeypatch):
     assert "STEP_STARTED" in body  # from the live launch event
     assert "event:" in body and "data:" in body
     # The ?since= boundary is enforced through the endpoint: the newer replay
-    # event is present, the older one is filtered out before hitting the wire.
+    # event is present, the older one is filtered out before hitting the wire,
+    # and the event exactly AT the cursor is excluded (strictly greater than).
     assert "evt-old" in body
     assert "evt-stale" not in body
+    assert "evt-boundary" not in body
+    # main.py forwarded the query param verbatim into the log lookup.
+    assert seen["since"] == "2026-07-03T23:59:59Z"

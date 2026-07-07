@@ -52,6 +52,18 @@ class TestRedactQueryTokenFilter:
         assert "SECRET" not in out
         assert "since=t0" in out  # only the credential is scrubbed
 
+    def test_scrubs_token_present_in_both_msg_and_args(self):
+        # A pre-rendered msg AND a format-args path can each carry the token;
+        # one filter pass must scrub both (a regression that fixed only one
+        # branch would leak through the other).
+        rec = _record(
+            'retrying GET /agui/v1/stream?access_token=SECRET.J.WT after %s',
+            ("GET /agui/v1/stream?access_token=SECRET.J.WT",),
+        )
+        out = _rendered(rec)
+        assert "SECRET" not in out
+        assert out.count(f"access_token={REDACTED}") == 2
+
     def test_scrubs_ticket_param_and_preserves_other_params(self):
         out = _rendered(_record("GET /agui/v1/stream?ticket=TKT123&since=x HTTP/1.1"))
         assert "TKT123" not in out

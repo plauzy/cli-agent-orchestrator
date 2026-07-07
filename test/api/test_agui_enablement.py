@@ -50,8 +50,9 @@ def _terminating_stream(monkeypatch):
 
 
 @pytest.mark.parametrize("flag", _FLAGS)
-def test_either_flag_enables_the_agui_stream(monkeypatch, flag, _terminating_stream):
-    monkeypatch.setenv(flag, "true")
+@pytest.mark.parametrize("value", ["true", "1", "yes", "TRUE"])
+def test_either_flag_enables_the_agui_stream(monkeypatch, flag, value, _terminating_stream):
+    monkeypatch.setenv(flag, value)
     resp = client.get("/agui/v1/stream", params={"since": "2999-01-01T00:00:00Z"})
     # 200 (auth off) or 401 (auth on) both mean "surface exists"; the
     # default-off contract is that it must NOT be a 404.
