@@ -73,9 +73,14 @@ function spawnCaoServer(): ChildProcess {
 
 test.beforeAll(async () => {
   caoServer = spawnCaoServer();
+  // Same wrapper-free rationale as CAO_SERVER_BIN: killing an `npm run`
+  // wrapper orphans the actual vite child, which then squats the port for
+  // the next run. Spawn the vite binary directly so afterAll's kill lands
+  // on the real server process.
+  const viteBin = path.resolve(DIR, "..", "node_modules", ".bin", "vite");
   pwaServer = spawn(
-    "npm",
-    ["run", "preview", "--", "--port", String(PWA_PORT), "--strictPort", "--host"],
+    viteBin,
+    ["preview", "--port", String(PWA_PORT), "--strictPort", "--host"],
     { cwd: path.resolve(DIR, ".."), stdio: "inherit" },
   );
   await waitForHttp(`${CAO_URL}/health`, 60_000);
@@ -155,6 +160,14 @@ test("live dashboard renders real emit_ui traffic, refuses off-list, resumes via
   await expect(page.getByText("● connected")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("Emitted during outage")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("Generative UI (7)")).toBeVisible();
+
+  // 5. Persistence: a full page reload tears the client down entirely; the
+  //    saved instance (IndexedDB) auto-activates on load and the tab returns
+  //    to the live stream with no re-registration. (Complementary to step 4:
+  //    that one proves in-session ?since= gap recovery; this proves the
+  //    across-session instance persistence path.)
+  await page.reload();
+  await expect(page.getByText("● connected")).toBeVisible({ timeout: 30_000 });
 
   await page.screenshot({ path: "e2e/__screenshots__/live-dashboard-final.png", fullPage: true });
 });

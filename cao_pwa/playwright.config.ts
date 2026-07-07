@@ -10,6 +10,10 @@ import { defineConfig } from "@playwright/test";
 // "screen recording" proof referenced in docs/generative-ui-*.md.
 export default defineConfig({
   testDir: "./e2e",
+  // The live spec boots a real cao-server (uv/python) — run it via
+  // `npm run test:e2e:live` (playwright.live.config.ts); the default e2e run
+  // stays hermetic (deterministic replay only, no server toolchain needed).
+  testIgnore: /live-dashboard\.spec\.ts/,
   outputDir: "./test-results",
   timeout: 30_000,
   use: {

@@ -75,8 +75,11 @@ jobs:
       - name: Install Playwright chromium
         run: npm run test:e2e:install
 
-      - name: Run Playwright e2e (records video + screenshots)
+      - name: Run Playwright e2e (deterministic replay; records video + screenshots)
         run: npm run test:e2e
+
+      - name: Run LIVE Playwright e2e (real cao-server; records the live-path video)
+        run: npm run test:e2e:live
 
       - name: Convert recording to mp4 + gif (best-effort)
         if: always()
@@ -97,6 +100,14 @@ jobs:
             break
           done
           if [ "$found" = "0" ]; then echo "No .webm recording found under test-results/"; fi
+          for webm in test-results-live/**/*.webm; do
+            base="recordings/agui-live-remediation-demo"
+            echo "Converting $webm -> $base.mp4 / $base.gif"
+            ffmpeg -y -i "$webm" -movflags +faststart -pix_fmt yuv420p "$base.mp4" || true
+            ffmpeg -y -i "$webm" -vf "fps=8,scale=1000:-1:flags=lanczos" "$base.gif" || true
+            cp "$webm" "$base.webm" || true
+            break
+          done
           ls -la recordings || true
 
       - name: Write job summary
@@ -122,6 +133,7 @@ jobs:
           path: |
             cao_pwa/recordings/**
             cao_pwa/test-results/**/*.webm
+            cao_pwa/test-results-live/**/*.webm
             cao_pwa/e2e/__screenshots__/**
           if-no-files-found: warn
           retention-days: 30
@@ -131,6 +143,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: generative-ui-report
-          path: cao_pwa/playwright-report/**
+          path: |
+            cao_pwa/playwright-report/**
+            cao_pwa/playwright-report-live/**
           if-no-files-found: warn
           retention-days: 30
