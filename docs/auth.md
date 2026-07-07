@@ -195,11 +195,20 @@ required, no subprotocol echoed.
 ## A2A transport auth (the :9890 listener)
 
 The A2A task routes (`POST /a2a/v1/rpc`, `GET /a2a/v1/tasks/{id}`,
-`GET /a2a/v1/stream/{id}`) enforce the same JWT scheme per method:
-`task.send` / `task.cancel` require `cao:write`; `task.get` and the
-stream/REST reads require `cao:read`. Failures return 401 (missing /
-malformed / expired bearer) or 403 (insufficient scope), carried both as
-the HTTP status and as a JSON-RPC error body.
+`GET /a2a/v1/stream/{id}`) enforce the same JWT scheme **per method**,
+verified against the same JWKS used everywhere else:
+
+| Method | Required scope |
+|---|---|
+| `task.send`, `task.cancel` | `cao:write` |
+| `task.get`, `GET /stream/{id}`, `GET /tasks/{id}` | `cao:read` |
+
+`cao:admin` satisfies any method; a `cao:write` grant implies read. Failures
+return 401 (missing / malformed / expired bearer) or 403 (insufficient
+scope), carried both as the HTTP status and as a JSON-RPC error body — never
+tunnelled through 200. Task ids are **create-only**: re-sending an existing
+id is refused with `INVALID_PARAMS` (a peer can never overwrite another
+peer's in-flight task).
 
 Two hard safety properties:
 
@@ -209,9 +218,12 @@ Two hard safety properties:
   unauthenticated task API is never a reachable configuration.
 - **Bounded task store**: the in-memory store is capped
   (`CAO_A2A_MAX_TASKS`, default 1000) and time-windowed
-  (`CAO_A2A_TASK_TTL`, default 3600 s). On overflow the oldest terminal
-  tasks are evicted; when full of live tasks, `task.send` returns the
-  `TASK_LIMIT_EXCEEDED` JSON-RPC error so peers back off.
+  (`CAO_A2A_TASK_TTL`, default 3600 s; malformed or non-positive values
+  fall back to the defaults with a warning — the bound cannot be disabled).
+  On overflow the oldest terminal tasks are evicted; when full of live
+  tasks, `task.send` is refused with `RESOURCE_EXHAUSTED` at **HTTP 429**
+  (+ `Retry-After: 30`), so both JSON-RPC clients and HTTP-native retry
+  middleware back off.
 
 Walkthrough (auth enabled):
 
