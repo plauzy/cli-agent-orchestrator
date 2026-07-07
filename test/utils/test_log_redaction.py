@@ -57,7 +57,7 @@ class TestRedactQueryTokenFilter:
         # one filter pass must scrub both (a regression that fixed only one
         # branch would leak through the other).
         rec = _record(
-            'retrying GET /agui/v1/stream?access_token=SECRET.J.WT after %s',
+            "retrying GET /agui/v1/stream?access_token=SECRET.J.WT after %s",
             ("GET /agui/v1/stream?access_token=SECRET.J.WT",),
         )
         out = _rendered(rec)

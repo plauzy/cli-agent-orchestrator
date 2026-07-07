@@ -6,3 +6,5 @@ test-results/
 playwright-report/
 e2e/__screenshots__/
 recordings/
+test-results-live/
+playwright-report-live/

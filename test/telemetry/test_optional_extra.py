@@ -113,6 +113,6 @@ def test_requested_telemetry_without_extra_warns() -> None:
     )
     assert proc.returncode == 0, f"stderr:\n{proc.stderr}\nstdout:\n{proc.stdout}"
     assert "OK" in proc.stdout
-    assert "cli-agent-orchestrator[otel]" in proc.stderr, (
-        f"expected the install hint on stderr; got:\n{proc.stderr}"
-    )
+    assert (
+        "cli-agent-orchestrator[otel]" in proc.stderr
+    ), f"expected the install hint on stderr; got:\n{proc.stderr}"
