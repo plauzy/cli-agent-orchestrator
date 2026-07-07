@@ -15,6 +15,8 @@ This sequencing follows the upstream reviewer recommendation (@fanhongy): PR-A p
 
 **Approach:** Use CAO's parallel multi-provider orchestration (`/cao`) to generate competing reconciled variants from existing Kiro and Claude branches, then run `/cao-eval` to select the best result per PR shape before submitting upstream.
 
+**Visual evidence mandate:** Every major feature update produced by this plan MUST ship visual evidence — a full-quality `.mp4` screen recording of the live feature path (the canonical artifact), a derived looping `.gif`, and comprehensive annotated screenshots — embedded in both the project documentation and the PR description. This is an enforceable gate, not an aspiration: see [Section 8 (Media & Visual Evidence Requirements)](#8-media--visual-evidence-requirements). It applies to GUI surfaces (Track A / PR-A) and non-GUI surfaces (Track B / PR-B) alike.
+
 ---
 
 ## 2. Branch Inventory
@@ -85,7 +87,7 @@ Every comment from [awslabs/cli-agent-orchestrator#387](https://github.com/awsla
 | Py3.10 compatibility | Kiro | Green on Py3.10, mypy version set correctly |
 | Skill governance (`SHIPPED_SKILLS`) | Kiro | Ships guard preventing unregistered skills |
 | Demo prop fidelity | Kiro | Props match actual AG-UI event schema |
-| No committed binary artifacts | Kiro | Claude commits a `.webm` demo file |
+| Committed demo media | Claude | Claude commits a `.webm` demo file; under the [Section 8](#8-media--visual-evidence-requirements) media mandate, committing demo media under `docs/media/` is now **required** (following established repo convention), so this is a Claude advantage to carry forward — the reconciled PR-A must ship mp4 + gif + screenshots regardless |
 | PWA `?since=` cursor-loss fix | Claude | Kiro ships the reconnect cursor bug |
 | Stronger default-off guard (module-absent) | Claude | Better isolation when AG-UI module not present |
 | Live reconnect proof | Claude | Real e2e assertion for SSE reconnection |
@@ -199,7 +201,7 @@ Phase 4: /cao-eval PR-B
 
 ### PR-A Reconciliation
 
-**Base:** `kiro/pr387-agui-core` (rationale: green on Py3.10, skill governance, no committed artifacts)
+**Base:** `kiro/pr387-agui-core` (rationale: green on Py3.10, skill governance, minimal/clean diff). Note: the reconciled PR-A must still add the required demo media under `docs/media/` per [Section 8](#8-media--visual-evidence-requirements) — the media mandate reframes "no committed artifacts" as "only the *required* feature-prefixed media, nothing stray."
 
 **Cherry-pick from `claude/pr387-agui-core`:**
 
@@ -250,11 +252,14 @@ Each variant is scored against the following criteria (weighted):
 
 | Category | Weight | Criteria |
 |----------|--------|----------|
-| **Blocking comments resolved** | 40% | All RC-01 through RC-04 (for PR-B), or relevant nits (PR-A) fully addressed |
-| **Important comments resolved** | 20% | RC-05 and RC-06 (PR-B) correctly fixed |
+| **Blocking comments resolved** | 35% | All RC-01 through RC-04 (for PR-B), or relevant nits (PR-A) fully addressed |
+| **Important comments resolved** | 15% | RC-05 and RC-06 (PR-B) correctly fixed |
 | **Nits addressed** | 10% | RC-07 through RC-11 (PR-A) all fixed |
 | **Gate commands pass** | 20% | Full gate suite green (see below) |
-| **Clean diff** | 10% | No unrelated changes, no committed artifacts, minimal diff vs base |
+| **Visual evidence / media deliverables** | 15% | mp4 + derived gif + comprehensive screenshots exist under `docs/media/` and are correctly embedded per [Section 8](#8-media--visual-evidence-requirements) (mp4 as plain link; gif/png inline with alt text + caption) in BOTH the feature docs and the PR description |
+| **Clean diff** | 5% | No unrelated changes, minimal diff vs base (note: demo media under `docs/media/` is expected and required, not counted as unrelated) |
+
+> **Hard gate:** The media deliverables are also a pass/fail prerequisite — a variant that scores well on code but is missing any required artifact (mp4, gif, or screenshots) or embeds them incorrectly is marked **not done** and cannot win, regardless of weighted score. See Pass/Fail Determination below.
 
 ### Gate Command Suite
 
@@ -270,6 +275,16 @@ cd cao_pwa && npx tsc --noEmit && npm test && npm run build
 
 # Web UI gates (if touched)
 cd web && npx tsc --noEmit && npm test && npm run build
+
+# Media gates (record live feature path, derive gif, capture screenshots)
+#   Track A (GUI): Playwright live spec + CI recording job
+npx playwright test cao_pwa/e2e/live-dashboard.spec.ts   # produces the live recording
+bash showcase.sh                                          # headless proof fallback
+#   Derive the looping gif from the canonical mp4
+ffmpeg -i docs/media/<feature>-demo.mp4 -vf "fps=12,scale=960:-1:flags=lanczos" docs/media/<feature>-demo.gif
+#   Verify artifacts exist and mp4 is NOT embedded with image syntax
+test -f docs/media/<feature>-demo.mp4 && test -f docs/media/<feature>-demo.gif
+! grep -Rus '!\[[^]]*\](.*\.mp4)' docs/   # mp4 must be a plain link, never ![]()
 ```
 
 ### When to Run /cao-eval
@@ -285,12 +300,78 @@ A variant **passes** if:
 2. All gate commands exit 0
 3. No regressions introduced vs. `main` (diff-test against main's test suite)
 4. Diff is scoped to the PR shape's files (no cross-contamination between PR-A and PR-B concerns)
+5. **Media deliverables present and correct (hard gate):** a full-quality `.mp4` of the live feature path, a derived looping `.gif`, and comprehensive annotated screenshots all exist under `docs/media/` and are embedded per [Section 8](#8-media--visual-evidence-requirements) — mp4 as a plain link, gif/png inline with alt text + caption — in both the feature docs and the PR description. A variant missing any artifact, or embedding the mp4 with `![]()` image syntax, **fails** regardless of code quality.
 
 A variant **wins** if it scores highest on the weighted rubric across all passing variants.
 
 ---
 
-## 8. Reconciliation Workflow
+## 8. Media & Visual Evidence Requirements
+
+**Policy (mandatory, enforceable):** Every major feature update produced by this plan MUST ship visual evidence. A variant, reconciled PR, or feature update is **not "done"** until the media deliverables below exist, are stored per repo convention, and are correctly embedded in **both** the project documentation **and** the PR description. This section is referenced as a hard gate by the [/cao-eval rubric](#7-cao-eval-criteria-and-success-gates) and by the [Track A and Track B success gates](#84-per-track-success-gates).
+
+### 8.1 Required Artifacts (per major feature update)
+
+| # | Artifact | Format | Role | Embedding |
+|---|----------|--------|------|-----------|
+| 1 | Full-quality screen recording of the **live** feature path | `.mp4` | **Canonical artifact** — authoritative proof the feature works end to end | Plain markdown **link** (never `![]()`) |
+| 2 | Short looping clip **derived from the mp4** | `.gif` | Inline preview for docs and PR body | Inline image `![alt](path)` |
+| 3 | Comprehensive **annotated screenshots** of each key state / component / step | `.png` | Static reference for every UI state (GUI) or CLI step (non-GUI) | Inline image `![alt](path)` |
+
+Every embed MUST carry descriptive alt text **and** a one-line caption.
+
+### 8.2 Production & Storage
+
+- **Recorded by** the Playwright live spec (`cao_pwa/e2e/live-dashboard.spec.ts`) and the CI recording job; the `showcase.sh` headless proof is the scriptable fallback.
+- **mp4 is captured first** from the live run and is the canonical artifact. The **gif is derived from that mp4** (downscaled, looping — same source execution). **Screenshots are captured in the same live run**, so all three artifacts describe one consistent execution rather than three unrelated captures.
+- **Stored under `docs/media/`**, following the established repo convention — the base branch already commits `.mp4`/`.webm`/`.gif`/`.png` demo binaries there, so committing media is the norm, not an exception.
+- **Naming:** `{feature}-demo.mp4`, `{feature}-demo.gif`, `{feature}-{state}.png` (e.g., `agui-generative-ui-demo.mp4`, `a2a-auth-flow-401.png`).
+
+### 8.3 Embedding Rules (GitHub-safe)
+
+| Rule | Reason |
+|------|--------|
+| Reference the mp4 as a **plain markdown link** — `[Watch the live demo](docs/media/x-demo.mp4)` — **never** with image syntax `![]()` | A committed video embedded with `![]()` image syntax will **not play on GitHub**; it renders as a broken image |
+| Embed the gif and every png **inline** with `![descriptive alt](path)` immediately followed by a caption line | gif/png render inline in both docs and PR bodies |
+| Every embed carries **descriptive alt text + a one-line caption** | Accessibility and reviewer context |
+| Apply the media to **BOTH** the project documentation (`docs/pwa.md` and the relevant feature docs) **AND** the PR description | Evidence must live where both readers and reviewers are |
+
+**Non-viable technique (do not attempt):** offline/online reconnect emulation in headless Chromium — it is not reliable in that environment. To demonstrate reconnection, use server `SIGKILL` + restart + page reload and record that instead.
+
+### 8.4 Per-Track Success Gates
+
+Media is a first-class success gate for **both** reconciliation tracks. A track's `reconcile/*-final` branch cannot be selected until its media gate is green.
+
+**Track A — `reconcile/pr387-agui-core` (PR-A, AG-UI / GUI):**
+- Live mp4 of the AG-UI generative-UI path (agent stream -> PWA render -> reconnect via SIGKILL+reload).
+- Derived looping gif + annotated screenshots of each key PWA state (instance picker, live event stream, generative-UI component render, post-reconnect resume).
+- Embedded in `docs/pwa.md` and the PR-A description per 8.3.
+
+**Track B — `reconcile/pr387-a2a-hardened` (PR-B, A2A transport / non-GUI):**
+Track B has no PWA, but the "every major feature" guarantee still holds. Track B MUST ship **screen-recorded CLI walkthroughs** as mp4 + derived gif + screenshots for:
+
+| Scenario | What the recording must show |
+|----------|------------------------------|
+| Auth enforcement flow | `401` (missing/invalid token) → `403` (valid token, insufficient scope) → `200` (valid token, correct scope) against `/a2a/v1/rpc` |
+| Store-full capacity path | `task.send` rejected with `RESOURCE_EXHAUSTED` / HTTP `429` once the task-store cap is reached |
+
+Record these via a scripted terminal session (e.g., `asciinema` or an `ffmpeg` screen capture of the CLI), store under `docs/media/`, and embed per 8.3 in the A2A feature doc and the PR-B description.
+
+### 8.5 Media Deliverables Checklist (required in every reconciled PR description)
+
+Both reconciled PRs (PR-A and PR-B) MUST include this checklist with every box checked before the PR is considered submittable:
+
+- [ ] Full-quality `.mp4` of the **live** feature path committed under `docs/media/`
+- [ ] `.mp4` embedded in the feature doc **and** PR body as a **plain link** (not `![]()`)
+- [ ] Looping `.gif` **derived from the mp4**, embedded inline with alt text + caption
+- [ ] Comprehensive annotated screenshots of **every** key state/step, embedded inline with alt text + captions
+- [ ] Feature doc updated with the same media (`docs/pwa.md` for PR-A; A2A feature doc for PR-B)
+- [ ] **(Track B only)** CLI walkthrough recordings for the `401 → 403 → 200` auth flow **and** the store-full `429` path
+- [ ] Verified `mp4` is NOT embedded with image syntax anywhere (`grep` guard from the Media gate passes)
+
+---
+
+## 9. Reconciliation Workflow
 
 ### Step-by-Step Operational Procedure
 
@@ -322,7 +403,12 @@ Step 4: Workers implement PR-A variants
     c. Cherry-picks winning patterns from the other provider
     d. Addresses all "both missed" gaps for PR-A
     e. Runs full gate command suite
-    f. Commits with message: "feat(agui): reconciled PR-A variant v{N}"
+    f. Produces media deliverables (Section 8): records the live AG-UI path
+       via the Playwright live spec / CI recording job to an .mp4 under
+       docs/media/, derives the looping .gif from that mp4, captures annotated
+       screenshots of each key PWA state, and embeds them (mp4 as plain link;
+       gif/png inline with alt text + captions) in docs/pwa.md
+    g. Commits with message: "feat(agui): reconciled PR-A variant v{N}"
 
 Step 5: /cao-eval for PR-A
   Run evaluation comparing reconcile/pr-a-v1 vs reconcile/pr-a-v2:
@@ -346,7 +432,13 @@ Step 7: Workers implement PR-B variants
     c. Cherry-picks winning patterns from the other provider
     d. Addresses all "both missed" gaps for PR-B (RC-03, RC-05)
     e. Runs full gate command suite
-    f. Commits with message: "feat(a2a): reconciled PR-B variant v{N}"
+    f. Produces media deliverables for the non-GUI surface (Section 8.4):
+       screen-records CLI walkthroughs to .mp4 under docs/media/ for the auth
+       401 -> 403 -> 200 flow and the store-full RESOURCE_EXHAUSTED / HTTP 429
+       path, derives the looping .gif from each mp4, captures step screenshots,
+       and embeds them (mp4 as plain link; gif/png inline with alt text +
+       captions) in the A2A feature doc
+    g. Commits with message: "feat(a2a): reconciled PR-B variant v{N}"
 
 Step 8: /cao-eval for PR-B
   Run evaluation comparing reconcile/pr-b-v1 vs reconcile/pr-b-v2:
@@ -359,10 +451,16 @@ Step 8: /cao-eval for PR-B
 Step 9: Final gate verification
   On reconcile/pr-a-final:
     - Full gate suite (pytest, mypy, black, isort, tsc, npm test, npm build)
+    - Media gate (Section 8): mp4 + derived gif + screenshots present under
+      docs/media/, correctly embedded in docs/pwa.md (mp4 as plain link),
+      grep guard confirms no ![]() image-syntax mp4 embeds
     - Manual review of diff vs feat/agentic-protocols-generative-ui
   On reconcile/pr-b-final (stacked on pr-a-final):
     - Full gate suite
     - Security audit of auth enforcement paths
+    - Media gate (Section 8.4): CLI-walkthrough mp4s (401->403->200 auth flow
+      and store-full 429 path) + derived gifs + step screenshots present and
+      correctly embedded in the A2A feature doc
     - Verify no cross-contamination with PR-A files
 
 Step 10: Submit upstream
@@ -370,11 +468,18 @@ Step 10: Submit upstream
     - PR-A first (stacks on the existing #387 discussion)
     - PR-B second (stacks on PR-A once merged)
   Each PR references this reconciliation plan and the /cao-eval results.
+  Each PR description embeds the media deliverables (Section 8): the mp4 as a
+    plain link, the derived gif and screenshots inline with alt text + captions,
+    and includes the completed media checklist (Section 8.5).
+  In the upstream reply, note that demo media is committed under docs/media/ per
+    fork convention, and offer to drop the committed binaries in favor of
+    artifact-only delivery (CI-produced downloads) if maintainers prefer — the
+    fork-side deliverable remains the embedded media.
 ```
 
 ---
 
-## 9. Constraints and Non-Goals
+## 10. Constraints and Non-Goals
 
 ### Hard Constraints
 
@@ -382,6 +487,7 @@ Step 10: Submit upstream
 - **PR-A lands before PR-B.** This is the agreed sequencing per upstream reviewer recommendation.
 - **All gate commands must pass** before any PR is submitted upstream.
 - **Pull latest `main`** into all branches before beginning reconciliation.
+- **Every major feature update ships visual evidence.** A full-quality `.mp4` of the live feature path (canonical), a derived looping `.gif`, and comprehensive annotated screenshots MUST exist under `docs/media/` and be correctly embedded (mp4 as a plain link; gif/png inline with alt text + captions) in both the feature docs and the PR description — for GUI (Track A) and non-GUI (Track B) surfaces alike. See [Section 8](#8-media--visual-evidence-requirements). This is a pass/fail gate, not a follow-up.
 
 ### Non-Goals (Explicit Follow-ups)
 
@@ -396,13 +502,14 @@ These items were identified during evaluation but are out of scope for this PR s
 
 ### Scope Boundaries
 
-- PR-A touches: `src/cli_agent_orchestrator/services/agui_stream.py`, `src/cli_agent_orchestrator/plugins/events.py`, `cao_pwa/`, `test/test_headless_ci.py`, `mypy.ini`, `tests/__init__.py`
-- PR-B touches: `src/cli_agent_orchestrator/a2a/`, `src/cli_agent_orchestrator/agent_card/listener.py`, `src/cli_agent_orchestrator/security/`, `pyproject.toml`, `test/a2a/`, `test/security/`
-- No overlap between PR-A and PR-B file scopes (by design)
+- PR-A touches: `src/cli_agent_orchestrator/services/agui_stream.py`, `src/cli_agent_orchestrator/plugins/events.py`, `cao_pwa/`, `test/test_headless_ci.py`, `mypy.ini`, `tests/__init__.py`, plus `docs/pwa.md` and PR-A media under `docs/media/` (Section 8)
+- PR-B touches: `src/cli_agent_orchestrator/a2a/`, `src/cli_agent_orchestrator/agent_card/listener.py`, `src/cli_agent_orchestrator/security/`, `pyproject.toml`, `test/a2a/`, `test/security/`, plus the A2A feature doc and PR-B CLI-walkthrough media under `docs/media/` (Section 8.4)
+- No overlap between PR-A and PR-B file scopes (by design). `docs/media/` is a shared, additive location — each PR only adds its own feature-prefixed artifacts, so there is no scope collision.
+- **Committed demo media under `docs/media/` is expected and required** (Section 8), following established repo convention; it is not treated as an "unrelated change" or a stray artifact.
 
 ---
 
-## 10. Appendix
+## 11. Appendix
 
 ### Links
 
