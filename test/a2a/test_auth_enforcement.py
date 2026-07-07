@@ -190,3 +190,74 @@ class TestDocstringsTellTheTruth:
         doc = stream_mod.__doc__ or ""
         assert "is enforced once auth is enabled" not in doc
         assert "cao:read" in doc
+
+
+class TestScopeMatrixCompletion:
+    """Cases ported from the sibling remediation's 28-case matrix, re-minted
+    as real RS256 JWTs (that matrix ran on a stubbed token layer), plus the
+    bearer-parsing edges neither suite covered."""
+
+    def test_admin_scope_satisfies_every_method(
+        self, client: TestClient, auth_on, jwt_factory
+    ):
+        admin = _bearer(jwt_factory.mint(scopes="cao:admin"))
+        sent = _send(client, headers=admin)
+        assert sent.status_code == 200 and "error" not in sent.json()
+        task_id = sent.json()["result"]["task"]["id"]
+
+        got = client.post(
+            "/a2a/v1/rpc",
+            json=_rpc("task.get", {"id": task_id}, req_id="2"),
+            headers=admin,
+        )
+        assert got.status_code == 200 and "error" not in got.json()
+
+        cancelled = client.post(
+            "/a2a/v1/rpc",
+            json=_rpc("task.cancel", {"id": task_id}, req_id="3"),
+            headers=admin,
+        )
+        assert cancelled.status_code == 200 and "error" not in cancelled.json()
+
+    def test_unknown_method_with_valid_token_is_method_not_found(
+        self, client: TestClient, auth_on, jwt_factory
+    ):
+        # Auth first, then dispatch: an AUTHENTICATED caller learns the method
+        # is unknown; an anonymous one gets 401 (pinned elsewhere) and learns
+        # nothing about the method surface.
+        resp = client.post(
+            "/a2a/v1/rpc",
+            json=_rpc("task.evil", {}),
+            headers=_bearer(jwt_factory.mint(scopes="cao:read")),
+        )
+        assert resp.status_code == 404  # matching HTTP status, like 401/403/429
+        assert resp.json()["error"]["code"] == int(A2AErrorCode.METHOD_NOT_FOUND)
+
+    def test_bearer_scheme_is_case_insensitive(
+        self, client: TestClient, auth_on, jwt_factory
+    ):
+        token = jwt_factory.mint(scopes="cao:write")
+        resp = _send(client, headers={"Authorization": f"BEARER {token}"})
+        assert resp.status_code == 200 and "error" not in resp.json()
+
+    def test_empty_bearer_is_401(self, client: TestClient, auth_on):
+        resp = _send(client, headers={"Authorization": "Bearer "})
+        assert resp.status_code == 401
+        assert resp.json()["error"]["code"] == int(A2AErrorCode.UNAUTHENTICATED)
+
+    def test_duplicate_authorization_headers_use_the_first(
+        self, client: TestClient, auth_on, jwt_factory
+    ):
+        # Starlette resolves duplicate headers to the first occurrence; pin it
+        # so header-smuggling a second (valid) credential cannot upgrade a
+        # rejected first one.
+        good = jwt_factory.mint(scopes="cao:write")
+        resp = client.post(
+            "/a2a/v1/rpc",
+            json=_rpc("task.send", {"task": {"id": "", "messages": []}}),
+            headers=[
+                ("Authorization", "Bearer not-a-jwt"),
+                ("Authorization", f"Bearer {good}"),
+            ],
+        )
+        assert resp.status_code == 401

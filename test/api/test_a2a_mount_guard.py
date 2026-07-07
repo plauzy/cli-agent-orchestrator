@@ -10,6 +10,8 @@ configured — discovery (Agent Card + JWKS) still serves, the task API doesn't.
 from __future__ import annotations
 
 import pytest
+
+from cli_agent_orchestrator.api.main import _should_mount_a2a
 from fastapi.testclient import TestClient
 
 from cli_agent_orchestrator.api.main import app
@@ -51,3 +53,32 @@ def test_default_off_no_listener(monkeypatch):
     monkeypatch.delenv("CAO_AGENT_CARD_ENABLED", raising=False)
     with TestClient(app, base_url="http://localhost"):
         assert app.state.agent_card_listener is None
+
+
+# ---------------------------------------------------------------------------
+# Decision table on the extracted pure function (ported from the Kiro
+# remediation) — the lifespan integration tests above cover the wiring; this
+# covers the full matrix without binding a socket.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "bind_host, a2a_disabled, auth_enabled, expected",
+    [
+        ("127.0.0.1", False, False, True),  # loopback + no auth: OK (dev)
+        ("localhost", False, False, True),  # loopback alias
+        ("::1", False, False, True),  # ipv6 loopback
+        ("0.0.0.0", False, False, False),  # non-loopback + no auth: REFUSED
+        ("0.0.0.0", False, True, True),  # non-loopback + auth: OK
+        ("10.0.0.5", False, False, False),  # arbitrary external + no auth: REFUSED
+        ("0.0.0.0", True, True, False),  # explicitly disabled always wins
+        ("127.0.0.1", True, False, False),  # disabled wins on loopback too
+    ],
+)
+def test_mount_decision(bind_host, a2a_disabled, auth_enabled, expected):
+    assert (
+        _should_mount_a2a(
+            bind_host=bind_host, a2a_disabled=a2a_disabled, auth_enabled=auth_enabled
+        )
+        is expected
+    )

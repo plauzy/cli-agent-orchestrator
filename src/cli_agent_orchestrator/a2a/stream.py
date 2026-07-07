@@ -30,7 +30,7 @@ import asyncio
 import json
 import logging
 from collections import defaultdict
-from typing import Any, AsyncIterator, List, Optional, Protocol, runtime_checkable
+from typing import Any, AsyncIterator, Optional, Protocol, runtime_checkable
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -164,13 +164,18 @@ def build_stream_router(
       bus-driven events in isolation.
     """
     event_bus = bus or NullEventBus()
-    router = APIRouter(prefix="/a2a/v1", tags=["a2a"])
+    # Read-only routes: require cao:read (write/admin also satisfy). No-op when
+    # the auth layer is default-off. ROUTER-level so both routes are covered —
+    # and any future route added here inherits the gate instead of shipping
+    # unauthenticated by omission.
+    router = APIRouter(
+        prefix="/a2a/v1",
+        tags=["a2a"],
+        dependencies=[Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN))],
+    )
 
     @router.get("/tasks/{task_id}")
-    async def get_task(
-        task_id: str,
-        _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
-    ) -> JSONResponse:
+    async def get_task(task_id: str) -> JSONResponse:
         task = await store.get(task_id)
         if task is None:
             return JSONResponse(
@@ -185,10 +190,7 @@ def build_stream_router(
         return JSONResponse({"task": task.to_dict()})
 
     @router.get("/stream/{task_id}")
-    async def stream(
-        task_id: str,
-        _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
-    ) -> StreamingResponse:
+    async def stream(task_id: str) -> StreamingResponse:
         async def gen() -> AsyncIterator[bytes]:
             # 1. Initial state (or 404-equivalent + close).
             task = await store.get(task_id)
