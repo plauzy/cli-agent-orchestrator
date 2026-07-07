@@ -14,8 +14,8 @@ Bounds: the in-memory store is capped (``max_tasks``, default 1000,
 ``CAO_A2A_MAX_TASKS``) and time-windowed (``ttl_seconds``, default 3600,
 ``CAO_A2A_TASK_TTL``). Tasks idle past the TTL are lazily swept on access;
 on overflow the oldest *terminal* tasks are evicted first, and when every
-stored task is still live a new insert raises ``TaskLimitExceeded`` (the
-RPC layer maps it to ``TASK_LIMIT_EXCEEDED``) instead of growing without
+stored task is still live a new insert raises ``TaskStoreFull`` (the
+RPC layer maps it to ``RESOURCE_EXHAUSTED`` at HTTP 429) instead of growing without
 bound — a network-reachable ``task.send`` must never be a remote
 memory-exhaustion vector.
 
@@ -27,18 +27,27 @@ instance across threads without external synchronization.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 from typing import Optional, Protocol, runtime_checkable
 
 from cli_agent_orchestrator.a2a.types import Task, TaskState
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_MAX_TASKS = 1000
 DEFAULT_TTL_SECONDS = 3600.0
 
 
-class TaskLimitExceeded(Exception):
-    """The store is at capacity with live (non-terminal) tasks only."""
+class TaskStoreFull(Exception):
+    """The store is at capacity with live (non-terminal) tasks only.
+
+    The RPC layer maps this to an ``A2AErrorCode.RESOURCE_EXHAUSTED`` JSON-RPC
+    error carried on HTTP 429 (+ ``Retry-After``) so a peer flooding
+    ``task.send`` gets a bounded, backoff-signaling rejection instead of
+    driving the process out of memory.
+    """
 
 
 @runtime_checkable
@@ -71,10 +80,36 @@ class InMemoryTaskStore:
 
     @classmethod
     def from_env(cls) -> "InMemoryTaskStore":
-        """Build a store with ``CAO_A2A_MAX_TASKS`` / ``CAO_A2A_TASK_TTL`` applied."""
+        """Build a store with ``CAO_A2A_MAX_TASKS`` / ``CAO_A2A_TASK_TTL`` applied.
+
+        A malformed or non-positive value falls back to the default with a
+        warning — never a startup crash, and never "disable the bound" (a
+        zero/negative cap would silently reopen the unbounded-store DoS this
+        store exists to close).
+        """
+
+        def _positive(name: str, default: float) -> float:
+            raw = os.environ.get(name)
+            if raw is None or not raw.strip():
+                return default
+            try:
+                value = float(raw)
+            except ValueError:
+                logger.warning("%s=%r is not a number; using default %s", name, raw, default)
+                return default
+            if value <= 0:
+                logger.warning(
+                    "%s=%r is not positive; using default %s (the bound cannot be disabled)",
+                    name,
+                    raw,
+                    default,
+                )
+                return default
+            return value
+
         return cls(
-            max_tasks=int(os.environ.get("CAO_A2A_MAX_TASKS", str(DEFAULT_MAX_TASKS))),
-            ttl_seconds=float(os.environ.get("CAO_A2A_TASK_TTL", str(DEFAULT_TTL_SECONDS))),
+            max_tasks=int(_positive("CAO_A2A_MAX_TASKS", DEFAULT_MAX_TASKS)),
+            ttl_seconds=_positive("CAO_A2A_TASK_TTL", DEFAULT_TTL_SECONDS),
         )
 
     def _sweep_locked(self, now: float) -> None:
@@ -105,7 +140,7 @@ class InMemoryTaskStore:
                 if TaskState.is_terminal(task.state)
             ]
             if not terminal:
-                raise TaskLimitExceeded(
+                raise TaskStoreFull(
                     f"store holds {len(self._tasks)} live tasks (max_tasks={self.max_tasks})"
                 )
             _, oldest_id = min(terminal)

@@ -7,8 +7,9 @@ bounded two ways, both env-tunable:
 
 * ``max_tasks`` (``CAO_A2A_MAX_TASKS``, default 1000) — on overflow the
   oldest *terminal* tasks are evicted first; if every stored task is still
-  live, new inserts are refused (``TaskLimitExceeded`` → the RPC layer maps
-  it to ``TASK_LIMIT_EXCEEDED``) rather than silently dropping active work.
+  live, new inserts are refused (``TaskStoreFull`` → the RPC layer maps it to
+  ``RESOURCE_EXHAUSTED`` at HTTP 429 + Retry-After) rather than silently
+  dropping active work.
 * ``ttl_seconds`` (``CAO_A2A_TASK_TTL``, default 3600) — tasks idle past the
   TTL are lazily swept on access.
 """
@@ -18,7 +19,7 @@ from __future__ import annotations
 import pytest
 
 from cli_agent_orchestrator.a2a import A2AErrorCode, InMemoryTaskStore, build_a2a_router
-from cli_agent_orchestrator.a2a.store import TaskLimitExceeded
+from cli_agent_orchestrator.a2a.store import TaskStoreFull
 from cli_agent_orchestrator.a2a.types import Task, TaskState
 
 
@@ -44,7 +45,7 @@ class TestCapacity:
         store = InMemoryTaskStore(max_tasks=2)
         await store.upsert(_task("t1"))
         await store.upsert(_task("t2"))
-        with pytest.raises(TaskLimitExceeded):
+        with pytest.raises(TaskStoreFull):
             await store.upsert(_task("t3"))
         # Existing live tasks were not dropped.
         assert await store.get("t1") is not None
@@ -116,7 +117,9 @@ class TestRpcMapping:
 
         assert send("t1").status_code == 200
         resp = send("t2")
-        # JSON-RPC application error (200 OK transport per spec) with the
-        # dedicated code, so peers can back off.
-        assert resp.status_code == 200
-        assert resp.json()["error"]["code"] == int(A2AErrorCode.TASK_LIMIT_EXCEEDED)
+        # Capacity refusal is a transport/backoff condition: HTTP 429 with a
+        # Retry-After hint (so HTTP-native retry middleware backs off), plus
+        # the JSON-RPC error body for clients that ignore transport status.
+        assert resp.status_code == 429
+        assert resp.headers.get("Retry-After") == "30"
+        assert resp.json()["error"]["code"] == int(A2AErrorCode.RESOURCE_EXHAUSTED)

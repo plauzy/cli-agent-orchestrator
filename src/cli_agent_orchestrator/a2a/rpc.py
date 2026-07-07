@@ -51,7 +51,7 @@ from typing import Any, Awaitable, Callable, List, Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from cli_agent_orchestrator.a2a.store import InMemoryTaskStore, TaskLimitExceeded, TaskStore
+from cli_agent_orchestrator.a2a.store import InMemoryTaskStore, TaskStore, TaskStoreFull
 from cli_agent_orchestrator.a2a.stream import NullEventBus, TaskEventBus
 from cli_agent_orchestrator.a2a.types import (
     A2AErrorCode,
@@ -205,6 +205,12 @@ async def _handle_task_send(
     task = Task.from_dict(task_payload)
     if not task.id:
         task.id = str(uuid.uuid4())
+    elif await store.get(task.id) is not None:
+        # Idempotent-create, not upsert: accepting a resubmitted id verbatim
+        # would let any peer overwrite/cancel another peer's in-flight task
+        # (review 4638092590 must-fix). Internal state transitions go through
+        # store.upsert/transition directly and are unaffected.
+        raise _invalid_params(f"task id {task.id!r} already exists")
     if not task.state:
         task.state = TaskState.SUBMITTED
     if task.created_at is None:
@@ -418,11 +424,18 @@ def build_a2a_router(
         except _RpcException as exc:
             # Application-level errors are still 200 OK per JSON-RPC.
             return JSONResponse(_error_response(req.id, exc.code, exc.message, exc.data))
-        except TaskLimitExceeded as exc:
+        except TaskStoreFull as exc:
             # Bounded store at capacity with live tasks — refuse the new task
-            # (never grow unbounded) and tell the peer to back off.
+            # (never grow unbounded). Carried as HTTP 429 + Retry-After so
+            # HTTP-native retry middleware backs off without understanding
+            # A2A error codes, with the JSON-RPC error body for clients that
+            # ignore transport status. Domain errors still ride 200; capacity
+            # is a transport/backoff condition (matching how 401/403 already
+            # carry their HTTP statuses here).
             return JSONResponse(
-                _error_response(req.id, int(A2AErrorCode.TASK_LIMIT_EXCEEDED), str(exc))
+                _error_response(req.id, int(A2AErrorCode.RESOURCE_EXHAUSTED), str(exc)),
+                status_code=429,
+                headers={"Retry-After": "30"},
             )
         except Exception as exc:  # pragma: no cover - defensive, internal bug
             logger.exception("A2A RPC handler crashed: method=%s", req.method)

@@ -72,8 +72,10 @@ class A2AErrorCode(IntEnum):
     TASK_ALREADY_TERMINAL = 2
     UNAUTHENTICATED = 3
     UNSUPPORTED_OPERATION = 4
+    # Caller authenticated but lacks the scope the method requires (HTTP 403).
     PERMISSION_DENIED = 5
-    TASK_LIMIT_EXCEEDED = 6
+    # Task store is at capacity and cannot accept a new task (HTTP 429).
+    RESOURCE_EXHAUSTED = 6
 
 
 @dataclass
@@ -111,7 +113,9 @@ class Task:
         known = {"id", "state", "messages", "metadata", "artifacts", "created_at", "updated_at"}
         extra = {k: v for k, v in data.items() if k not in known}
         return cls(
-            id=str(data["id"]),
+            # data.get, not data["id"]: an omitted id is legal — task.send
+            # generates a server-side UUID for falsy ids (review 4638092590).
+            id=str(data.get("id", "")),
             state=data.get("state", TaskState.SUBMITTED),
             messages=list(data.get("messages", [])),
             metadata=dict(data.get("metadata", {})),
