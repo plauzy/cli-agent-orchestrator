@@ -60,13 +60,16 @@ pre-existing repo state rather than this diff, so the record stays accurate.
   issue in `InstancePicker.tsx`; updating the stale `test_headless_ci.py`
   docstring.
 - **Assorted:** folding the dated `generative-ui-implementation-2026-07-04.md`
-  into `docs/pwa.md`; moving the OTel deps under an `[otel]` optional extra
-  (`authlib`/`python-multipart` leave with the A2A PR, under `[a2a]`); tightening
-  the `_agui_enabled()` docs — the `CAO_MCP_APPS_ENABLED` interaction is
-  intentional (the two surfaces share one in-process event source) but the
-  wording will say so explicitly; de-stubbing the `?since=` boundary in the
-  endpoint test so the replay wiring is exercised end-to-end; stripping the
-  unrelated README/CODEBASE reformatting.
+  into `docs/pwa.md`; moving the OTel deps under an `[otel]` optional extra —
+  and on the other two flagged deps: `authlib` moves to the dev group (only the
+  JWT/JWKS test fixtures import it) and `python-multipart` is removed outright
+  (nothing imports it), so no `[a2a]` runtime extra is invented — the A2A
+  runtime itself needs neither (its verification path is `pyjwt[crypto]`);
+  tightening the `_agui_enabled()` docs — the `CAO_MCP_APPS_ENABLED`
+  interaction is intentional (the two surfaces share one in-process event
+  source) but the wording will say so explicitly; de-stubbing the `?since=`
+  boundary in the endpoint test so the replay wiring is exercised end-to-end;
+  stripping the unrelated README/CODEBASE reformatting.
 
 ## Decomposition plan (taking @fanhongy up on the offer)
 
@@ -80,7 +83,35 @@ Two PRs, structured exactly along the verified/blocked boundary:
    above.
 2. **PR-B — A2A JSON-RPC + signed Agent Card listener** (≈3.4k lines, 25
    files, new branch) — held until the auth gating, store bounds, docstring
-   corrections, and the per-method 401/403 test matrix are in.
+   corrections, and the per-method 401/403 test matrix are in. A full store of
+   live tasks refuses `task.send` with `RESOURCE_EXHAUSTED` at **HTTP 429**
+   (with a `Retry-After` hint) so HTTP-native retry middleware backs off
+   without understanding A2A error codes — domain errors still ride 200 as
+   JSON-RPC error bodies.
+
+**Proof layer shipping with PR-A** (beyond the review's asks): a live-path
+Playwright recording — a real `cao-server` + the real dashboard driving all
+six generative-UI components, the off-list refusal, and `?since=` recovery
+from a **hard server restart** (an event emitted during the outage arrives via
+replay) — plus a runnable `examples/agui-dashboard/` quick start whose
+`showcase.sh` doubles as a deployment smoke test, and an `agui-author` skill
+teaching agents the component vocabulary. The recording regenerates in CI on
+every relevant change; the committed copy can be dropped in favor of the CI
+artifact if you'd prefer no binary in the tree.
+
+## Reply to review 4638092590 (@anilkmr-a2z)
+
+Thanks — all five land as follows. The auth-enforcement and unbounded-store
+must-fixes are the same B1/B2 above, fixed in PR-B (per-method scope table +
+cap/TTL exactly along the lines you sketched, including reusing the
+`WORKFLOW_OUTPUT_STORE_MAX_ENTRIES` precedent's shape). Your task-`id`
+injection catch is real and was in neither of our earlier fix sets: PR-B now
+rejects a `task.send` whose `id` already exists with `INVALID_PARAMS`
+(idempotent-create, your option (b) — peers keep client-generated ids, but an
+id can never overwrite another task), and `Task.from_dict` uses
+`data.get("id", "")` so an omitted id takes the server-generated-UUID path
+instead of raising `KeyError`. `authlib` moves to the dev dependency group in
+PR-A (your read matches ours: only the test fixtures import it).
 
 ## Corrections for the record (with evidence)
 

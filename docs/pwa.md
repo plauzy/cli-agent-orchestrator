@@ -89,7 +89,8 @@ https://cao-dashboard.example.com/?access_token=eyJhbGc...
 **Keep these tokens short-lived.** A query-string credential can surface in
 places an `Authorization` header never would (browser history, proxy logs,
 `Referer` headers), and it stays replayable until `exp`. CAO scrubs
-`access_token` values from its own access log, but that doesn't cover
+`access_token` (and, pre-emptively, `ticket`) values from its own access
+log, but that doesn't cover
 intermediaries — so mint tokens with a short TTL (minutes, not hours) for
 dashboard use. A short-lived single-use ticket handshake
 (`POST /agui/v1/ticket` with header auth → `?ticket=`) and a dedicated
