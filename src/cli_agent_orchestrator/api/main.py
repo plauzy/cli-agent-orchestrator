@@ -328,6 +328,28 @@ class CreateFlowRequest(BaseModel):
         return v
 
 
+# Hosts treated as loopback for the A2A mount guard.
+_A2A_LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost")
+
+
+def _should_mount_a2a(*, bind_host: str, a2a_disabled: bool, auth_enabled: bool) -> bool:
+    """Decide whether to mount the A2A transport routers on the listener.
+
+    Fail-closed: the A2A JSON-RPC surface is a task *write* API, so it must not
+    be mounted on a non-loopback bind while the auth layer is disabled — that
+    combination would expose an unauthenticated, peer-controllable task API
+    (the exact finding the review reproduced). Loopback + no-auth stays allowed
+    for local dev; any bind with auth enabled is allowed; ``CAO_A2A_DISABLED``
+    always wins. Pure function so the decision table is unit-testable without
+    binding a socket (the lifespan integration tests cover the wiring).
+    """
+    if a2a_disabled:
+        return False
+    if bind_host not in _A2A_LOOPBACK_HOSTS and not auth_enabled:
+        return False
+    return True
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
@@ -426,8 +448,26 @@ async def lifespan(app: FastAPI):
 
             a2a_router = None
             a2a_stream_router = None
-            if os.environ.get("CAO_A2A_DISABLED", "false").lower() != "true":
-                a2a_store = InMemoryTaskStore()
+            a2a_disabled_flag = os.environ.get("CAO_A2A_DISABLED", "false").lower() == "true"
+            a2a_bind_host = os.environ.get("CAO_AGENT_CARD_HOST", "127.0.0.1")
+            a2a_wanted = _should_mount_a2a(
+                bind_host=a2a_bind_host,
+                a2a_disabled=a2a_disabled_flag,
+                auth_enabled=is_auth_enabled(),
+            )
+            if not a2a_disabled_flag and not a2a_wanted:
+                # Only the fail-closed guard refuses when the flag is on:
+                # non-loopback bind with no auth configured would be an
+                # unauthenticated write API for any network peer.
+                logger.error(
+                    "Refusing to mount the A2A task routes: CAO_AGENT_CARD_HOST=%s is "
+                    "non-loopback and auth is not configured (set AUTH0_DOMAIN / "
+                    "CAO_AUTH_JWKS_URI, or bind loopback). The Agent Card discovery "
+                    "routes are still served.",
+                    a2a_bind_host,
+                )
+            if a2a_wanted:
+                a2a_store = InMemoryTaskStore.from_env()
                 a2a_bus = InMemoryTaskEventBus()
                 a2a_router = build_a2a_router(store=a2a_store, bus=a2a_bus)
                 a2a_stream_router = build_stream_router(store=a2a_store, bus=a2a_bus)

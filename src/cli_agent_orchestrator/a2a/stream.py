@@ -18,8 +18,10 @@ the SSE handler forwards them. A ``NullBus`` is provided for tests +
 deployments where streaming isn't wired.
 
 The bus + store + transport endpoints together form the full A2A
-v1.0 server side. Authentication via the JWKS published at
-``/.well-known/jwks.json`` is enforced once auth is enabled.
+v1.0 server side. Authentication: when CAO auth is enabled, both routes
+require an ``Authorization: Bearer`` JWT carrying ``cao:read`` (validated
+against the configured JWKS via ``require_any_scope``); when auth is
+disabled (default-off) no token is required.
 """
 
 from __future__ import annotations
@@ -30,11 +32,17 @@ import logging
 from collections import defaultdict
 from typing import Any, AsyncIterator, Optional, Protocol, runtime_checkable
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from cli_agent_orchestrator.a2a.store import TaskStore
 from cli_agent_orchestrator.a2a.types import A2AErrorCode, TaskState
+from cli_agent_orchestrator.security.auth import (
+    SCOPE_ADMIN,
+    SCOPE_READ,
+    SCOPE_WRITE,
+    require_any_scope,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +164,15 @@ def build_stream_router(
       bus-driven events in isolation.
     """
     event_bus = bus or NullEventBus()
-    router = APIRouter(prefix="/a2a/v1", tags=["a2a"])
+    # Read-only routes: require cao:read (write/admin also satisfy). No-op when
+    # the auth layer is default-off. ROUTER-level so both routes are covered —
+    # and any future route added here inherits the gate instead of shipping
+    # unauthenticated by omission.
+    router = APIRouter(
+        prefix="/a2a/v1",
+        tags=["a2a"],
+        dependencies=[Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN))],
+    )
 
     @router.get("/tasks/{task_id}")
     async def get_task(task_id: str) -> JSONResponse:

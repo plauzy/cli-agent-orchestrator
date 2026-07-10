@@ -10,6 +10,15 @@ or libsql-backed store would be a drop-in replacement (the ``TaskStore``
 Protocol is the seam) but is deferred — A2A peers typically poll on
 short timeframes.
 
+Bounds: the in-memory store is capped (``max_tasks``, default 1000,
+``CAO_A2A_MAX_TASKS``) and time-windowed (``ttl_seconds``, default 3600,
+``CAO_A2A_TASK_TTL``). Tasks idle past the TTL are lazily swept on access;
+on overflow the oldest *terminal* tasks are evicted first, and when every
+stored task is still live a new insert raises ``TaskStoreFull`` (the
+RPC layer maps it to ``RESOURCE_EXHAUSTED`` at HTTP 429) instead of growing without
+bound — a network-reachable ``task.send`` must never be a remote
+memory-exhaustion vector.
+
 Concurrency: ``InMemoryTaskStore`` uses an ``asyncio.Lock`` because
 the A2A endpoints are async. Sync callers should not share an
 instance across threads without external synchronization.
@@ -18,10 +27,27 @@ instance across threads without external synchronization.
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 import time
 from typing import Optional, Protocol, runtime_checkable
 
 from cli_agent_orchestrator.a2a.types import Task, TaskState
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_MAX_TASKS = 1000
+DEFAULT_TTL_SECONDS = 3600.0
+
+
+class TaskStoreFull(Exception):
+    """The store is at capacity with live (non-terminal) tasks only.
+
+    The RPC layer maps this to an ``A2AErrorCode.RESOURCE_EXHAUSTED`` JSON-RPC
+    error carried on HTTP 429 (+ ``Retry-After``) so a peer flooding
+    ``task.send`` gets a bounded, backoff-signaling rejection instead of
+    driving the process out of memory.
+    """
 
 
 @runtime_checkable
@@ -38,22 +64,99 @@ class TaskStore(Protocol):
 class InMemoryTaskStore:
     """Default in-memory store. One instance per CAO process.
 
-    Tasks live until either explicitly deleted or until the process
-    restarts. This is fine for typical A2A usage where peers track
-    their own task ids and prune by themselves.
+    Bounded by ``max_tasks`` + ``ttl_seconds`` (see module docstring);
+    peers that track their own task ids should poll within the TTL.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        max_tasks: int = DEFAULT_MAX_TASKS,
+        ttl_seconds: float = DEFAULT_TTL_SECONDS,
+    ) -> None:
+        self.max_tasks = max_tasks
+        self.ttl_seconds = ttl_seconds
         self._tasks: dict[str, Task] = {}
         self._lock = asyncio.Lock()
 
+    @classmethod
+    def from_env(cls) -> "InMemoryTaskStore":
+        """Build a store with ``CAO_A2A_MAX_TASKS`` / ``CAO_A2A_TASK_TTL`` applied.
+
+        A malformed or non-positive value falls back to the default with a
+        warning — never a startup crash, and never "disable the bound" (a
+        zero/negative cap would silently reopen the unbounded-store DoS this
+        store exists to close).
+        """
+
+        def _positive(name: str, default: float) -> float:
+            raw = os.environ.get(name)
+            if raw is None or not raw.strip():
+                return default
+            try:
+                value = float(raw)
+            except ValueError:
+                logger.warning("%s=%r is not a number; using default %s", name, raw, default)
+                return default
+            if value <= 0:
+                logger.warning(
+                    "%s=%r is not positive; using default %s (the bound cannot be disabled)",
+                    name,
+                    raw,
+                    default,
+                )
+                return default
+            return value
+
+        return cls(
+            max_tasks=int(_positive("CAO_A2A_MAX_TASKS", DEFAULT_MAX_TASKS)),
+            ttl_seconds=_positive("CAO_A2A_TASK_TTL", DEFAULT_TTL_SECONDS),
+        )
+
+    def _sweep_locked(self, now: float) -> None:
+        """Drop tasks idle past the TTL. Caller holds the lock."""
+        if self.ttl_seconds <= 0:
+            return
+        cutoff = now - self.ttl_seconds
+        stale = [
+            task_id
+            for task_id, task in self._tasks.items()
+            if (task.updated_at or task.created_at or now) < cutoff
+        ]
+        for task_id in stale:
+            del self._tasks[task_id]
+
+    def _evict_for_capacity_locked(self) -> None:
+        """Make room for one insert. Caller holds the lock.
+
+        Oldest terminal tasks go first (their lifecycle is finished; peers
+        re-polling them would see TASK_NOT_FOUND, same as after a TTL sweep).
+        Live tasks are never dropped — when the store is full of them the
+        insert is refused instead.
+        """
+        while len(self._tasks) >= self.max_tasks:
+            terminal = [
+                (task.updated_at or task.created_at or 0.0, task_id)
+                for task_id, task in self._tasks.items()
+                if TaskState.is_terminal(task.state)
+            ]
+            if not terminal:
+                raise TaskStoreFull(
+                    f"store holds {len(self._tasks)} live tasks (max_tasks={self.max_tasks})"
+                )
+            _, oldest_id = min(terminal)
+            del self._tasks[oldest_id]
+
     async def get(self, task_id: str) -> Optional[Task]:
         async with self._lock:
+            self._sweep_locked(time.time())
             return self._tasks.get(task_id)
 
     async def upsert(self, task: Task) -> None:
         async with self._lock:
             now = time.time()
+            self._sweep_locked(now)
+            if task.id not in self._tasks:
+                self._evict_for_capacity_locked()
             if task.created_at is None:
                 task.created_at = now
             task.updated_at = now
@@ -65,6 +168,7 @@ class InMemoryTaskStore:
 
     async def list_ids(self) -> list[str]:
         async with self._lock:
+            self._sweep_locked(time.time())
             return list(self._tasks.keys())
 
     async def transition(self, task_id: str, new_state: str) -> Optional[Task]:
