@@ -50,7 +50,9 @@ pytestmark = [pytest.mark.e2e, pytest.mark.slow]
 
 # Override the test/e2e/conftest.py autouse fixtures — this test runs the
 # A2A surfaces in-process via ``httpx.ASGITransport`` and doesn't need a
-# live CAO server or warmed uvx cache.
+# live CAO server, a warmed uvx cache, or tmux (there is no terminal-backed
+# agent here — both peers are ASGI apps). Overriding ``require_tmux`` keeps
+# the round-trip runnable in tmux-less environments (e.g. minimal CI jobs).
 @pytest.fixture(autouse=True)
 def require_cao_server():
     yield
@@ -58,6 +60,11 @@ def require_cao_server():
 
 @pytest.fixture(autouse=True)
 def warmup_mcp_server_cache():
+    yield
+
+
+@pytest.fixture(autouse=True)
+def require_tmux():
     yield
 
 

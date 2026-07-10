@@ -74,6 +74,23 @@ class AgentCardListener:
             await asyncio.wait_for(self.task, timeout=5.0)
         except asyncio.TimeoutError:
             logger.warning("Agent Card listener did not stop within 5s")
+        except Exception:  # pragma: no cover - defensive
+            # A start-up failure (e.g. the port was already bound) surfaces
+            # when the serve task is awaited. Log and continue so shutdown
+            # still releases whatever sockets did open.
+            logger.warning("Agent Card listener task ended with an error", exc_info=True)
+        # uvicorn's Server.serve() returns right after startup() (which binds
+        # the listening socket) when should_exit is already set, skipping the
+        # shutdown() that would close it. Setting should_exit alone therefore
+        # races: a quick start->stop can leave :9890 bound until GC. Close any
+        # listening sockets explicitly so the port is released deterministically.
+        for server in getattr(self.server, "servers", None) or []:
+            server.close()
+        for server in getattr(self.server, "servers", None) or []:
+            try:
+                await server.wait_closed()
+            except Exception:  # pragma: no cover - defensive
+                pass
 
 
 async def start_agent_card_listener(
