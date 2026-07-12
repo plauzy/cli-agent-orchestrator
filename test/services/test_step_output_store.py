@@ -1,4 +1,4 @@
-"""Tests for the in-memory structured-return store (issue #312, Bolt 2 / N4).
+"""Tests for the in-memory structured-return store (issue #312, v2 / N4).
 
 Covers validate-pass -> COMPLETED, validate-fail -> COMPLETED_UNVALIDATED (no
 raise), no-schema -> trivially valid, cap eviction (oldest dropped, never

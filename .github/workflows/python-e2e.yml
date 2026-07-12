@@ -1,0 +1,46 @@
+name: Python e2e (mock_cli)
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  python-e2e:
+    name: Python e2e (mock_cli)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Pre-flight checks (tmux + mock_cli)
+        run: |
+          tmux -V
+          chmod +x test/providers/fixtures/bin/mock_cli
+          test/providers/fixtures/bin/mock_cli --version
+          # Start a tmux server so the first libtmux call doesn't race
+          # against daemon startup in a headless CI runner.
+          tmux new-session -d -s __preflight 2>/dev/null || true
+          tmux kill-session -t __preflight 2>/dev/null || true
+
+      - name: Run Python e2e smoke (mock_cli, no external credentials)
+        run: |
+          uv run pytest -m e2e test/e2e/test_websocket_auth.py \
+            -v --no-cov --tb=short

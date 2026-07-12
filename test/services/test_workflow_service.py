@@ -1,4 +1,4 @@
-"""Unit tests for the workflow run engine (issue #312, Bolt 3 / N5).
+"""Unit tests for the workflow run engine (issue #312, v3 / N5).
 
 Covers the load-bearing algorithm from ``functional-design/business-logic-model.md``:
 the two nested recovery loops (Traces A–E, §2a), determinism, input-validation

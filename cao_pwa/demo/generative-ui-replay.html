@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CAO — Generative UI over heterogeneous CLI agents (deterministic replay)</title>
+<!--
+  VISUAL PROOF ARTIFACT — open this file in any browser (no server needed).
+
+  This is a deterministic replay of an AG-UI event sequence. Every frame in
+  the embedded EVENTS array was produced by the REAL backend adapter
+  (services/agui_stream.to_agui_event) over a scripted multi-provider scenario
+  (see cao_pwa/demo/generative-ui-sequence.json, regenerated from Python).
+
+  The renderers below mirror the React allow-list in src/components/GenerativeUI.tsx
+  1:1 (same closed component set, same fields). The point it proves:
+    - A HETEROGENEOUS fleet (kiro_cli, claude_code, codex) each authors UI intents,
+      and they render UNIFORMLY on one surface — the operator can't tell which
+      provider produced which card.
+    - Safety is structural: an off-list component ("iframe") is REFUSED, never
+      rendered. No HTML/script/eval ever crosses the wire — only named
+      components + JSON props.
+
+  The live React version + a Playwright-recorded MP4/GIF are produced in CI
+  (see cao_pwa/e2e/generative-ui.spec.ts); the sandbox blocks the browser CDN.
+-->
+<style>
+  :root { color-scheme: light dark; --bg:#0f1116; --panel:#171a21; --line:#262b36; --fg:#e6e9ef; --muted:#9aa4b2; --accent:#5b9dff; --add:#3fb950; --del:#f85149; --warn:#d29922; --danger:#f85149; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:16px 20px; border-bottom:1px solid var(--line); }
+  header h1 { margin:0 0 4px; font-size:16px; }
+  header p { margin:0; color:var(--muted); font-size:12px; }
+  .controls { display:flex; gap:8px; align-items:center; padding:12px 20px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  .controls button { background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:6px 12px; cursor:pointer; font:inherit; }
+  .controls button:hover { border-color:var(--accent); }
+  .controls .frame-count { color:var(--muted); margin-left:auto; font-variant-numeric:tabular-nums; }
+  main { display:grid; grid-template-columns: 1fr 340px; gap:0; min-height: 60vh; }
+  @media (max-width: 780px){ main { grid-template-columns: 1fr; } }
+  .surface { padding:16px 20px; }
+  .surface h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 10px; }
+  .ticker { border-left:1px solid var(--line); padding:16px 20px; background:var(--panel); }
+  .ticker h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 10px; }
+  .ticker ol { margin:0; padding-left:18px; }
+  .ticker li { margin-bottom:4px; font-size:12px; }
+  .ticker .t-type { color:var(--accent); font-weight:600; }
+  .prov { display:inline-block; font-size:10px; padding:1px 6px; border:1px solid var(--line); border-radius:10px; color:var(--muted); margin-left:6px; }
+  .cards { display:flex; flex-direction:column; gap:10px; }
+  .gen-ui { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  .gen-ui .row1 { display:flex; align-items:center; gap:8px; }
+  .gen-ui h4 { margin:0 0 6px; font-size:14px; }
+  .gen-ui .detail { color:var(--muted); font-size:12px; margin:0 0 8px; }
+  .risk { font-size:10px; padding:1px 8px; border-radius:10px; border:1px solid var(--line); }
+  .risk-high { color:var(--danger); border-color:var(--danger); }
+  .risk-medium { color:var(--warn); border-color:var(--warn); }
+  .actions { display:flex; gap:8px; margin-top:8px; }
+  .actions button { background:transparent; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:5px 12px; cursor:pointer; }
+  .actions button:first-child { border-color:var(--add); color:var(--add); }
+  .actions button:last-child { border-color:var(--del); color:var(--del); }
+  .choice button { display:block; width:100%; text-align:left; margin:4px 0; background:transparent; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:7px 10px; cursor:pointer; }
+  .choice button:hover { border-color:var(--accent); }
+  .diff li { list-style:none; display:flex; gap:10px; align-items:center; font-family:ui-monospace,monospace; font-size:12px; }
+  .diff ul { padding:0; margin:6px 0 0; }
+  .diff .add { color:var(--add); } .diff .del { color:var(--del); }
+  progress { width:100%; height:8px; }
+  .metric { display:flex; justify-content:space-between; align-items:baseline; }
+  .metric .val { font-size:20px; font-weight:700; } .metric .unit { font-size:12px; color:var(--muted); }
+  .refused { background:rgba(248,81,73,.08); border:1px dashed var(--danger); border-radius:10px; padding:10px 14px; color:var(--danger); font-size:12px; }
+  .provider-legend { display:flex; gap:6px; margin-top:10px; flex-wrap:wrap; }
+  .empty { color:var(--muted); font-style:italic; }
+</style>
+</head>
+<body>
+<header>
+  <h1>CAO — Generative UI over heterogeneous CLI agents</h1>
+  <p>Deterministic replay. Every frame was produced by the real <code>services/agui_stream.to_agui_event</code> adapter. Renderers mirror <code>src/components/GenerativeUI.tsx</code>.</p>
+</header>
+<div class="controls">
+  <button id="play">▶ Play</button>
+  <button id="pause">⏸ Pause</button>
+  <button id="step">⏭ Step</button>
+  <button id="reset">⟲ Reset</button>
+  <span class="frame-count"><span id="pos">0</span> / <span id="total">0</span> frames</span>
+</div>
+<main>
+  <section class="surface">
+    <h2>Rendered generative UI (uniform across providers)</h2>
+    <div id="cards" class="cards"><p class="empty">Press Play to replay the fleet.</p></div>
+  </section>
+  <aside class="ticker">
+    <h2>AG-UI event stream</h2>
+    <ol id="ticker"></ol>
+  </aside>
+</main>
+
+<script id="events" type="application/json">
+[
+  {
+    "agui_type": "RUN_STARTED",
+    "data": {
+      "event_id": "e1",
+      "terminal_id": null,
+      "session_name": "cao-feature-x",
+      "timestamp": "2026-07-04T01:33:01+00:00",
+      "traceparent": null,
+      "thread_id": "cao-feature-x",
+      "run_id": "cao-feature-x"
+    },
+    "provider": ""
+  },
+  {
+    "agui_type": "STEP_STARTED",
+    "data": {
+      "event_id": "e2",
+      "terminal_id": "q-01",
+      "session_name": "cao-feature-x",
+      "timestamp": "2026-07-04T01:33:02+00:00",
+      "traceparent": null,
+      "step_id": "q-01",
+      "step_name": "planner",
+      "provider": "kiro_cli"
+    },
+    "provider": "kiro_cli"
+  },
+  {
+    "agui_type": "STEP_STARTED",
+    "data": {
+      "event_id": "e3",
+      "terminal_id": "cc-02",
+      "session_name": "cao-feature-x",
+      "timestamp": "2026-07-04T01:33:03+00:00",
+      "traceparent": null,
+      "step_id": "cc-02",
+      "step_name": "developer",
+      "provider": "claude_code"
+    },
+    "provider": "claude_code"
+  },
+  {
+    "agui_type": "STEP_STARTED",
+    "data": {
+      "event_id": "e4",
+      "terminal_id": "cx-03",
+      "session_name": "cao-feature-x",
+      "timestamp": "2026-07-04T01:33:04+00:00",
+      "traceparent": null,
+      "step_id": "cx-03",
+      "step_name": "reviewer",
+      "provider": "codex"
+    },
+    "provider": "codex"
+  },
+  {
+    "agui_type": "GENERATIVE_UI",
+    "data": {
+      "event_id": "e5",
+      "terminal_id": "q-01",
+      "session_name": null,
+      "timestamp": "2026-07-04T01:33:05+00:00",
+      "traceparent": null,
+      "component": "choice_prompt",
+      "props": {
+        "question": "Which architecture for the cache layer?",
+        "choices": [
+          "write-through",
+          "write-back",
+          "read-aside"
+        ]
+      }
+    },
+    "provider": "kiro_cli"
+  },
+  {
+    "agui_type": "GENERATIVE_UI",
+    "data": {
+      "event_id": "e6",
+      "terminal_id": "cc-02",
+      "session_name": null,
+      "timestamp": "2026-07-04T01:33:06+00:00",
+      "traceparent": null,
+      "component": "approval_card",
+      "props": {
+        "title": "Approve handoff of DB migration to reviewer?",
+        "detail": "Alters 3 tables",
+        "risk": "high"
+      }
+    },
+    "provider": "claude_code"
+  },
+  {
+    "agui_type": "GENERATIVE_UI",
+    "data": {
+      "event_id": "e7",
+      "terminal_id": "cc-02",
+      "session_name": null,
+      "timestamp": "2026-07-04T01:33:07+00:00",
+      "traceparent": null,
+      "component": "diff_summary",
+      "props": {
+        "title": "Working changes",
+        "files": [
+          {
+            "path": "api/main.py",
+            "additions": 54,
+            "deletions": 6
+          },
+          {
+            "path": "services/agui_stream.py",
+            "additions": 120,
+            "deletions": 8
+          }
+        ]
+      }
+    },
+    "provider": "claude_code"
+  },
+  {
+    "agui_type": "GENERATIVE_UI",
+    "data": {
+      "event_id": "e8",
+      "terminal_id": "cx-03",
+      "session_name": null,
+      "timestamp": "2026-07-04T01:33:08+00:00",
+      "traceparent": null,
+      "component": "progress",
+      "props": {
+        "label": "Running review suite",
+        "value": 0.66
+      }
+    },
+    "provider": "codex"
+  },
+  {
+    "agui_type": "GENERATIVE_UI",
+    "data": {
+      "event_id": "e9",
+      "terminal_id": "cx-03",
+      "session_name": null,
+      "timestamp": "2026-07-04T01:33:09+00:00",
+      "traceparent": null,
+      "component": "metric",
+      "props": {
+        "label": "tokens/s",
+        "value": 38,
+        "unit": "tok/s"
+      }
+    },
+    "provider": "codex"
+  },
+  {
+    "agui_type": "RAW",
+    "data": {
+      "event_id": "e10",
+      "terminal_id": "cc-02",
+      "session_name": null,
+      "timestamp": "2026-07-04T01:33:10+00:00",
+      "traceparent": null,
+      "cao_kind": "generative_ui",
+      "rejected_component": "iframe"
+    },
+    "provider": "claude_code"
+  },
+  {
+    "agui_type": "TEXT_MESSAGE_CONTENT",
+    "data": {
+      "event_id": "e11",
+      "terminal_id": "cc-02",
+      "session_name": null,
+      "timestamp": "2026-07-04T01:33:11+00:00",
+      "traceparent": null,
+      "message_id": "reviewer",
+      "role": "assistant",
+      "delta": "",
+      "metadata": {
+        "sender": "developer",
+        "receiver": "reviewer",
+        "orchestration_type": "handoff"
+      }
+    },
+    "provider": "claude_code"
+  },
+  {
+    "agui_type": "STEP_FINISHED",
+    "data": {
+      "event_id": "e12",
+      "terminal_id": "cx-03",
+      "session_name": null,
+      "timestamp": "2026-07-04T01:33:12+00:00",
+      "traceparent": null,
+      "step_id": "cx-03",
+      "step_name": "reviewer"
+    },
+    "provider": "codex"
+  }
+]
+</script>
+<script>
+  const EVENTS = JSON.parse(document.getElementById("events").textContent);
+  document.getElementById("total").textContent = EVENTS.length;
+  const cardsEl = document.getElementById("cards");
+  const tickerEl = document.getElementById("ticker");
+  const posEl = document.getElementById("pos");
+  let pos = 0, timer = null;
+
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const prov = (p) => p ? `<span class="prov">${esc(p)}</span>` : "";
+
+  // Vanilla mirror of the React allow-list. Unknown -> refused (never rendered).
+  function renderComponent(component, props, provider) {
+    props = props || {};
+    switch (component) {
+      case "approval_card": return `<div class="gen-ui"><div class="row1"><h4>${esc(props.title||"Approval requested")}</h4>${prov(provider)}</div>${props.detail?`<p class="detail">${esc(props.detail)}</p>`:""}${props.risk?`<span class="risk risk-${esc(props.risk)}">${esc(props.risk)} risk</span>`:""}<div class="actions"><button>Approve</button><button>Reject</button></div></div>`;
+      case "choice_prompt": return `<div class="gen-ui choice"><div class="row1"><h4>${esc(props.question||"Choose")}</h4>${prov(provider)}</div>${(props.choices||[]).map(c=>`<button>${esc(typeof c==="string"?c:(c&&c.label)||"")}</button>`).join("")}</div>`;
+      case "diff_summary": return `<div class="gen-ui diff"><div class="row1"><h4>${esc(props.title||"Changes")}</h4>${prov(provider)}</div><ul>${(props.files||[]).map(f=>`<li><code>${esc(f.path)}</code><span class="add">+${esc(f.additions||0)}</span><span class="del">-${esc(f.deletions||0)}</span></li>`).join("")}</ul></div>`;
+      case "progress": { const v = typeof props.value==="number"?props.value:null; return `<div class="gen-ui"><div class="row1"><span>${esc(props.label||"Working…")}</span>${prov(provider)}</div><progress max="1" ${v==null?"":`value="${v}"`}></progress></div>`; }
+      case "metric": return `<div class="gen-ui metric"><div><div>${esc(props.label||"metric")}</div>${prov(provider)}</div><div><span class="val">${esc(props.value)}</span> <span class="unit">${esc(props.unit||"")}</span></div></div>`;
+      case "agent_card": return `<div class="gen-ui"><div class="row1"><strong>${esc(props.name||"agent")}</strong>${prov(provider)}</div><div class="detail">${esc(props.status||"")}</div></div>`;
+      default: return `<div class="refused">⛔ REFUSED off-list component: <code>${esc(component)}</code> — never rendered ${prov(provider)}</div>`;
+    }
+  }
+
+  function applyFrame(f) {
+    // Ticker line for every frame.
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="t-type">${esc(f.agui_type)}</span> ${esc(f.data.component||f.data.rejected_component||f.data.step_name||f.data.thread_id||"")}${prov(f.provider)}`;
+    tickerEl.appendChild(li);
+    // Render generative UI + refusals on the surface.
+    if (f.agui_type === "GENERATIVE_UI") {
+      cardsEl.insertAdjacentHTML("beforeend", renderComponent(f.data.component, f.data.props, f.provider));
+    } else if (f.data.rejected_component) {
+      cardsEl.insertAdjacentHTML("beforeend", renderComponent(f.data.rejected_component, f.data.props, f.provider));
+    }
+  }
+
+  function reset() {
+    pos = 0; posEl.textContent = 0; cardsEl.innerHTML = '<p class="empty">Press Play to replay the fleet.</p>'; tickerEl.innerHTML = "";
+    clearInterval(timer); timer = null;
+  }
+  function step() {
+    if (pos === 0) cardsEl.innerHTML = "";
+    if (pos >= EVENTS.length) { clearInterval(timer); timer=null; return; }
+    applyFrame(EVENTS[pos]); pos++; posEl.textContent = pos;
+  }
+  document.getElementById("play").onclick = () => { if (!timer) { if (pos>=EVENTS.length) reset(); timer = setInterval(step, 900); } };
+  document.getElementById("pause").onclick = () => { clearInterval(timer); timer=null; };
+  document.getElementById("step").onclick = () => { clearInterval(timer); timer=null; step(); };
+  document.getElementById("reset").onclick = reset;
+</script>
+</body>
+</html>

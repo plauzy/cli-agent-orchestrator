@@ -120,3 +120,16 @@ def get_bus() -> SseBus:
             if _bus is None:
                 _bus = SseBus()
     return _bus
+
+
+# Backward-compatible alias. Some consumers (e.g. services.zellij_bridge) refer
+# to this class as ``SSEBus``; keep the old name importable so they work.
+SSEBus = SseBus
+
+
+def reset_bus() -> None:
+    """Drop the singleton SSE bus (used by tests to start with a clean slate)."""
+
+    global _bus
+    with _bus_lock:
+        _bus = None

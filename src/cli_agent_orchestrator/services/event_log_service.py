@@ -167,3 +167,11 @@ def get_event_log() -> EventLog:
             if _log is None:
                 _log = EventLog()
     return _log
+
+
+def reset_event_log() -> None:
+    """Drop the singleton (used by tests to start clean)."""
+
+    global _log
+    with _log_lock:
+        _log = None

@@ -5,7 +5,7 @@ thin HTTP client against the ``/workflows`` endpoints on the running cao-server
 (single integration seam, B2-BR-10). This module NEVER imports
 ``workflow_spec_service`` or ``database`` directly (project Forbidden rule).
 
-The Bolt-3 run verbs — ``run`` / ``status`` / ``cancel`` — are thin HTTP clients
+The v3 run verbs — ``run`` / ``status`` / ``cancel`` — are thin HTTP clients
 over the ``/workflows/runs`` engine endpoints (N5), mirroring the authoring-verb
 style. They never import ``workflow_service`` directly (project Forbidden rule).
 """
