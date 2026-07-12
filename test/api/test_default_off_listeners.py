@@ -1,10 +1,13 @@
 """Regression: `cao-server` with no flags opens no listener beyond :9889.
 
 The A2A / Agent Card transport was split out of the AG-UI core PR (review
-feedback on awslabs/cli-agent-orchestrator#387): it must not exist on this
-branch at all — no module, no lifespan wiring, no ``/a2a`` routes. This
-asserts that stronger contract, plus the AG-UI surface's own default-off
-behavior (no flags => 404).
+feedback on awslabs/cli-agent-orchestrator#387) and lands hardened in Phase-B.
+It is present in this build but **default-off**: with no flags set there is no
+lifespan wiring, no listener handle, and no ``/a2a`` routes on the main :9889
+app (the transport only mounts on the dedicated :9890 listener when
+``CAO_AGENT_CARD_ENABLED`` is set — see test_a2a_mount_guard.py). This asserts
+that default-off contract, plus the AG-UI surface's own default-off behavior
+(no flags => 404).
 """
 
 from __future__ import annotations
@@ -27,12 +30,12 @@ def _no_surface_env(monkeypatch):
         monkeypatch.delenv(var, raising=False)
 
 
-def test_a2a_surface_absent_from_this_build():
-    """The A2A/Agent Card transport is not part of this branch."""
-    with pytest.raises(ImportError):
-        import cli_agent_orchestrator.a2a  # noqa: F401
-    with pytest.raises(ImportError):
-        import cli_agent_orchestrator.agent_card  # noqa: F401
+def test_a2a_surface_importable_but_not_wired_by_default():
+    """The A2A/Agent Card modules exist (Phase-B) but importing them has no
+    side effects: no listener is started and no routes mount without the flag.
+    """
+    import cli_agent_orchestrator.a2a  # noqa: F401
+    import cli_agent_orchestrator.agent_card  # noqa: F401
 
 
 def test_no_agent_card_listener_state_without_flag():
