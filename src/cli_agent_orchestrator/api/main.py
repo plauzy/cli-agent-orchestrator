@@ -35,6 +35,13 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from cli_agent_orchestrator.a2a import (
+    InMemoryTaskEventBus,
+    InMemoryTaskStore,
+    build_a2a_router,
+    build_stream_router,
+)
+from cli_agent_orchestrator.agent_card import start_agent_card_listener
 from cli_agent_orchestrator.backends import TerminalBackendError, TerminalNotFoundError
 from cli_agent_orchestrator.backends.herdr_backend import HerdrBackend
 from cli_agent_orchestrator.backends.registry import get_backend
@@ -45,6 +52,8 @@ from cli_agent_orchestrator.clients.database import (
     init_db,
 )
 from cli_agent_orchestrator.constants import (
+    AGENT_CARD_KEY_DIR,
+    AGENT_CARD_PORT,
     ALLOWED_HOSTS,
     API_BASE_URL,
     CAO_HOME_DIR,
@@ -449,6 +458,28 @@ class CreateFlowRequest(BaseModel):
         return v
 
 
+# Hosts treated as loopback for the A2A mount guard.
+_A2A_LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost")
+
+
+def _should_mount_a2a(*, bind_host: str, a2a_disabled: bool, auth_enabled: bool) -> bool:
+    """Decide whether to mount the A2A transport routers on the listener.
+
+    Fail-closed: the A2A JSON-RPC surface is a task *write* API, so it must not
+    be mounted on a non-loopback bind while the auth layer is disabled — that
+    combination would expose an unauthenticated, peer-controllable task API
+    (the exact finding the review reproduced). Loopback + no-auth stays allowed
+    for local dev; any bind with auth enabled is allowed; ``CAO_A2A_DISABLED``
+    always wins. Pure function so the decision table is unit-testable without
+    binding a socket (the lifespan integration tests cover the wiring).
+    """
+    if a2a_disabled:
+        return False
+    if bind_host not in _A2A_LOOPBACK_HOSTS and not auth_enabled:
+        return False
+    return True
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
@@ -513,6 +544,86 @@ async def lifespan(app: FastAPI):
         set_herdr_inbox_service(svc)
         herdr_inbox_task = asyncio.create_task(svc.start())
         logger.info("Herdr inbox service started")
+
+    # Agent Card / A2A listener (DEFAULT-OFF).
+    #
+    # Optionally starts a dedicated read-only Agent Card listener on its own
+    # port (AGENT_CARD_PORT, default :9890). It is off unless explicitly
+    # enabled, binds loopback (127.0.0.1) by default, and is failure-isolated.
+    #   - CAO_AGENT_CARD_ENABLED=true starts the listener (off by default). It
+    #     does NOT inherit the main app's TrustedHostMiddleware, so operators
+    #     opt in knowingly; it binds 127.0.0.1 unless CAO_AGENT_CARD_HOST is
+    #     set (e.g. 0.0.0.0 for external A2A discoverability — a deliberate
+    #     network-exposure choice).
+    #   - CAO_A2A_DISABLED=true publishes the Agent Card but skips mounting the
+    #     A2A v1.0 JSON-RPC + stream routers on the listener.
+    agent_card_listener = None
+    if os.environ.get("CAO_AGENT_CARD_ENABLED", "false").lower() == "true":
+        try:
+            from cli_agent_orchestrator.services import settings_service
+
+            def _agent_card_metadata() -> Dict:
+                """Operator-supplied Agent Card metadata (best-effort).
+
+                Prefers a ``get_agent_card_metadata`` on settings_service if the
+                (ported) implementation is present; otherwise falls back to the
+                unified config ``agent_card`` key, then an empty dict (the
+                builder produces a valid default card from an empty mapping).
+                """
+                getter = getattr(settings_service, "get_agent_card_metadata", None)
+                if callable(getter):
+                    try:
+                        return getter() or {}
+                    except Exception:
+                        return {}
+                try:
+                    return ConfigService.get("agent_card", default={}) or {}
+                except Exception:
+                    return {}
+
+            a2a_router = None
+            a2a_stream_router = None
+            a2a_disabled_flag = os.environ.get("CAO_A2A_DISABLED", "false").lower() == "true"
+            a2a_bind_host = os.environ.get("CAO_AGENT_CARD_HOST", "127.0.0.1")
+            a2a_wanted = _should_mount_a2a(
+                bind_host=a2a_bind_host,
+                a2a_disabled=a2a_disabled_flag,
+                auth_enabled=is_auth_enabled(),
+            )
+            if not a2a_disabled_flag and not a2a_wanted:
+                # Only the fail-closed guard refuses when the flag is on:
+                # non-loopback bind with no auth configured would be an
+                # unauthenticated write API for any network peer.
+                logger.error(
+                    "Refusing to mount the A2A task routes: CAO_AGENT_CARD_HOST=%s is "
+                    "non-loopback and auth is not configured (set AUTH0_DOMAIN / "
+                    "CAO_AUTH_JWKS_URI, or bind loopback). The Agent Card discovery "
+                    "routes are still served.",
+                    a2a_bind_host,
+                )
+            if a2a_wanted:
+                a2a_store = InMemoryTaskStore.from_env()
+                a2a_bus = InMemoryTaskEventBus()
+                a2a_router = build_a2a_router(store=a2a_store, bus=a2a_bus)
+                a2a_stream_router = build_stream_router(store=a2a_store, bus=a2a_bus)
+                app.state.a2a_store = a2a_store
+                app.state.a2a_bus = a2a_bus
+
+            a2a_port = int(os.environ.get("CAO_AGENT_CARD_PORT", str(AGENT_CARD_PORT)))
+            agent_card_listener = await start_agent_card_listener(
+                AGENT_CARD_KEY_DIR,
+                _agent_card_metadata,
+                port=a2a_port,
+                a2a_router=a2a_router,
+                a2a_stream_router=a2a_stream_router,
+            )
+            logger.info("Agent Card / A2A listener started on :%s", a2a_port)
+        except Exception:
+            logger.warning("Agent Card listener failed to start; continuing", exc_info=True)
+
+    # Expose the listener handle (None when default-off) so tests can assert no
+    # extra listener is opened without the explicit enable flag.
+    app.state.agent_card_listener = agent_card_listener
 
     yield
 

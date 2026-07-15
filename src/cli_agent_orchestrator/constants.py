@@ -187,6 +187,13 @@ def graph_export_root() -> Path:
 # OpenTelemetry service.name for CAO's spans/metrics.
 OTEL_SERVICE_NAME = "cao"
 
+# Dedicated read-only Agent Card / A2A listener.
+# Runs on its own port (default 9890), intentionally discoverable by external
+# A2A peers, separate from the localhost-only main API. Signing keys live under
+# AGENT_CARD_KEY_DIR.
+AGENT_CARD_PORT = int(os.environ.get("CAO_AGENT_CARD_PORT", "9890"))
+AGENT_CARD_KEY_DIR = CAO_HOME_DIR / "agent_card"
+
 # Provider-specific agent directories
 KIRO_AGENTS_DIR = Path(os.environ.get("CAO_AGENTS_DIR", str(Path.home() / ".kiro" / "agents")))
 COPILOT_AGENTS_DIR = Path.home() / ".copilot" / "agents"  # Copilot custom agents
