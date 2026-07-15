@@ -1,4 +1,4 @@
-"""Tests for the workflow spec authoring service (issue #312, Bolt 2 / N2).
+"""Tests for the workflow spec authoring service (issue #312, v2 / N2).
 
 Covers load/validate, upsert+list, the byte-identical rebuild invariant
 (FR-2.1 / C1a — drop the index, relist, assert identical), delete (+ 404 on

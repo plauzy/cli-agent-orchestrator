@@ -1,4 +1,4 @@
-"""Tests for the Bolt-3 workflow run CLI verbs (issue #312, N5).
+"""Tests for the v3 workflow run CLI verbs (issue #312, N5).
 
 Covers ``cao workflow run`` / ``status`` / ``cancel`` as thin HTTP clients:
 happy path, error-detail surfacing, ``--input k=v`` parsing + type coercion, and

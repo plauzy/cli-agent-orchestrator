@@ -1,9 +1,9 @@
-"""In-memory structured-return store (issue #312, Bolt 2 / N4, ADR-4).
+"""In-memory structured-return store (issue #312, v2 / N4, ADR-4).
 
 A process-local, capped, oldest-first-evicting collection keyed by
 ``(run_id, step_id)`` that holds the worker-emitted output of one workflow step
 plus its schema-validation verdict. It decouples worker-emit timing from
-engine-consume timing; the engine (N5, Bolt 3) reads it when sequencing the next
+engine-consume timing; the engine (N5, v3) reads it when sequencing the next
 step. The N6 run journal swaps in behind this same interface with no contract
 change.
 
@@ -11,8 +11,8 @@ The store is **transient** and **best-effort**: a process restart loses it (the
 explicit pre-N6 gap, ADR-8), and cap eviction honors the non-blocking promise —
 it NEVER raises. ``record_step_output`` validates the output against an
 ``output_schema`` (passed WITH the request for the synthetic-key MVP, since there
-is no run record in Bolt 2 — F2) using the SAME ``jsonschema`` Draft 2020-12
-validator family Bolt 1 used to check schema well-formedness, so authoring-time
+is no run record in v2 — F2) using the SAME ``jsonschema`` Draft 2020-12
+validator family v1 used to check schema well-formedness, so authoring-time
 and runtime checks agree (B2-BR-7). A schema failure is RECORDED (validated=False,
 state COMPLETED_UNVALIDATED), never raised.
 """

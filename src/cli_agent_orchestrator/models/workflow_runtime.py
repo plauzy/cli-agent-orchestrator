@@ -1,4 +1,4 @@
-"""Lightweight workflow runtime DTOs (issue #312, Bolt 2).
+"""Lightweight workflow runtime DTOs (issue #312, v2).
 
 These are the transient, runtime-facing value objects of the workflow feature:
 the derived index row, the structured step-output record, and the MCP return
@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 
 class StepState(str, Enum):
-    """Per-step run state. Defined in Bolt 1; instantiated by the engine (N5)."""
+    """Per-step run state. Defined in v1; instantiated by the engine (N5)."""
 
     PENDING = "pending"
     RUNNING = "running"
@@ -33,11 +33,11 @@ class StepState(str, Enum):
 
 
 class RunState(str, Enum):
-    """Whole-run state. Defined in Bolt 1; instantiated by the engine (N5).
+    """Whole-run state. Defined in v1; instantiated by the engine (N5).
 
     Lives in this light module (re-exported by ``models/workflow.py``) so the MCP
     seam can name a run state without pulling the jsonschema/yaml grammar module.
-    Bolt 3 adds ``CANCELLED`` (B3-BR-12) so a user-cancelled run is distinguishable
+    v3 adds ``CANCELLED`` (B3-BR-12) so a user-cancelled run is distinguishable
     from an engine-``FAILED`` run. Additive enum change — no existing value altered.
     """
 
@@ -48,7 +48,7 @@ class RunState(str, Enum):
 
 
 # ---------------------------------------------------------------------------
-# Bolt 2 (N2/N4) — derived index row + structured-return record/ack
+# v2 (N2/N4) — derived index row + structured-return record/ack
 # ---------------------------------------------------------------------------
 class WorkflowIndexRow(BaseModel):
     """A derived, non-authoritative projection of a ``WorkflowSpec`` (C4, B2-BR-2).
@@ -72,9 +72,9 @@ class StepOutputRecord(BaseModel):
 
     Keyed by ``(run_id, step_id)``. In-memory in the MVP; the same shape becomes
     the N6 journal row with no contract change. ``state`` is the candidate
-    end-state the engine (N5, Bolt 3) acts on: ``COMPLETED`` when the output
+    end-state the engine (N5, v3) acts on: ``COMPLETED`` when the output
     validated against the step ``output_schema``, else ``COMPLETED_UNVALIDATED``
-    (B2-BR-7 / B2-BR-8). Bolt 2 *populates* these two values; it never drives the
+    (B2-BR-7 / B2-BR-8). v2 *populates* these two values; it never drives the
     reprompt loop.
     """
 
@@ -92,7 +92,7 @@ class ReturnAck(BaseModel):
     Mirrors the existing handoff-tool envelope shape; it is **never** an
     exception. ``ReturnAck.validated=False`` tells the worker its output did not
     validate — it does NOT claim the step ran or will run (Q1 honesty discipline);
-    the recovery (reprompt-once) is the engine's, Bolt 3.
+    the recovery (reprompt-once) is the engine's, v3.
     """
 
     ok: bool = Field(description="Whether the endpoint accepted and stored the output")
@@ -101,7 +101,7 @@ class ReturnAck(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Bolt 3 (N5) — run-engine seam DTOs
+# v3 (N5) — run-engine seam DTOs
 # ---------------------------------------------------------------------------
 # These are the LIGHT, seam-facing value objects the run engine returns and the
 # MCP server consumes (B3-BR-15: the MCP seam consumes only these DTOs, never the

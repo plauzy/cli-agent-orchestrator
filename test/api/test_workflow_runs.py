@@ -1,4 +1,4 @@
-"""Tests for the Bolt-3 run-engine endpoints (issue #312, N5).
+"""Tests for the v3 run-engine endpoints (issue #312, N5).
 
 Covers the three run endpoints (POST /workflows/runs, GET .../{run_id}, POST
 .../{run_id}/cancel) and their error mapping (C5 / B3-BR-14): 200 happy run, 404

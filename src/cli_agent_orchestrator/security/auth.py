@@ -207,6 +207,16 @@ class _JWKSCache:
 _jwks_cache = _JWKSCache()
 
 
+def reset_jwks_cache() -> None:
+    """Drop any cached JWKS client (tests switch key material between cases).
+
+    ``test/conftest.py::auth_enabled_env`` has referenced this since the
+    fixture landed; the function itself was missing — a latent break for any
+    in-process test enabling auth.
+    """
+    _jwks_cache.clear()
+
+
 def get_jwks_cache() -> _JWKSCache:
     """Return the process-wide JWKS cache (exposed for tests)."""
 

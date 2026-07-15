@@ -21,7 +21,17 @@ from cli_agent_orchestrator.services.settings_service import (
 
 @pytest.fixture
 def settings_file(tmp_path):
-    """Patch SETTINGS_FILE and CAO_HOME_DIR to use a temp directory."""
+    """Patch SETTINGS_FILE and CAO_HOME_DIR to use a temp directory.
+
+    ``get_server_settings`` memoizes its result in a module-level cache keyed on
+    the settings-file mtime. That cache is process-global, so a prior test that
+    read settings (e.g. the cli ``test_config`` suite) can leave a stale entry
+    that this fixture's fresh temp file would otherwise not invalidate. Reset
+    the cache on enter *and* exit so every test that patches the settings path
+    reads deterministically regardless of execution order.
+    """
+    import cli_agent_orchestrator.services.settings_service as _ss
+
     fake_settings = tmp_path / "settings.json"
     with (
         patch(
@@ -33,7 +43,13 @@ def settings_file(tmp_path):
             tmp_path,
         ),
     ):
-        yield fake_settings
+        _ss._server_settings_cache = None
+        _ss._server_settings_mtime_ns = -1
+        try:
+            yield fake_settings
+        finally:
+            _ss._server_settings_cache = None
+            _ss._server_settings_mtime_ns = -1
 
 
 class TestLoad:

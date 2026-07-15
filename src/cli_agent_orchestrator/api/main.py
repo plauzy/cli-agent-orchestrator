@@ -14,7 +14,7 @@ import termios
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Dict, List, Optional, cast
+from typing import Annotated, Any, Dict, List, Optional, cast
 
 from fastapi import (
     BackgroundTasks,
@@ -35,6 +35,13 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from cli_agent_orchestrator.a2a import (
+    InMemoryTaskEventBus,
+    InMemoryTaskStore,
+    build_a2a_router,
+    build_stream_router,
+)
+from cli_agent_orchestrator.agent_card import start_agent_card_listener
 from cli_agent_orchestrator.backends import TerminalBackendError, TerminalNotFoundError
 from cli_agent_orchestrator.backends.herdr_backend import HerdrBackend
 from cli_agent_orchestrator.backends.registry import get_backend
@@ -45,6 +52,8 @@ from cli_agent_orchestrator.clients.database import (
     init_db,
 )
 from cli_agent_orchestrator.constants import (
+    AGENT_CARD_KEY_DIR,
+    AGENT_CARD_PORT,
     ALLOWED_HOSTS,
     API_BASE_URL,
     CAO_HOME_DIR,
@@ -52,6 +61,7 @@ from cli_agent_orchestrator.constants import (
     DEFAULT_PROVIDER,
     INBOX_POLLING_INTERVAL,
     INBOX_RECONCILE_INTERVAL,
+    OTEL_SERVICE_NAME,
     SERVER_HOST,
     SERVER_PORT,
     SERVER_VERSION,
@@ -83,6 +93,7 @@ from cli_agent_orchestrator.security.auth import (
     SCOPE_READ,
     SCOPE_WRITE,
     SCOPES_SUPPORTED,
+    extract_scopes_from_token,
     get_authorization_servers,
     get_current_scopes,
     is_auth_enabled,
@@ -111,8 +122,9 @@ from cli_agent_orchestrator.services.log_writer import log_writer
 from cli_agent_orchestrator.services.status_monitor import status_monitor
 from cli_agent_orchestrator.services.step_output_store import _validate_key_part
 from cli_agent_orchestrator.services.terminal_service import OutputMode, TerminalInputBlockedError
+from cli_agent_orchestrator.telemetry import init_telemetry, shutdown_telemetry
 from cli_agent_orchestrator.utils.agent_profiles import load_agent_profile, resolve_provider
-from cli_agent_orchestrator.utils.logging import setup_logging
+from cli_agent_orchestrator.utils.logging import install_access_log_redaction, setup_logging
 from cli_agent_orchestrator.utils.skills import (
     SkillNameError,
     load_skill_content,
@@ -318,13 +330,13 @@ class RunStepResponse(BaseModel):
 
 
 class WorkflowValidateRequest(BaseModel):
-    """Request body for ``POST /workflows/validate`` (Bolt 2, N2)."""
+    """Request body for ``POST /workflows/validate`` (v2, N2)."""
 
     path: str = Field(description="Filesystem path to the workflow spec YAML file")
 
 
 class StepOutputRequest(BaseModel):
-    """Request body for the structured-return endpoint (Bolt 2, N4, C5).
+    """Request body for the structured-return endpoint (v2, N4, C5).
 
     For the synthetic-key MVP there is no run record, so the step's
     ``output_schema`` arrives WITH the request (F2) rather than being re-resolved
@@ -338,7 +350,7 @@ class StepOutputRequest(BaseModel):
 
 
 class WorkflowRunRequest(BaseModel):
-    """Request body for ``POST /workflows/runs`` (Bolt 3, N5, C5)."""
+    """Request body for ``POST /workflows/runs`` (v3, N5, C5)."""
 
     name_or_path: str = Field(description="Workflow name (indexed) or path to a spec YAML file")
     inputs: Dict = Field(
@@ -446,11 +458,44 @@ class CreateFlowRequest(BaseModel):
         return v
 
 
+# Hosts treated as loopback for the A2A mount guard.
+_A2A_LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost")
+
+
+def _should_mount_a2a(*, bind_host: str, a2a_disabled: bool, auth_enabled: bool) -> bool:
+    """Decide whether to mount the A2A transport routers on the listener.
+
+    Fail-closed: the A2A JSON-RPC surface is a task *write* API, so it must not
+    be mounted on a non-loopback bind while the auth layer is disabled — that
+    combination would expose an unauthenticated, peer-controllable task API
+    (the exact finding the review reproduced). Loopback + no-auth stays allowed
+    for local dev; any bind with auth enabled is allowed; ``CAO_A2A_DISABLED``
+    always wins. Pure function so the decision table is unit-testable without
+    binding a socket (the lifespan integration tests cover the wiring).
+    """
+    if a2a_disabled:
+        return False
+    if bind_host not in _A2A_LOOPBACK_HOSTS and not auth_enabled:
+        return False
+    return True
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
     logger.info("Starting CLI Agent Orchestrator server...")
     setup_logging()
+    # Scrub credential query params (``?access_token=`` / ``?ticket=``) from
+    # uvicorn's access log before any request is served. Installed here — not
+    # only in ``main()`` — so the imported-app deployment path
+    # (``uvicorn cli_agent_orchestrator.api.main:app``) is covered too. Idempotent.
+    install_access_log_redaction()
+    # OpenTelemetry (ported): opt-in — no-op unless OTEL_SDK_DISABLED=false.
+    # Safe to call unconditionally; failure-isolated so it never blocks boot.
+    try:
+        init_telemetry(OTEL_SERVICE_NAME)
+    except Exception:
+        logger.warning("OTel telemetry init failed; continuing", exc_info=True)
     init_db()
     registry = PluginRegistry()
     await registry.load()
@@ -500,6 +545,86 @@ async def lifespan(app: FastAPI):
         herdr_inbox_task = asyncio.create_task(svc.start())
         logger.info("Herdr inbox service started")
 
+    # Agent Card / A2A listener (DEFAULT-OFF).
+    #
+    # Optionally starts a dedicated read-only Agent Card listener on its own
+    # port (AGENT_CARD_PORT, default :9890). It is off unless explicitly
+    # enabled, binds loopback (127.0.0.1) by default, and is failure-isolated.
+    #   - CAO_AGENT_CARD_ENABLED=true starts the listener (off by default). It
+    #     does NOT inherit the main app's TrustedHostMiddleware, so operators
+    #     opt in knowingly; it binds 127.0.0.1 unless CAO_AGENT_CARD_HOST is
+    #     set (e.g. 0.0.0.0 for external A2A discoverability — a deliberate
+    #     network-exposure choice).
+    #   - CAO_A2A_DISABLED=true publishes the Agent Card but skips mounting the
+    #     A2A v1.0 JSON-RPC + stream routers on the listener.
+    agent_card_listener = None
+    if os.environ.get("CAO_AGENT_CARD_ENABLED", "false").lower() == "true":
+        try:
+            from cli_agent_orchestrator.services import settings_service
+
+            def _agent_card_metadata() -> Dict:
+                """Operator-supplied Agent Card metadata (best-effort).
+
+                Prefers a ``get_agent_card_metadata`` on settings_service if the
+                (ported) implementation is present; otherwise falls back to the
+                unified config ``agent_card`` key, then an empty dict (the
+                builder produces a valid default card from an empty mapping).
+                """
+                getter = getattr(settings_service, "get_agent_card_metadata", None)
+                if callable(getter):
+                    try:
+                        return getter() or {}
+                    except Exception:
+                        return {}
+                try:
+                    return ConfigService.get("agent_card", default={}) or {}
+                except Exception:
+                    return {}
+
+            a2a_router = None
+            a2a_stream_router = None
+            a2a_disabled_flag = os.environ.get("CAO_A2A_DISABLED", "false").lower() == "true"
+            a2a_bind_host = os.environ.get("CAO_AGENT_CARD_HOST", "127.0.0.1")
+            a2a_wanted = _should_mount_a2a(
+                bind_host=a2a_bind_host,
+                a2a_disabled=a2a_disabled_flag,
+                auth_enabled=is_auth_enabled(),
+            )
+            if not a2a_disabled_flag and not a2a_wanted:
+                # Only the fail-closed guard refuses when the flag is on:
+                # non-loopback bind with no auth configured would be an
+                # unauthenticated write API for any network peer.
+                logger.error(
+                    "Refusing to mount the A2A task routes: CAO_AGENT_CARD_HOST=%s is "
+                    "non-loopback and auth is not configured (set AUTH0_DOMAIN / "
+                    "CAO_AUTH_JWKS_URI, or bind loopback). The Agent Card discovery "
+                    "routes are still served.",
+                    a2a_bind_host,
+                )
+            if a2a_wanted:
+                a2a_store = InMemoryTaskStore.from_env()
+                a2a_bus = InMemoryTaskEventBus()
+                a2a_router = build_a2a_router(store=a2a_store, bus=a2a_bus)
+                a2a_stream_router = build_stream_router(store=a2a_store, bus=a2a_bus)
+                app.state.a2a_store = a2a_store
+                app.state.a2a_bus = a2a_bus
+
+            a2a_port = int(os.environ.get("CAO_AGENT_CARD_PORT", str(AGENT_CARD_PORT)))
+            agent_card_listener = await start_agent_card_listener(
+                AGENT_CARD_KEY_DIR,
+                _agent_card_metadata,
+                port=a2a_port,
+                a2a_router=a2a_router,
+                a2a_stream_router=a2a_stream_router,
+            )
+            logger.info("Agent Card / A2A listener started on :%s", a2a_port)
+        except Exception:
+            logger.warning("Agent Card listener failed to start; continuing", exc_info=True)
+
+    # Expose the listener handle (None when default-off) so tests can assert no
+    # extra listener is opened without the explicit enable flag.
+    app.state.agent_card_listener = agent_card_listener
+
     yield
 
     # Stop herdr inbox service on shutdown
@@ -545,6 +670,11 @@ async def lifespan(app: FastAPI):
         pass
 
     await registry.teardown()
+    # OpenTelemetry (ported): flush + shut down exporters (no-op when disabled).
+    try:
+        shutdown_telemetry()
+    except Exception:
+        logger.warning("Error shutting down OTel telemetry", exc_info=True)
     logger.info("Shutting down CLI Agent Orchestrator server...")
 
 
@@ -706,6 +836,39 @@ def _require_mcp_apps_enabled() -> None:
         )
 
 
+def _agui_enabled() -> bool:
+    """Whether the AG-UI SSE surface (``/agui/v1/stream``, ``emit_ui``) is enabled.
+
+    Two enablement paths, both deliberate (documented in docs/agui.md):
+
+    * ``CAO_AGUI_ENABLED`` — the dedicated flag, so AG-UI can be turned on
+      independently of the MCP Apps iframe surface.
+    * ``CAO_MCP_APPS_ENABLED`` (via ``_mcp_apps_enabled()``) — the pre-existing
+      MCP Apps flag also enables AG-UI, because the two surfaces are read-outs
+      of the same in-process event source (``EventLogPublisher`` → ``SseBus``)
+      with the same privacy boundary; an operator who exposed that data to the
+      iframe has already made the disclosure decision AG-UI relies on.
+
+    With neither flag set the surface is absent (404s) and the server is
+    byte-identical to a build without this feature.
+    """
+
+    if os.environ.get("CAO_AGUI_ENABLED", "").strip().lower() in ("1", "true", "yes"):
+        return True
+    # Shared with the EventLogPublisher observer so the route and the publisher
+    # that feeds it can never disagree about whether the surface is live.
+    from cli_agent_orchestrator.services.agui_enablement import agui_surface_enabled
+
+    return agui_surface_enabled()
+
+
+def _require_agui_enabled() -> None:
+    """Raise 404 when the AG-UI surface is disabled (default-off)."""
+
+    if not _agui_enabled():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AG-UI surface disabled")
+
+
 @app.get("/events")
 async def events_stream(
     _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
@@ -773,6 +936,236 @@ async def events_history(
             )
     events = get_event_log().history(limit=limit, since=since, kinds=kinds_filter)
     return {"events": events}
+
+
+@app.get("/agui/v1/stream")
+async def agui_stream(
+    since: Optional[str] = Query(
+        default=None,
+        description=(
+            "ISO-8601 lower bound. When set, buffered events after this "
+            "timestamp are replayed (as AG-UI frames) before the live stream; "
+            "clients dedupe by event id."
+        ),
+    ),
+    access_token: Optional[str] = Query(
+        default=None,
+        description=(
+            "JWT for auth-enabled mode. Native EventSource cannot set an "
+            "Authorization header, so the token travels as this query parameter."
+        ),
+    ),
+):
+    """Stream fleet events as AG-UI typed events (Server-Sent Events).
+
+    This is the L2 standalone-dashboard surface (consumed by any AG-UI client). It
+    shares the exact same source as ``/events`` — the in-process ``SseBus`` fed
+    by the ``EventLogPublisher`` — but re-maps each normalized six-primitive
+    record onto AG-UI typed events via ``agui_stream.to_agui_event`` before it
+    hits the wire, so any AG-UI-compatible client renders CAO with no custom
+    adapter code.
+
+    Each SSE frame is a *named* AG-UI event: ``event: <AGUI_TYPE>`` +
+    ``data: <json>``. Message bodies are never carried (the ring buffer stores
+    metadata only and the mapping redacts by construction).
+
+    Default-off: returns 404 unless the AG-UI surface is enabled via
+    ``CAO_AGUI_ENABLED`` (or the MCP Apps surface is on). When auth is enabled,
+    a ``cao:read``-bearing JWT must be supplied via ``?access_token=`` (native
+    EventSource cannot send Authorization headers).
+    """
+    _require_agui_enabled()
+
+    # Auth: query-parameter token (EventSource can't set headers). Default-off
+    # (no AUTH0_DOMAIN / CAO_AUTH_JWKS_URI) grants the full scope set.
+    if is_auth_enabled():
+        if not access_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="access_token query parameter required when auth is enabled",
+            )
+        try:
+            scopes = extract_scopes_from_token(access_token)
+        except HTTPException:
+            raise
+        except Exception:
+            # PyJWTError subclasses (malformed/expired/bad signature) or a JWKS
+            # fetch failure. Fails closed either way; map to a clean 401 instead
+            # of an opaque 500 so auth telemetry stays trustworthy.
+            logger.info("agui_stream: token validation failed", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="invalid or expired access_token",
+            )
+        if not any(s in scopes for s in (SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="insufficient scope (cao:read required)",
+            )
+    else:
+        scopes = [SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN]
+
+    from fastapi.responses import StreamingResponse
+
+    from cli_agent_orchestrator.clients.database import list_terminals_by_session
+    from cli_agent_orchestrator.services import session_service
+    from cli_agent_orchestrator.services.agui_stream import (
+        state_delta_frame,
+        state_snapshot_frame,
+        to_agui_event,
+    )
+    from cli_agent_orchestrator.services.event_log_service import get_event_log
+    from cli_agent_orchestrator.services.sse_bus import get_bus
+    from cli_agent_orchestrator.services.ui_state_service import build_dashboard_snapshot
+
+    def _fleet_snapshot() -> Dict:
+        """Build the current DashboardSnapshot from live session/terminal state.
+
+        Failure-isolated: any backend hiccup yields an empty snapshot rather
+        than tearing down the stream. ``list_sessions`` already returns ``[]``
+        on error, so an unavailable tmux/herdr backend degrades gracefully.
+        """
+        sessions = session_service.list_sessions()
+        terminals: List[Dict] = []
+        for sess in sessions:
+            try:
+                terminals.extend(list_terminals_by_session(sess["id"]))
+            except Exception:
+                logger.debug("agui_stream: terminal listing failed for %s", sess.get("id"))
+        return build_dashboard_snapshot(sessions, terminals, list(scopes))
+
+    def _sse(event_id: Optional[str], agui_type: str, data: Dict) -> str:
+        """Format one SSE frame, with an ``id:`` cursor when the event has one."""
+
+        prefix = f"id: {event_id}\n" if event_id is not None else ""
+        return f"{prefix}event: {agui_type}\ndata: {json.dumps(data)}\n\n"
+
+    async def event_generator():
+        # Register the live subscription BEFORE replaying history / taking the
+        # snapshot, so an event published during the replay->live handoff is
+        # buffered in this queue rather than lost. The small replay/live overlap
+        # is de-duplicated by event id below, so a ``?since=`` reconnect resumes
+        # with neither a gap nor a duplicate. The queue is metadata-only, same
+        # as the live path.
+        bus = get_bus()
+        queue = bus.register()
+        try:
+            replayed_ids: set = set()
+
+            # Optional replay: re-emit buffered history after ``since`` as AG-UI
+            # frames; remember the ids so the live drain can skip the overlap.
+            if since:
+                try:
+                    for record in get_event_log().history(since=since):
+                        rid = record.get("id")
+                        if rid is not None:
+                            replayed_ids.add(rid)
+                        rtype, rdata = to_agui_event(record)
+                        yield _sse(rid, rtype, rdata)
+                except Exception:
+                    logger.warning("agui_stream: history replay failed", exc_info=True)
+
+            # AG-UI shared-state: emit a full STATE_SNAPSHOT on connect so any
+            # client hydrates its projection, then keep it current with minimal
+            # RFC-6902 STATE_DELTA patches after each fleet event.
+            prev_snapshot: Optional[Dict] = None
+            try:
+                prev_snapshot = _fleet_snapshot()
+                agui_type, data = state_snapshot_frame(prev_snapshot)
+                yield _sse(None, agui_type, data)
+            except Exception:
+                logger.warning("agui_stream: initial STATE_SNAPSHOT failed", exc_info=True)
+
+            # Drain the queue registered above (buffered handoff events first,
+            # then live), via the bus's drain seam so a fake can terminate the
+            # stream cleanly in tests. Cancellation on client disconnect
+            # propagates through the ``finally`` that unregisters the subscriber.
+            async for event in bus.drain(queue):
+                rid = event.get("id")
+                # Skip the replay/live overlap so a reconnecting client that
+                # passed ``?since=`` never sees an event twice.
+                if rid is not None and rid in replayed_ids:
+                    replayed_ids.discard(rid)
+                    continue
+                agui_type, data = to_agui_event(event)
+                yield _sse(rid, agui_type, data)
+
+                # Recompute the fleet snapshot and emit a STATE_DELTA when it
+                # moved. NB: recomputes on every event; a debounce/cache is a
+                # natural follow-up for high event rates (this is the opt-in L2
+                # dashboard surface, not the orchestration hot path).
+                try:
+                    curr = _fleet_snapshot()
+                    if prev_snapshot is not None:
+                        delta = state_delta_frame(prev_snapshot, curr)
+                        if delta is not None:
+                            dtype, ddata = delta
+                            yield _sse(None, dtype, ddata)
+                    prev_snapshot = curr
+                except Exception:
+                    logger.warning("agui_stream: STATE_DELTA computation failed", exc_info=True)
+        finally:
+            bus.unregister(queue)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+class EmitUIRequest(BaseModel):
+    """Body for POST /agui/v1/emit_ui — an agent-authored generative-UI intent."""
+
+    component: str
+    props: Dict[str, Any] = Field(default_factory=dict)
+    terminal_id: Optional[str] = None
+    session_name: Optional[str] = None
+
+
+@app.post("/agui/v1/emit_ui")
+async def agui_emit_ui(
+    body: EmitUIRequest,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict:
+    """Producer for agent-authored generative-UI intents (closes the AG-UI loop).
+
+    An agent — via the ``emit_ui`` MCP tool — declares a component from the
+    frozen allow-list; the intent is validated **server-side** here and
+    published onto the fleet event bus, where ``agui_stream.to_agui_event`` maps
+    it to a ``GENERATIVE_UI`` frame on ``/agui/v1/stream``. Off-list components
+    and oversized/non-serializable props are rejected (400) so a bad intent
+    never reaches the bus. Requires ``cao:write`` when auth is enabled.
+    """
+    _require_agui_enabled()
+
+    from cli_agent_orchestrator.services.agui_stream import GENERATIVE_UI_COMPONENTS
+    from cli_agent_orchestrator.services.event_log_service import get_event_log
+    from cli_agent_orchestrator.services.sse_bus import get_bus
+
+    if body.component not in GENERATIVE_UI_COMPONENTS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Unknown UI component '{body.component}'. "
+                f"Allowed: {sorted(GENERATIVE_UI_COMPONENTS)}"
+            ),
+        )
+    try:
+        encoded = json.dumps(body.props)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="props must be JSON-serializable",
+        )
+    if len(encoded.encode("utf-8")) > 8 * 1024:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="props payload too large (>8KB)"
+        )
+
+    detail = {
+        "event_type": "agent_ui",
+        "ui": {"component": body.component, "props": body.props},
+    }
+    event = get_event_log().append("other", body.terminal_id, body.session_name, detail)
+    get_bus().publish(event)
+    return {"ok": True, "event_id": event.get("id"), "component": body.component}
 
 
 # Topology widget static bundle at /widgets/topology/ — the vanilla SSE-driven
@@ -1548,12 +1941,12 @@ async def run_step(
 
 
 # =============================================================================
-# Workflow authoring + structured-return endpoints (issue #312, Bolt 2)
+# Workflow authoring + structured-return endpoints (issue #312, v2)
 # =============================================================================
 # Single integration seam for the `cao workflow` CLI verbs and the
 # `workflow_return` MCP tool (B2-BR-10). Core services raise narrow exceptions;
 # this boundary maps them to HTTPException (B2-BR-9): ValueError -> 400,
-# FileNotFoundError/KeyError -> 404. The run/cancel/status endpoints are Bolt 3.
+# FileNotFoundError/KeyError -> 404. The run/cancel/status endpoints are v3.
 
 
 @app.post("/workflows/validate")
@@ -1631,7 +2024,7 @@ async def record_step_output_endpoint(
 
     Validation lives at this seam (ADR-4). A schema-invalid output does NOT 500 —
     it is stored with ``validated=False`` / state ``COMPLETED_UNVALIDATED`` and
-    returned as a 200 (the engine acts on the flag in Bolt 3). A malformed
+    returned as a 200 (the engine acts on the flag in v3). A malformed
     ``run_id`` / ``step_id`` (failing the name regex) maps to 400.
     """
     from cli_agent_orchestrator.services.step_output_store import record_step_output
@@ -1652,7 +2045,7 @@ async def record_step_output_endpoint(
     )
 
 
-# Run-engine endpoints (Bolt 3, N5). ``start_run`` is awaited INLINE (Q1=A): the
+# Run-engine endpoints (v3, N5). ``start_run`` is awaited INLINE (Q1=A): the
 # HTTP request is the blocking wait, matching the synchronous ``workflow_run`` MCP
 # tool. Error mapping (C5 / B3-BR-14): unknown run/spec -> 404, invalid spec/inputs
 # -> 400, cancel-of-finished -> 409, NotBuiltYetError (reserved seam) -> 501,
@@ -2709,6 +3102,9 @@ def main():
     # literal ``*`` is honoured and disables the check (matches the
     # existing CAO_WS_ALLOWED_CLIENTS="*" semantics).
     forwarded_ips = "*" if "*" in TRUSTED_FORWARDER_IPS else ",".join(TRUSTED_FORWARDER_IPS)
+    # Credential query params (``?access_token=``) are scrubbed from uvicorn's
+    # access log by ``install_access_log_redaction()``, installed in the app
+    # lifespan so both ``cao-server`` and ``uvicorn ...:app`` are covered.
     uvicorn.run(
         app,
         host=host,

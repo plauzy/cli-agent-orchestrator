@@ -23,6 +23,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - add provider support (#272)
 
+- **AG-UI typed-event stream** — new `/agui/v1/stream` Server-Sent Events endpoint that maps CAO's normalized fleet events to [AG-UI](https://github.com/ag-ui-protocol/ag-ui) typed events (`RUN_*`, `STEP_*`, `TEXT_MESSAGE_CONTENT`, `TOOL_CALL_START`, `STATE_SNAPSHOT`, `STATE_DELTA`, `GENERATIVE_UI`, `RUN_ERROR`), so any AG-UI-compatible client renders CAO with no custom adapter. Default-off via `CAO_AGUI_ENABLED`; supports `?since=` history replay and, when auth is enabled, a `?access_token=` query-parameter JWT for browser `EventSource` clients. Message bodies are never carried (metadata-only by construction).
+
+- **Generative UI** — agents author allow-listed UI components (approval cards, choice prompts, diff summaries, progress/metrics, agent cards) via the `emit_ui` MCP tool / `POST /agui/v1/emit_ui`. Intents are validated **server-side** against a frozen allow-list (no arbitrary markup) and rendered uniformly across heterogeneous providers. See [docs/agui.md](docs/agui.md#generative-ui).
+
+- **A2A v1.0 transport + signed Agent Card** — JSON-RPC 2.0 (`task.send`/`get`/`cancel`), SSE streaming, and REST polling for agent-to-agent interop, plus an Ed25519-signed Agent Card + JWKS published on a dedicated listener. The listener is default-off (`CAO_AGENT_CARD_ENABLED`) and binds loopback (127.0.0.1) unless an operator opts into external discoverability with `CAO_AGENT_CARD_HOST`. When the auth layer is enabled, the transport enforces **per-method scope** (`task.send`/`task.cancel` → `cao:write`, `task.get` and the stream/REST reads → `cao:read`; `cao:admin` satisfies any), returning `401`/`403` with JSON-RPC error bodies; the listener **refuses to mount the transport on a non-loopback bind while auth is disabled** (the Agent Card doc still publishes). Task ids are **create-only** (re-sending an existing id → `INVALID_PARAMS`; a peer can never overwrite another peer's task), and the in-memory task store is **bounded** (`CAO_A2A_MAX_TASKS`, default 1000) and **TTL-evicting** (`CAO_A2A_TASK_TTL`, default 3600s) — a full store of live tasks refuses new `task.send` with `RESOURCE_EXHAUSTED` (HTTP 429 + `Retry-After`) rather than growing without limit. See [docs/auth.md](docs/auth.md#a2a-transport-auth-the-9890-listener).
+
+- **OpenTelemetry GenAI instrumentation** — opt-in, shipped as the `[otel]` optional extra (`pip install cli-agent-orchestrator[otel]`); the base install degrades to no-ops. The inter-agent dispatch seam (`send_message` / `handoff` / `assign`) emits a GenAI `execute_tool` span and a `cao.orchestration.dispatches` counter over OTLP, and propagates W3C trace context (`traceparent`) into plugin events. GenAI `invoke_agent` / `chat` span helpers ship for instrumenting agent- and model-level calls. See [docs/otel-deployment.md](docs/otel-deployment.md).
+
+- **Native multi-agent workflow spec** — a trusted-author YAML workflow grammar with authoring/validation endpoints, a run-engine seam, and `workflow_run` / `workflow_return` / `workflow_cancel` MCP tools (#312).
+
+- **`mock_cli` provider** — a credentials-free mock agent for deterministic CI of orchestration logic without real CLI binaries or secrets. See [docs/mock-cli-provider.md](docs/mock-cli-provider.md).
+
+- add Antigravity CLI (`agy`) provider — Google's terminal-native coding agent and the successor to the Gemini CLI after the free "Login with Google" path was retired (#323)
+
 - add herdr terminal backend with event-driven inbox delivery (#271)
 
 - bundle built-in memory plugins for Claude Code, Kiro, and Codex (#269)

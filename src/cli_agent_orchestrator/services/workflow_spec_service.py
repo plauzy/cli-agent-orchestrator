@@ -1,4 +1,4 @@
-"""Workflow spec authoring service (issue #312, Bolt 2 / N2).
+"""Workflow spec authoring service (issue #312, v2 / N2).
 
 The core service behind the four authoring CLI verbs (validate / list / get /
 delete) and their ``/workflows`` HTTP endpoints. Spec YAML files on disk are the
@@ -8,7 +8,7 @@ single source of truth (B2-BR-2); the ``workflow_index`` SQLite table is a
 
 Scope discipline (Q1): this service ships ONLY the author -> persist surface.
 ``run`` / ``cancel`` / run-``status`` and the implicit-upsert-on-``run`` *trigger*
-are NOT here — they land in Bolt 3 with the run engine (N5). The
+are NOT here — they land in v3 with the run engine (N5). The
 ``upsert_index`` / ``rebuild_index_from_files`` machinery DOES ship and is
 exercised by ``list_workflows`` and authoring round-trips.
 
@@ -123,10 +123,10 @@ def load_and_validate(path: str, base_dir: Optional[str] = None) -> WorkflowSpec
     """Load a spec file, validate its grammar, and return the typed model (C2).
 
     The single read path. The containing directory is policy-checked by the
-    shared validator before any read (B2-BR-1). Grammar is checked via Bolt 1's
+    shared validator before any read (B2-BR-1). Grammar is checked via v1's
     ``validate_only`` (which never raises); a ``fail`` result is promoted to a
     ``ValueError`` so the boundary maps it to 400. A ``pass_reserved`` spec loads
-    successfully — reserved-ness is not a load error (Bolt-1 BR-3).
+    successfully — reserved-ness is not a load error (v1 BR-3).
 
     The file is read EXACTLY ONCE: the same decoded text is fed to grammar
     validation and to model construction. Reading twice (validate the path, then
@@ -286,7 +286,7 @@ def list_workflows(scan_dir: Optional[str] = None) -> List[WorkflowIndexRow]:
 
     COST CEILING: each of ``list`` / ``get`` / ``delete`` triggers a FULL O(n)
     rebuild (glob + n reads + n parses + n upserts). Fine for the handful of
-    specs Bolt 2 targets, but a future caller (e.g. the run engine) MUST NOT call
+    specs v2 targets, but a future caller (e.g. the run engine) MUST NOT call
     ``get_workflow`` in a loop — a 100-step workflow would be 100 rebuilds =
     O(n²) reads. Resolve the spec once and pass it down instead.
     """

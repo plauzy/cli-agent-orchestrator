@@ -1,4 +1,4 @@
-"""Bolt-1 DoD equivalence test (issue #312, N0, BR-8 / RD-1.2).
+"""v1 DoD equivalence test (issue #312, N0, BR-8 / RD-1.2).
 
 Asserts that the two step callers drive an IDENTICAL step sequence through the
 shared run_agent_step substrate:
