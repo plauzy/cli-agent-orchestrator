@@ -841,7 +841,8 @@ async def agui_stream(
         default=None,
         description=(
             "JWT for auth-enabled mode. Native EventSource cannot set an "
-            "Authorization header, so the token travels as this query parameter."
+            "Authorization header, so the token travels as this query parameter "
+            "(the same pattern as the WebSocket cao.bearer subprotocol)."
         ),
     ),
 ):
@@ -2295,13 +2296,52 @@ async def get_inbox_messages_endpoint(
         )
 
 
+# WebSocket auth.
+# Browsers can't add custom headers to the WS handshake, so the JWT travels in
+# the Sec-WebSocket-Protocol list as ``cao.bearer.<jwt>``. Default-off (no
+# AUTH0_DOMAIN / CAO_AUTH_JWKS_URI) short-circuits to the full scope set so the
+# no-auth localhost contract is byte-identical.
+_SUBPROTOCOL_BEARER_PREFIX = "cao.bearer."
+_ALL_WS_SCOPES = (SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)
+
+
+def _extract_ws_scopes(websocket: WebSocket) -> Optional[List[str]]:
+    """Return the scopes granted to a WS connection, or None if unauthorized.
+
+    - Auth disabled: full scope set (no token required).
+    - Auth enabled: parse ``cao.bearer.<jwt>`` from the requested subprotocols;
+      return the token's scopes, or None when the token is missing/empty/invalid
+      (caller closes 4401).
+    """
+    if not is_auth_enabled():
+        return list(_ALL_WS_SCOPES)
+    for proto in websocket.scope.get("subprotocols") or []:
+        if not isinstance(proto, str) or not proto.startswith(_SUBPROTOCOL_BEARER_PREFIX):
+            continue
+        token = proto[len(_SUBPROTOCOL_BEARER_PREFIX) :]
+        if not token:
+            return None
+        try:
+            return extract_scopes_from_token(token)
+        except Exception:
+            # HTTPException from the auth layer, PyJWTError subclasses
+            # (malformed/expired/bad signature), or a JWKS fetch failure — all
+            # mean "not authorized". Returning None lets the caller close with
+            # a clean 4401 instead of an opaque handshake error.
+            logger.info("terminal_ws: token validation failed", exc_info=True)
+            return None
+    return None
+
+
 @app.websocket("/terminals/{terminal_id}/ws")
 async def terminal_ws(websocket: WebSocket, terminal_id: str):
     """WebSocket endpoint for live terminal streaming via tmux attach.
 
-    Security: This endpoint provides full PTY access with no authentication.
-    It is intended for localhost-only use. Do NOT expose the server to
-    untrusted networks (e.g. --host 0.0.0.0) without adding authentication.
+    Security: PTY access is localhost-only by default (client-IP allowlist).
+    When auth is enabled (``AUTH0_DOMAIN`` / ``CAO_AUTH_JWKS_URI`` set), a JWT
+    carried in the ``cao.bearer.<jwt>`` subprotocol is additionally required:
+    ``cao:read`` to connect (observe), ``cao:write`` to send ``input`` /
+    ``resize`` frames. A read-only viewer's input frames are dropped.
     """
     # Reject connections from clients outside the configured allowlist.
     # Defaults to loopback; operators running cao-server inside a container can
@@ -2319,7 +2359,27 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
         await websocket.close(code=4003, reason="WebSocket access is restricted to allowed clients")
         return
 
-    await websocket.accept()
+    # Validate scopes pre-accept (so we know whether to echo the subprotocol),
+    # but accept before closing so 4xxx codes propagate to the client — a
+    # pre-accept close otherwise surfaces to browsers only as an opaque HTTP 403.
+    scopes = _extract_ws_scopes(websocket)
+    has_bearer_subprotocol = any(
+        isinstance(p, str) and p.startswith(_SUBPROTOCOL_BEARER_PREFIX)
+        for p in (websocket.scope.get("subprotocols") or [])
+    )
+    if has_bearer_subprotocol:
+        await websocket.accept(subprotocol="cao.bearer")
+    else:
+        await websocket.accept()
+    if scopes is None:
+        await websocket.close(code=4401, reason="Unauthorized")
+        return
+    if SCOPE_READ not in scopes:
+        await websocket.close(code=4403, reason="Insufficient scope")
+        return
+    # Read-only viewers (cao:read without cao:write/admin) may observe the PTY
+    # stream but their input/resize frames are dropped (see _forward_input).
+    can_write = SCOPE_WRITE in scopes or SCOPE_ADMIN in scopes
 
     metadata = get_terminal_metadata(terminal_id)
     if not metadata:
@@ -2416,11 +2476,26 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
                 break
 
     async def _forward_input():
-        """Receive from WebSocket and write to PTY."""
+        """Receive from WebSocket and write to PTY.
+
+        Read-only viewers (``cao:read`` without ``cao:write``/``cao:admin``) may
+        observe but not drive: their ``input``/``resize`` frames are dropped and
+        a single warning is logged per connection.
+        """
+        write_drop_warned = False
         try:
             while not done.is_set():
                 msg = await websocket.receive_text()
                 payload = json.loads(msg)
+                if payload.get("type") in ("input", "resize") and not can_write:
+                    if not write_drop_warned:
+                        logger.warning(
+                            "WS write frame dropped — caller lacks %s (terminal_id=%s)",
+                            SCOPE_WRITE,
+                            terminal_id,
+                        )
+                        write_drop_warned = True
+                    continue
                 if payload.get("type") == "input":
                     raw = payload["data"].encode()
                     # Write in chunks to avoid overflowing the PTY buffer
