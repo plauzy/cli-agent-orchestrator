@@ -1,4 +1,4 @@
-"""Workflow run engine (issue #312, Bolt 3 / N5).
+"""Workflow run engine (issue #312, v3 / N5).
 
 The deterministic, in-memory orchestration engine: it holds the process-local run
 registry and the sequencing / bounded-retry / reprompt-once / templating logic that

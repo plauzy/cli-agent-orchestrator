@@ -210,3 +210,46 @@ class TestSinceFilterIsoForms:
         # A garbage cursor must neither raise nor filter everything out.
         ids = [e["id"] for e in log.history(since="not-a-timestamp")]
         assert ev["id"] in ids
+
+
+class TestEventLogEdgeCases:
+    """Naive-timestamp coercion, malformed rows, and the reset helper."""
+
+    def test_naive_since_is_treated_as_utc(self) -> None:
+        # A naive ``since`` (no tzinfo) must be coerced to UTC and still filter
+        # chronologically without raising.
+        log = EventLog()
+        now = datetime.now(timezone.utc)
+        old = log.append("launch", None, None, {})
+        log._buf[-1]["timestamp"] = (now - timedelta(hours=1)).isoformat()
+        naive_cursor = (now - timedelta(minutes=1)).replace(tzinfo=None).isoformat()
+        ids = [e["id"] for e in log.history(since=naive_cursor)]
+        assert old["id"] not in ids  # predates the (UTC-coerced) cursor
+
+    def test_malformed_stored_timestamp_is_skipped(self) -> None:
+        log = EventLog()
+        log.append("launch", None, None, {})
+        log._buf[-1]["timestamp"] = "not-a-timestamp"  # ValueError branch
+        assert log.history() == []
+
+    def test_missing_stored_timestamp_is_skipped(self) -> None:
+        log = EventLog()
+        log.append("launch", None, None, {})
+        del log._buf[-1]["timestamp"]  # KeyError branch
+        assert log.history() == []
+
+    def test_naive_stored_timestamp_is_treated_as_utc(self) -> None:
+        log = EventLog()
+        ev = log.append("launch", None, None, {})
+        log._buf[-1]["timestamp"] = (
+            (datetime.now() - timedelta(minutes=1)).replace(tzinfo=None).isoformat()
+        )
+        ids = [e["id"] for e in log.history()]
+        assert ev["id"] in ids  # naive-but-recent row is retained
+
+    def test_reset_event_log_drops_singleton(self) -> None:
+        from cli_agent_orchestrator.services.event_log_service import reset_event_log
+
+        first = get_event_log()
+        reset_event_log()
+        assert get_event_log() is not first

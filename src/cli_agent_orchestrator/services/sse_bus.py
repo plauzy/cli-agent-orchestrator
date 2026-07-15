@@ -77,6 +77,41 @@ class SseBus:
                     except ValueError:
                         pass
 
+    def register(self) -> "asyncio.Queue[Dict]":
+        """Register a subscriber queue immediately and return it.
+
+        Unlike :meth:`subscribe` — whose queue is registered lazily on the first
+        iteration — this registers synchronously, so a caller can start
+        buffering live events *before* it takes a history snapshot. That closes
+        the replay/live-subscription gap: an event published during the
+        replay→live handoff lands in this queue instead of being lost. Pair with
+        :meth:`unregister` in a ``finally``.
+        """
+
+        loop = asyncio.get_running_loop()
+        queue: "asyncio.Queue[Dict]" = asyncio.Queue(maxsize=SSE_MAX_QUEUE_SIZE)
+        with self._lock:
+            self._subs.append((queue, loop))
+        return queue
+
+    def unregister(self, queue: "asyncio.Queue[Dict]") -> None:
+        """Remove a queue registered via :meth:`register` (idempotent)."""
+
+        with self._lock:
+            self._subs = [entry for entry in self._subs if entry[0] is not queue]
+
+    async def drain(self, queue: "asyncio.Queue[Dict]") -> AsyncGenerator[Dict, None]:
+        """Yield events from a queue obtained via :meth:`register`, until cancelled.
+
+        Split out from :meth:`subscribe` so a caller can ``register`` the queue
+        *before* taking a snapshot (closing the replay/live gap) and then drain
+        it here. Also a clean override seam: a fake can yield a finite sequence
+        and return, terminating the stream instead of blocking forever.
+        """
+
+        while True:
+            yield await queue.get()
+
     async def subscribe(self) -> AsyncGenerator[Dict, None]:
         """Register a new subscriber queue and yield events until cancelled.
 
@@ -84,20 +119,12 @@ class SseBus:
         (subscriber disconnect / iframe teardown / cancellation).
         """
 
-        loop = asyncio.get_running_loop()
-        queue: "asyncio.Queue[Dict]" = asyncio.Queue(maxsize=SSE_MAX_QUEUE_SIZE)
-        entry = (queue, loop)
-        with self._lock:
-            self._subs.append(entry)
+        queue = self.register()
         try:
-            while True:
-                yield await queue.get()
+            async for event in self.drain(queue):
+                yield event
         finally:
-            with self._lock:
-                try:
-                    self._subs.remove(entry)
-                except ValueError:
-                    pass
+            self.unregister(queue)
 
     @property
     def subscriber_count(self) -> int:
@@ -120,3 +147,16 @@ def get_bus() -> SseBus:
             if _bus is None:
                 _bus = SseBus()
     return _bus
+
+
+# Backward-compatible alias. Some consumers (e.g. services.zellij_bridge) refer
+# to this class as ``SSEBus``; keep the old name importable so they work.
+SSEBus = SseBus
+
+
+def reset_bus() -> None:
+    """Drop the singleton SSE bus (used by tests to start with a clean slate)."""
+
+    global _bus
+    with _bus_lock:
+        _bus = None
