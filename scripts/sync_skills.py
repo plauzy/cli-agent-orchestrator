@@ -42,6 +42,7 @@ SHIPPED_SKILLS: List[str] = [
     "workflow-author",
     "cao-plugin",
     "cao-provider",
+    "cao-contributing",
 ]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
