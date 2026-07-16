@@ -45,6 +45,7 @@ class TestInitializePassesResolvedInitTimeout:
     """
 
     @pytest.mark.asyncio
+    @patch.object(ClaudeCodeProvider, "wait_until_input_ready")
     @patch.object(ClaudeCodeProvider, "_ensure_skip_bypass_prompt_setting")
     @patch.object(ClaudeCodeProvider, "_build_claude_command", return_value="claude")
     @patch.object(ClaudeCodeProvider, "_handle_startup_prompts")
@@ -61,6 +62,7 @@ class TestInitializePassesResolvedInitTimeout:
         mock_handle,
         mock_build,
         mock_ensure,
+        mock_wait_ready,
     ):
         """provider_init_timeout=180 caps wait_for_shell, handler, and wait_until_status."""
         mock_wait_shell.return_value = True
@@ -76,6 +78,7 @@ class TestInitializePassesResolvedInitTimeout:
         assert mock_handle.call_args.kwargs["outer_timeout"] == 180
 
     @pytest.mark.asyncio
+    @patch.object(ClaudeCodeProvider, "wait_until_input_ready")
     @patch(_SETTINGS, return_value={"provider_init_timeout": 60})
     @patch.object(ClaudeCodeProvider, "_ensure_skip_bypass_prompt_setting")
     @patch.object(ClaudeCodeProvider, "_build_claude_command", return_value="claude")
@@ -94,6 +97,7 @@ class TestInitializePassesResolvedInitTimeout:
         mock_build,
         mock_ensure,
         mock_settings,
+        mock_wait_ready,
     ):
         """No provider_init_timeout on the profile -> the 60s server default flows through."""
         mock_wait_shell.return_value = True
@@ -109,6 +113,7 @@ class TestInitializePassesResolvedInitTimeout:
         assert mock_handle.call_args.kwargs["outer_timeout"] == 60
 
     @pytest.mark.asyncio
+    @patch.object(ClaudeCodeProvider, "wait_until_input_ready")
     @patch(_SETTINGS, return_value={"provider_init_timeout": 60})
     @patch.object(ClaudeCodeProvider, "_ensure_skip_bypass_prompt_setting")
     @patch.object(ClaudeCodeProvider, "_build_claude_command", return_value="claude")
@@ -125,6 +130,7 @@ class TestInitializePassesResolvedInitTimeout:
         mock_build,
         mock_ensure,
         mock_settings,
+        mock_wait_ready,
     ):
         """No agent profile at all (_load_profile -> None) -> server default flows through."""
         mock_wait_shell.return_value = True
@@ -139,6 +145,7 @@ class TestInitializePassesResolvedInitTimeout:
         assert mock_handle.call_args.kwargs["outer_timeout"] == 60
 
     @pytest.mark.asyncio
+    @patch.object(ClaudeCodeProvider, "wait_until_input_ready")
     @patch.object(ClaudeCodeProvider, "_ensure_skip_bypass_prompt_setting")
     @patch.object(ClaudeCodeProvider, "_build_claude_command", return_value="claude")
     @patch.object(ClaudeCodeProvider, "_handle_startup_prompts")
@@ -155,6 +162,7 @@ class TestInitializePassesResolvedInitTimeout:
         mock_handle,
         mock_build,
         mock_ensure,
+        mock_wait_ready,
     ):
         """initialize() must pass the timeout as outer_timeout, never positionally.
 
