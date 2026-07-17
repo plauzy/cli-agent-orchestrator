@@ -75,26 +75,35 @@ _AGUI_RUN_ERROR = "RUN_ERROR"
 # ---------------------------------------------------------------------------
 
 
-def _map_resume_payload(payload: Any) -> str:
+def _map_resume_payload(payload: Any) -> Optional[str]:
     """Map a resume entry payload to an ApprovalDecision string.
 
     Mapping rules:
     - {approved: true} or {approved: True} -> "approve"
-    - {approved: false} or status "cancelled" -> "deny"
-    - {editedArgs: ...} or any dict with an "editedArgs" key -> "edit"
-    - Anything else -> "approve" (safe default for resolved status)
+    - {approved: false} or {approved: False} -> "deny"
+    - {editedArgs: ...} or any dict with an "editedArgs"/"edited_args" key -> "edit"
+    - Non-dict payloads or dicts without an explicit boolean ``approved``
+      key and without ``editedArgs`` -> None (ambiguous; caller should treat
+      as an error).
+
+    Returns:
+        Decision string ("approve", "deny", "edit") or None when the payload
+        is ambiguous/malformed.
     """
     if not isinstance(payload, dict):
-        return "approve"
+        return None
 
     if "editedArgs" in payload or "edited_args" in payload:
         return "edit"
 
     approved = payload.get("approved")
+    if approved is True:
+        return "approve"
     if approved is False:
         return "deny"
 
-    return "approve"
+    # No explicit boolean ``approved`` and no editedArgs -- ambiguous payload.
+    return None
 
 
 def _extract_edited_text(payload: Any) -> Optional[str]:
@@ -182,9 +191,23 @@ async def run_plane_stream(
                 continue
 
             # Map payload to decision
-            decision_str = _map_resume_payload(entry.payload)
+            decision_str: Optional[str] = _map_resume_payload(entry.payload)
             if entry.status == "cancelled":
                 decision_str = "deny"
+
+            if decision_str is None:
+                err = RunErrorEvent(
+                    type="RUN_ERROR",
+                    thread_id=thread_id,
+                    run_id=run_id,
+                    message=(
+                        f"Ambiguous resume payload for interrupt {interrupt_id}: "
+                        f"payload must include 'approved' (boolean) or 'editedArgs'"
+                    ),
+                )
+                yield _emit(err)
+                finished = True
+                return
 
             edited_text = _extract_edited_text(entry.payload) if decision_str == "edit" else None
 

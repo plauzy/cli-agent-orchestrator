@@ -566,9 +566,14 @@ def test_map_resume_payload_approved():
     assert _map_resume_payload({"approved": False}) == "deny"
     assert _map_resume_payload({"editedArgs": "hello"}) == "edit"
     assert _map_resume_payload({"edited_args": "hello"}) == "edit"
-    assert _map_resume_payload({}) == "approve"
-    assert _map_resume_payload(None) == "approve"
-    assert _map_resume_payload("string") == "approve"
+    # Ambiguous payloads now return None instead of defaulting to "approve"
+    assert _map_resume_payload({}) is None
+    assert _map_resume_payload(None) is None
+    assert _map_resume_payload("string") is None
+    # Non-boolean 'approved' values are ambiguous
+    assert _map_resume_payload({"approved": "yes"}) is None
+    assert _map_resume_payload({"approved": 1}) is None
+    assert _map_resume_payload({"status": "resolved"}) is None
 
 
 def test_extract_edited_text():
@@ -579,3 +584,158 @@ def test_extract_edited_text():
     assert _extract_edited_text({"editedArgs": {"key": "val"}}) == '{"key": "val"}'
     assert _extract_edited_text({}) is None
     assert _extract_edited_text(None) is None
+
+
+# ---------------------------------------------------------------------------
+# Tests: ambiguous payload -> RUN_ERROR
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_plane_resume_empty_payload_produces_error():
+    """resume[] with empty dict payload (no explicit approved) produces RUN_ERROR."""
+    from cli_agent_orchestrator.services.agui.run_plane import run_plane_stream
+
+    emitter = RecordingUiEmitter()
+    construct = AgentHandoffWithApproval(emitter=emitter, answer_delivery=None)
+
+    interrupt = construct.on_provider_waiting(
+        terminal_id="t-1",
+        provider="claude_code",
+        raw_prompt="\u2191/\u2193 to navigate",
+        session_name="s-1",
+    )
+
+    input_data = _minimal_run_input(
+        resume=[{
+            "interruptId": interrupt.id,
+            "status": "resolved",
+            "payload": {},
+        }]
+    )
+
+    frames = await _collect_stream(
+        run_plane_stream(
+            input_data=input_data,
+            approval_construct=construct,
+        )
+    )
+    parsed = _parse_frames(frames)
+
+    assert parsed[0]["type"] == "RUN_STARTED"
+    assert parsed[1]["type"] == "RUN_ERROR"
+    assert "Ambiguous resume payload" in parsed[1]["message"]
+    # Interrupt should NOT have been resolved
+    assert not construct.get_interrupt(interrupt.id).resolved
+
+
+@pytest.mark.asyncio
+async def test_run_plane_resume_non_dict_payload_produces_error():
+    """resume[] with non-dict payload (e.g. None or string) produces RUN_ERROR."""
+    from cli_agent_orchestrator.services.agui.run_plane import run_plane_stream
+
+    emitter = RecordingUiEmitter()
+    construct = AgentHandoffWithApproval(emitter=emitter, answer_delivery=None)
+
+    interrupt = construct.on_provider_waiting(
+        terminal_id="t-1",
+        provider="claude_code",
+        raw_prompt="\u2191/\u2193 to navigate",
+        session_name="s-1",
+    )
+
+    input_data = _minimal_run_input(
+        resume=[{
+            "interruptId": interrupt.id,
+            "status": "resolved",
+            "payload": None,
+        }]
+    )
+
+    frames = await _collect_stream(
+        run_plane_stream(
+            input_data=input_data,
+            approval_construct=construct,
+        )
+    )
+    parsed = _parse_frames(frames)
+
+    assert parsed[0]["type"] == "RUN_STARTED"
+    assert parsed[1]["type"] == "RUN_ERROR"
+    assert "Ambiguous resume payload" in parsed[1]["message"]
+    assert not construct.get_interrupt(interrupt.id).resolved
+
+
+@pytest.mark.asyncio
+async def test_run_plane_resume_non_boolean_approved_produces_error():
+    """resume[] with non-boolean 'approved' (e.g. string 'yes') produces RUN_ERROR."""
+    from cli_agent_orchestrator.services.agui.run_plane import run_plane_stream
+
+    emitter = RecordingUiEmitter()
+    construct = AgentHandoffWithApproval(emitter=emitter, answer_delivery=None)
+
+    interrupt = construct.on_provider_waiting(
+        terminal_id="t-1",
+        provider="claude_code",
+        raw_prompt="\u2191/\u2193 to navigate",
+        session_name="s-1",
+    )
+
+    input_data = _minimal_run_input(
+        resume=[{
+            "interruptId": interrupt.id,
+            "status": "resolved",
+            "payload": {"approved": "yes"},
+        }]
+    )
+
+    frames = await _collect_stream(
+        run_plane_stream(
+            input_data=input_data,
+            approval_construct=construct,
+        )
+    )
+    parsed = _parse_frames(frames)
+
+    assert parsed[0]["type"] == "RUN_STARTED"
+    assert parsed[1]["type"] == "RUN_ERROR"
+    assert "Ambiguous resume payload" in parsed[1]["message"]
+    assert not construct.get_interrupt(interrupt.id).resolved
+
+
+@pytest.mark.asyncio
+async def test_run_plane_resume_cancelled_status_still_works_with_empty_payload():
+    """resume[] with status='cancelled' overrides to deny even with empty payload."""
+    from cli_agent_orchestrator.services.agui.run_plane import run_plane_stream
+
+    emitter = RecordingUiEmitter()
+    construct = AgentHandoffWithApproval(emitter=emitter, answer_delivery=None)
+
+    interrupt = construct.on_provider_waiting(
+        terminal_id="t-1",
+        provider="claude_code",
+        raw_prompt="\u2191/\u2193 to navigate",
+        session_name="s-1",
+    )
+
+    input_data = _minimal_run_input(
+        resume=[{
+            "interruptId": interrupt.id,
+            "status": "cancelled",
+            "payload": {},
+        }]
+    )
+
+    frames = await _collect_stream(
+        run_plane_stream(
+            input_data=input_data,
+            approval_construct=construct,
+        )
+    )
+    parsed = _parse_frames(frames)
+
+    # Cancelled status overrides to deny regardless of payload mapping
+    assert construct.get_interrupt(interrupt.id).resolved
+    assert construct.get_interrupt(interrupt.id).outcome == "deny"
+    assert parsed[-1]["type"] == "RUN_FINISHED"
+    assert parsed[-1]["outcome"]["type"] == "success"

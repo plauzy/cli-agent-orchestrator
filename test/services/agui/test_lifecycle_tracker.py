@@ -361,3 +361,203 @@ class TestReplayDeterminism:
         run1 = run_through()
         run2 = run_through()
         assert run1 == run2
+
+
+class TestSameReceiverCollision:
+    """When two TOOL_CALL_START frames target the same receiver before the first
+    completes, the tracker synthesizes a TOOL_CALL_END for the first (disposition
+    'superseded') before registering the second."""
+
+    def test_second_handoff_supersedes_first(self) -> None:
+        tracker = ToolCallLifecycleTracker()
+
+        # Open first tool call targeting receiver "r1"
+        open1 = _record(
+            "handoff",
+            terminal_id="r1",
+            detail={"sender": "s", "receiver": "r1", "orchestration_type": "handoff"},
+            rid="open-1",
+        )
+        frames1 = tracker.feed(open1, to_agui_event(open1))
+        assert len(frames1) == 1
+        assert frames1[0][0] == AGUI_TOOL_CALL_START
+        assert tracker.open_count == 1
+
+        # Open second tool call targeting the same receiver "r1"
+        open2 = _record(
+            "handoff",
+            terminal_id="r1",
+            detail={"sender": "s2", "receiver": "r1", "orchestration_type": "assign"},
+            rid="open-2",
+        )
+        frames2 = tracker.feed(open2, to_agui_event(open2))
+
+        # Expect: TOOL_CALL_END(superseded) for first, then TOOL_CALL_START for second
+        types = [f[0] for f in frames2]
+        assert AGUI_TOOL_CALL_END in types
+        assert AGUI_TOOL_CALL_START in types
+
+        # The superseded closer comes first
+        end_idx = types.index(AGUI_TOOL_CALL_END)
+        start_idx = types.index(AGUI_TOOL_CALL_START)
+        assert end_idx < start_idx
+
+        # The superseded TOOL_CALL_END has the first call's id and disposition
+        end_frame = frames2[end_idx]
+        assert end_frame[1]["tool_call_id"] == "open-1"
+        assert end_frame[1]["metadata"]["disposition"] == "superseded"
+
+        # Only one open call remains
+        assert tracker.open_count == 1
+
+    def test_superseded_end_has_correct_tool_call_name(self) -> None:
+        tracker = ToolCallLifecycleTracker()
+
+        open1 = _record(
+            "handoff",
+            terminal_id="r1",
+            detail={"sender": "s", "receiver": "r1", "orchestration_type": "handoff"},
+            rid="open-1",
+        )
+        tracker.feed(open1, to_agui_event(open1))
+
+        open2 = _record(
+            "handoff",
+            terminal_id="r1",
+            detail={"sender": "s2", "receiver": "r1", "orchestration_type": "assign"},
+            rid="open-2",
+        )
+        frames2 = tracker.feed(open2, to_agui_event(open2))
+
+        end_frame = next(f for f in frames2 if f[0] == AGUI_TOOL_CALL_END)
+        assert end_frame[1]["tool_call_name"] == "handoff"
+
+    def test_completion_after_superseded_only_closes_latest(self) -> None:
+        """After superseding, completing the receiver closes only the new call."""
+        tracker = ToolCallLifecycleTracker()
+
+        open1 = _record(
+            "handoff",
+            terminal_id="r1",
+            detail={"sender": "s", "receiver": "r1", "orchestration_type": "handoff"},
+            rid="open-1",
+        )
+        tracker.feed(open1, to_agui_event(open1))
+
+        open2 = _record(
+            "handoff",
+            terminal_id="r1",
+            detail={"sender": "s2", "receiver": "r1", "orchestration_type": "assign"},
+            rid="open-2",
+        )
+        tracker.feed(open2, to_agui_event(open2))
+
+        # Now complete receiver "r1"
+        close = _record(
+            "completion",
+            terminal_id="r1",
+            detail={"event_type": "post_kill_terminal", "agent_name": "dev"},
+            rid="close-1",
+        )
+        frames = tracker.feed(close, to_agui_event(close))
+
+        end_frames = [f for f in frames if f[0] == AGUI_TOOL_CALL_END]
+        assert len(end_frames) == 1
+        # Should close the second (latest) open call
+        assert end_frames[0][1]["tool_call_id"] == "open-2"
+        assert end_frames[0][1]["tool_call_name"] == "assign"
+        # No disposition on normal completion
+        assert "disposition" not in end_frames[0][1]["metadata"]
+
+        # No open calls remain
+        assert tracker.open_count == 0
+
+    def test_a2a_delegation_superseded_produces_result_and_end(self) -> None:
+        """Superseding an a2a_delegation open also emits TOOL_CALL_RESULT."""
+        tracker = ToolCallLifecycleTracker()
+
+        open1 = _record(
+            "a2a_delegation",
+            terminal_id="t1",
+            detail={"sender": "s", "receiver": "r1", "orchestration_type": "a2a_send"},
+            rid="a2a-1",
+        )
+        tracker.feed(open1, to_agui_event(open1))
+
+        open2 = _record(
+            "handoff",
+            terminal_id="r1",
+            detail={"sender": "s2", "receiver": "r1", "orchestration_type": "handoff"},
+            rid="open-2",
+        )
+        frames = tracker.feed(open2, to_agui_event(open2))
+
+        types = [f[0] for f in frames]
+        assert AGUI_TOOL_CALL_RESULT in types
+        assert AGUI_TOOL_CALL_END in types
+        assert AGUI_TOOL_CALL_START in types
+
+        # RESULT and END for superseded come before the new START
+        result_idx = types.index(AGUI_TOOL_CALL_RESULT)
+        end_idx = types.index(AGUI_TOOL_CALL_END)
+        start_idx = types.index(AGUI_TOOL_CALL_START)
+        assert result_idx < end_idx < start_idx
+
+        # Check disposition on the superseded frames
+        end_frame = frames[end_idx]
+        assert end_frame[1]["metadata"]["disposition"] == "superseded"
+        result_frame = frames[result_idx]
+        assert result_frame[1]["metadata"]["disposition"] == "superseded"
+
+    def test_triple_handoff_to_same_receiver(self) -> None:
+        """Three consecutive handoffs to the same receiver: each supersedes the previous."""
+        tracker = ToolCallLifecycleTracker()
+
+        # First open
+        open1 = _record(
+            "handoff",
+            terminal_id="r1",
+            detail={"sender": "s1", "receiver": "r1", "orchestration_type": "handoff"},
+            rid="open-1",
+        )
+        frames1 = tracker.feed(open1, to_agui_event(open1))
+        assert tracker.open_count == 1
+
+        # Second open (supersedes first)
+        open2 = _record(
+            "handoff",
+            terminal_id="r1",
+            detail={"sender": "s2", "receiver": "r1", "orchestration_type": "handoff"},
+            rid="open-2",
+        )
+        frames2 = tracker.feed(open2, to_agui_event(open2))
+        superseded_ends_2 = [f for f in frames2 if f[0] == AGUI_TOOL_CALL_END]
+        assert len(superseded_ends_2) == 1
+        assert superseded_ends_2[0][1]["tool_call_id"] == "open-1"
+        assert tracker.open_count == 1
+
+        # Third open (supersedes second)
+        open3 = _record(
+            "handoff",
+            terminal_id="r1",
+            detail={"sender": "s3", "receiver": "r1", "orchestration_type": "handoff"},
+            rid="open-3",
+        )
+        frames3 = tracker.feed(open3, to_agui_event(open3))
+        superseded_ends_3 = [f for f in frames3 if f[0] == AGUI_TOOL_CALL_END]
+        assert len(superseded_ends_3) == 1
+        assert superseded_ends_3[0][1]["tool_call_id"] == "open-2"
+        assert tracker.open_count == 1
+
+        # Final completion closes the third
+        close = _record(
+            "completion",
+            terminal_id="r1",
+            detail={"event_type": "post_kill_terminal"},
+            rid="close-1",
+        )
+        close_frames = tracker.feed(close, to_agui_event(close))
+        end_frames = [f for f in close_frames if f[0] == AGUI_TOOL_CALL_END]
+        assert len(end_frames) == 1
+        assert end_frames[0][1]["tool_call_id"] == "open-3"
+        assert tracker.open_count == 0
