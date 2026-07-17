@@ -1246,6 +1246,102 @@ async def agui_resume_interrupt(
     }
 
 
+# ---------------------------------------------------------------------------
+# Run plane endpoint (AG-UI stock wire dialect)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/agui/v1/run")
+async def agui_run(
+    request: Request,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+):
+    """Stream AG-UI stock events for a run (POST /agui/v1/run).
+
+    Accepts a RunAgentInput body (camelCase) and streams lifecycle-legal SSE
+    frames using the official ag-ui-protocol EventEncoder. Each frame is a
+    ``data:`` line containing camelCase JSON with a ``type`` field.
+
+    When ``resume[]`` is non-empty, ``cao:write`` is required (the caller is
+    mutating interrupt state). Otherwise ``cao:read`` is the floor.
+
+    Returns 501 when the ``ag-ui-protocol`` package is not installed (the
+    [agui] optional extra was not included at install time).
+    Returns 404 when the AG-UI surface is disabled.
+    """
+    _require_agui_enabled()
+
+    from cli_agent_orchestrator.services.agui.run_plane import AG_UI_AVAILABLE
+
+    if not AG_UI_AVAILABLE:
+        return JSONResponse(
+            status_code=501,
+            content={
+                "detail": (
+                    "ag-ui-protocol is not installed. "
+                    "Install with: pip install cli-agent-orchestrator[agui]"
+                )
+            },
+        )
+
+    # Parse the body
+    body = await request.json()
+
+    # Scope escalation: if resume[] is non-empty, require cao:write
+    resume_entries = body.get("resume") or []
+    if resume_entries:
+        if not any(s in _scopes for s in (SCOPE_WRITE, SCOPE_ADMIN)):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="cao:write required when resume[] is non-empty",
+            )
+
+    # Get approval construct from app state
+    bridge = getattr(app.state, "approval_bridge", None)
+    approval_construct = bridge.construct if bridge is not None else None
+
+    # Build the snapshot function
+    def _fleet_snapshot() -> Dict:
+        from cli_agent_orchestrator.clients.database import list_terminals_by_session
+        from cli_agent_orchestrator.services import session_service
+        from cli_agent_orchestrator.services.ui_state_service import build_dashboard_snapshot
+
+        sessions = session_service.list_sessions()
+        terminals: List[Dict] = []
+        for sess in sessions:
+            try:
+                terminals.extend(list_terminals_by_session(sess["id"]))
+            except Exception:
+                pass
+        return build_dashboard_snapshot(sessions, terminals, list(_scopes))
+
+    # Build the bus subscription function
+    async def _bus_events():
+        from cli_agent_orchestrator.services.sse_bus import get_bus
+
+        sse_bus = get_bus()
+        sub = sse_bus.register(overflow_close=True)
+        try:
+            async for event in sse_bus.drain(sub):
+                yield event
+        finally:
+            sse_bus.unregister(sub)
+
+    from fastapi.responses import StreamingResponse
+
+    from cli_agent_orchestrator.services.agui.run_plane import run_plane_stream
+
+    return StreamingResponse(
+        run_plane_stream(
+            input_data=body,
+            approval_construct=approval_construct,
+            snapshot_fn=_fleet_snapshot,
+            bus_subscribe_fn=_bus_events,
+        ),
+        media_type="text/event-stream",
+    )
+
+
 # Topology widget static bundle at /widgets/topology/ — the vanilla SSE-driven
 # view consumed alongside the /events stream above. The mount is default-off
 # (no-op unless CAO_MCP_APPS_ENABLED is set) and idempotent, so re-importing this
