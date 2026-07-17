@@ -79,8 +79,9 @@ class ToolCallLifecycleTracker:
 
         # Track new TOOL_CALL_START opens.
         if agui_type == AGUI_TOOL_CALL_START:
-            self._track_open(record, data)
-            return frames
+            superseded = self._track_open(record, data)
+            # Superseded closers come before the new open frame.
+            return superseded + frames
 
         # Check for completion that closes an open tool call.
         if agui_type == AGUI_STEP_FINISHED:
@@ -102,13 +103,28 @@ class ToolCallLifecycleTracker:
             frames.extend(closers)
         return frames
 
-    def _track_open(self, record: Dict[str, Any], data: Dict[str, Any]) -> None:
-        """Register a new open tool call, with bounded eviction."""
+    def _track_open(self, record: Dict[str, Any], data: Dict[str, Any]) -> List[Frame]:
+        """Register a new open tool call, with bounded eviction.
+
+        If the receiver already has an open call, that call is closed first
+        (synthesized TOOL_CALL_END with disposition "superseded") before
+        registering the new one.
+
+        Returns any synthesized closer frames for a superseded open call.
+        """
         detail: Dict[str, Any] = record.get("detail") or {}
         receiver = detail.get("receiver")
         if not receiver:
             # Cannot track without a receiver terminal_id.
-            return
+            return []
+
+        superseded_frames: List[Frame] = []
+
+        # If there is already an open call for this receiver, close it first.
+        if receiver in self._open:
+            superseded_frames = self._synthesize_close(
+                receiver, timestamp=record.get("timestamp"), disposition="superseded"
+            )
 
         # Evict oldest entries if at capacity.
         while len(self._open) >= self._max_open:
@@ -121,6 +137,8 @@ class ToolCallLifecycleTracker:
             "metadata": data.get("metadata") or {},
         }
 
+        return superseded_frames
+
     def _try_close(
         self, terminal_id: Optional[str], record: Dict[str, Any]
     ) -> List[Frame]:
@@ -131,14 +149,24 @@ class ToolCallLifecycleTracker:
         return self._synthesize_close(terminal_id, timestamp=record.get("timestamp"))
 
     def _synthesize_close(
-        self, receiver_id: str, timestamp: Optional[str] = None
+        self, receiver_id: str, timestamp: Optional[str] = None, disposition: Optional[str] = None
     ) -> List[Frame]:
-        """Synthesize TOOL_CALL_END (and optionally TOOL_CALL_RESULT) for a receiver."""
+        """Synthesize TOOL_CALL_END (and optionally TOOL_CALL_RESULT) for a receiver.
+
+        Args:
+            receiver_id: The terminal_id of the receiver to close.
+            timestamp: Optional timestamp for the synthesized frames.
+            disposition: Optional disposition string (e.g. "superseded") added to
+                metadata when the close is not a normal completion.
+        """
         open_info = self._open.pop(receiver_id, None)
         if open_info is None:
             return []
 
         tool_call_id = open_info["tool_call_id"]
+        metadata = dict(open_info["metadata"])
+        if disposition:
+            metadata["disposition"] = disposition
         frames: List[Frame] = []
 
         # For a2a_delegation opens, also synthesize TOOL_CALL_RESULT.
@@ -148,7 +176,7 @@ class ToolCallLifecycleTracker:
                 {
                     "tool_call_id": tool_call_id,
                     "result": "",  # Metadata-only: no body content.
-                    "metadata": open_info["metadata"],
+                    "metadata": metadata,
                     "timestamp": timestamp,
                 },
             ))
@@ -159,7 +187,7 @@ class ToolCallLifecycleTracker:
             {
                 "tool_call_id": tool_call_id,
                 "tool_call_name": open_info["tool_call_name"],
-                "metadata": open_info["metadata"],
+                "metadata": metadata,
                 "timestamp": timestamp,
             },
         ))
