@@ -3,7 +3,7 @@
 Re-exports the foundation layer: the base construct ABC, the emitter family,
 the stream reader, the apply_json_patch_strict helper, the lifecycle tracker,
 and the L2 fold-based constructs (supervisor dashboard, session timeline,
-cross-provider sync).
+cross-provider sync, handoff approval).
 """
 
 from __future__ import annotations
@@ -17,6 +17,12 @@ from cli_agent_orchestrator.services.agui.base import (
     apply_json_patch_strict,
 )
 from cli_agent_orchestrator.services.agui.cross_provider_sync import CrossProviderStateSync
+from cli_agent_orchestrator.services.agui.handoff_approval import (
+    AgentHandoffWithApproval,
+    ApprovalDecision,
+    Interrupt,
+    classify_reason,
+)
 from cli_agent_orchestrator.services.agui.lifecycle_tracker import ToolCallLifecycleTracker
 from cli_agent_orchestrator.services.agui.session_timeline import (
     MultiAgentSessionTimeline,
@@ -28,11 +34,14 @@ from cli_agent_orchestrator.services.agui.supervisor_dashboard import (
 )
 
 __all__ = [
+    "AgentHandoffWithApproval",
     "AguiConstruct",
     "AguiStreamReader",
+    "ApprovalDecision",
     "CrossProviderStateSync",
     "HttpUiEmitter",
     "InProcessUiEmitter",
+    "Interrupt",
     "MultiAgentSessionTimeline",
     "RecordingUiEmitter",
     "SupervisorDashboardStream",
@@ -40,4 +49,5 @@ __all__ = [
     "ToolCallLifecycleTracker",
     "UiEmitter",
     "apply_json_patch_strict",
+    "classify_reason",
 ]

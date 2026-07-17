@@ -512,6 +512,27 @@ async def lifespan(app: FastAPI):
     inbox_service_task = asyncio.create_task(inbox_service.run(registry))
     logger.info("Event bus consumers started (StatusMonitor, LogWriter, InboxService)")
 
+    # Start ApprovalBridge when AG-UI surface is enabled
+    approval_bridge_task: Optional[asyncio.Task] = None
+    from cli_agent_orchestrator.services.agui_enablement import agui_surface_enabled
+
+    if agui_surface_enabled():
+        from cli_agent_orchestrator.services.agui.approval_bridge import ApprovalBridge
+        from cli_agent_orchestrator.services.agui.base import InProcessUiEmitter
+        from cli_agent_orchestrator.services.agui.handoff_approval import (
+            AgentHandoffWithApproval,
+        )
+
+        approval_emitter = InProcessUiEmitter()
+        approval_construct = AgentHandoffWithApproval(
+            emitter=approval_emitter,
+            answer_delivery=None,  # Will use terminal_service directly in bridge
+        )
+        approval_bridge = ApprovalBridge(construct=approval_construct)
+        app.state.approval_bridge = approval_bridge
+        approval_bridge_task = asyncio.create_task(approval_bridge.run())
+        logger.info("ApprovalBridge started")
+
     # Start temporary OpenCode inbox poller. GH #115 tracks replacing this
     # provider-specific wakeup path with a unified delivery engine.
     opencode_inbox_task = asyncio.create_task(opencode_inbox_delivery_daemon(registry))
@@ -555,6 +576,13 @@ async def lifespan(app: FastAPI):
     status_monitor_task.cancel()
     log_writer_task.cancel()
     inbox_service_task.cancel()
+    # Cancel approval bridge on shutdown
+    if approval_bridge_task is not None:
+        approval_bridge_task.cancel()
+        try:
+            await approval_bridge_task
+        except asyncio.CancelledError:
+            pass
     # Cancel daemon on shutdown
     daemon_task.cancel()
 
@@ -1132,6 +1160,90 @@ async def agui_emit_ui(
     event = get_event_log().append("other", body.terminal_id, body.session_name, detail)
     get_bus().publish(event)
     return {"ok": True, "event_id": event.get("id"), "component": body.component}
+
+
+# ---------------------------------------------------------------------------
+# Interrupt resume endpoint (human-in-the-loop approval)
+# ---------------------------------------------------------------------------
+
+
+class ResumeInterruptRequest(BaseModel):
+    decision: str = Field(..., description="One of: approve, deny, edit")
+    edited_text: Optional[str] = Field(None, description="Required when decision is 'edit'")
+
+    @field_validator("decision")
+    @classmethod
+    def validate_decision(cls, v: str) -> str:
+        allowed = {"approve", "deny", "edit"}
+        if v not in allowed:
+            raise ValueError(f"decision must be one of {sorted(allowed)}")
+        return v
+
+
+@app.post("/agui/v1/interrupts/{interrupt_id}/resume")
+async def agui_resume_interrupt(
+    interrupt_id: str,
+    body: ResumeInterruptRequest,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict:
+    """Resume a pending approval interrupt with the user's decision.
+
+    Idempotent: re-resuming an already-resolved interrupt returns the recorded
+    outcome with no side effects (no keystrokes re-sent).
+
+    Guards:
+    - 404 when AG-UI surface disabled
+    - 404 for unknown interrupt_id
+    - 422 for invalid decision or edit validation failure
+    - Requires cao:write or cao:admin when auth is enabled
+    """
+    _require_agui_enabled()
+
+    from cli_agent_orchestrator.services.agui.handoff_approval import (
+        ApprovalDecision,
+    )
+
+    bridge = getattr(app.state, "approval_bridge", None)
+    if bridge is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Approval bridge not initialized",
+        )
+
+    construct = bridge.construct
+    interrupt = construct.get_interrupt(interrupt_id)
+    if interrupt is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown interrupt: {interrupt_id}",
+        )
+
+    try:
+        decision_enum = ApprovalDecision(body.decision)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid decision: {body.decision}",
+        )
+
+    try:
+        result = await construct.resume(
+            interrupt_id=interrupt_id,
+            decision=decision_enum,
+            edited_text=body.edited_text,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        )
+
+    return {
+        "ok": True,
+        "interrupt_id": result.id,
+        "resolved": result.resolved,
+        "outcome": result.outcome,
+    }
 
 
 # Topology widget static bundle at /widgets/topology/ — the vanilla SSE-driven
