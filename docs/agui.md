@@ -30,15 +30,25 @@ to a build without the feature.
 `GET /agui/v1/stream` maps CAO's six normalized event primitives onto AG-UI
 typed events:
 
-| CAO primitive | AG-UI event(s) |
-|---|---|
-| session / terminal launch | `RUN_STARTED` / `STEP_STARTED` |
-| completion | `RUN_FINISHED` / `STEP_FINISHED` |
-| handoff / delegation | `TOOL_CALL_START` / `TOOL_CALL_END` |
-| message delivery | `TEXT_MESSAGE_CONTENT` (metadata only) |
-| file modification | `STATE_DELTA` (RFC 6902) against a fleet `STATE_SNAPSHOT` |
-| error | `RUN_ERROR` |
-| agent-authored UI | `GENERATIVE_UI` |
+| CAO primitive | AG-UI event(s) | Notes |
+|---|---|---|
+| session / terminal launch | `RUN_STARTED` / `STEP_STARTED` | |
+| completion | `RUN_FINISHED` / `STEP_FINISHED` | Also triggers synthesized `TOOL_CALL_END` for open receivers |
+| handoff (`orchestration_type=handoff\|assign`) | `TOOL_CALL_START` | Agent-to-agent task delegation [1] |
+| handoff (`orchestration_type=send_message` or absent) | `TEXT_MESSAGE_CONTENT` (metadata only) | Simple message dispatch |
+| a2a_delegation | `TOOL_CALL_START` | Cross-agent A2A task; closer also synthesizes `TOOL_CALL_RESULT` |
+| file modification | `STATE_DELTA` (RFC 6902) against a fleet `STATE_SNAPSHOT` | |
+| error | `RUN_ERROR` | |
+| agent-authored UI | `GENERATIVE_UI` | |
+
+[1] **L1 Cleanup A (TOOL_CALL lifecycle):** Handoff records with
+`orchestration_type` of `handoff` or `assign` now map to `TOOL_CALL_START`
+(previously all handoffs mapped to `TEXT_MESSAGE_CONTENT`). The
+`ToolCallLifecycleTracker` correlates these opens with receiver terminal
+completions and synthesizes exactly one `TOOL_CALL_END` per open. For
+`a2a_delegation` opens, a `TOOL_CALL_RESULT` is also synthesized before the
+`TOOL_CALL_END`. This ensures AG-UI clients see a well-formed tool-call
+lifecycle (open/result/end) rather than orphaned starts.
 
 On connect the server emits a full `STATE_SNAPSHOT` so any client hydrates its
 projection, then keeps it current with minimal RFC 6902 `STATE_DELTA` patches
@@ -105,6 +115,59 @@ reconnects automatically and the dropped records are replayed exactly once via
 `Last-Event-ID` (above). The durable record behind the replay is the in-process
 ring buffer (`event_log_service`). (The MCP-Apps `/events` stream keeps its
 legacy drop-on-slow behaviour and backfills via `cao_fetch_history`.)
+
+## Replay contract (full specification)
+
+The replay mechanism is deterministic and designed for safe, idempotent reconnects:
+
+### Cursor precedence
+
+1. **`?since=<ISO-8601>`** -- explicit timestamp lower bound. Must be a valid
+   ISO-8601 string; malformed values produce HTTP 400 before any streaming starts.
+2. **`Last-Event-ID` header** -- native EventSource automatic cursor. Used only
+   when `?since=` is absent.
+3. **Neither** -- no replay; only the live stream is emitted.
+
+### Validation
+
+The `?since=` parameter is validated as ISO-8601 using `datetime.fromisoformat()`
+**before** the streaming response begins. Invalid values return `400 Bad Request`
+with a descriptive error. This prevents malformed cursors from being silently
+swallowed inside the failure-isolated replay block.
+
+### Over-delivery and deduplication (Seen-Set Dedup)
+
+The live subscription is registered **before** history replay begins. This means
+events published during the replay-to-live handoff are buffered in the subscriber
+queue. The stream maintains a `replayed_ids` set to deduplicate the overlap:
+events that appear in both the replay batch and the live queue are emitted only
+once (from replay). This guarantees neither gaps nor duplicates.
+
+### Snapshot ordering
+
+On every connection (fresh or reconnect), the server emits a full
+`STATE_SNAPSHOT` after the replay batch and before the first live `STATE_DELTA`.
+A client must receive the snapshot to hydrate its projection before it can
+correctly apply RFC-6902 patches.
+
+### Tool-call lifecycle across reconnects
+
+The `ToolCallLifecycleTracker` is instantiated per-connection. On reconnect with
+replay, the tracker processes replayed records first (rebuilding its open-call
+map), then continues with live events. Because the tracker is deterministic
+(same inputs produce same outputs), a replay produces the same synthesized frames
+as the original stream -- no duplicate closers, no orphan frames.
+
+### CAO extension status
+
+| Feature | Status | Notes |
+|---|---|---|
+| `?since=` ISO-8601 validation | Shipped | 400 on malformed |
+| `Last-Event-ID` replay | Shipped | Native EventSource compatible |
+| Seen-Set dedup | Shipped | Zero duplicates on reconnect |
+| Overflow-as-gap signal | Shipped | Stream closes; client reconnects |
+| `TOOL_CALL_END` lifecycle synthesis | Shipped | Deterministic under replay |
+| Short-lived ticket handshake | Follow-up | `POST /agui/v1/ticket` TBD |
 
 ## Generative UI
 
