@@ -934,10 +934,26 @@ async def agui_stream(
     else:
         scopes = [SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN]
 
+    # Validate ?since= as ISO-8601 before streaming starts (L1 Cleanup B).
+    # A malformed value must produce HTTP 400 immediately rather than being
+    # swallowed inside the failure-isolated replay block.
+    if since:
+        try:
+            # Python 3.10 fromisoformat() does not handle trailing 'Z';
+            # normalize it to '+00:00' for cross-version compatibility.
+            _since_normalized = since.replace("Z", "+00:00") if since.endswith("Z") else since
+            datetime.fromisoformat(_since_normalized)
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid ISO-8601 timestamp for 'since': {since!r}",
+            )
+
     from fastapi.responses import StreamingResponse
 
     from cli_agent_orchestrator.clients.database import list_terminals_by_session
     from cli_agent_orchestrator.services import session_service
+    from cli_agent_orchestrator.services.agui.lifecycle_tracker import ToolCallLifecycleTracker
     from cli_agent_orchestrator.services.agui_stream import (
         state_delta_frame,
         state_snapshot_frame,
@@ -982,6 +998,7 @@ async def agui_stream(
         # events on an open connection) so the client reconnects with
         # Last-Event-ID and replays the dropped records exactly once (F2).
         sub = bus.register(overflow_close=True)
+        tracker = ToolCallLifecycleTracker()
         try:
             replayed_ids: set = set()
 
@@ -1003,7 +1020,8 @@ async def agui_stream(
                         if rid is not None:
                             replayed_ids.add(rid)
                         rtype, rdata = to_agui_event(record)
-                        yield _sse(rid, rtype, rdata)
+                        for ftype, fdata in tracker.feed(record, (rtype, rdata)):
+                            yield _sse(rid, ftype, fdata)
             except Exception:
                 logger.warning("agui_stream: history replay failed", exc_info=True)
 
@@ -1031,7 +1049,8 @@ async def agui_stream(
                     replayed_ids.discard(rid)
                     continue
                 agui_type, data = to_agui_event(event)
-                yield _sse(rid, agui_type, data)
+                for ftype, fdata in tracker.feed(event, (agui_type, data)):
+                    yield _sse(rid, ftype, fdata)
 
                 # Recompute the fleet snapshot and emit a STATE_DELTA when it
                 # moved. NB: recomputes on every event; a debounce/cache is a
@@ -1047,6 +1066,10 @@ async def agui_stream(
                     prev_snapshot = curr
                 except Exception:
                     logger.warning("agui_stream: STATE_DELTA computation failed", exc_info=True)
+
+            # Session end: synthesize closers for any remaining open tool calls.
+            for ftype, fdata in tracker.close_all():
+                yield _sse(None, ftype, fdata)
         finally:
             bus.unregister(sub)
 
