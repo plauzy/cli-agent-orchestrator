@@ -1,69 +1,131 @@
 # Design Document: AG-UI L2 Construct Library (Phase 2)
 
 > Tracking issue: awslabs/cli-agent-orchestrator **#458** (AG-UI Phase 2 — L2 constructs).
-> Builds on the already-merged **L1 adapter** (issue #386 acceptance criteria). This
-> document does **not** re-design L1; it composes purely over the existing L1 stream
-> and emit path.
+> Builds on the already-merged **L1 adapter** (PR #436). This revision supersedes the
+> initial draft after a grounding audit against **ag-ui main @ `b646b46`** and
+> **cli-agent-orchestrator main @ `1b00753`** — see `audit.md` for the
+> finding-by-finding evidence trail. Every protocol claim below cites the source of
+> truth it was verified against.
 
 ## Overview
 
-CAO's merged **L1 AG-UI adapter** turns the fleet's six normalized event primitives
-into AG-UI typed events on a single default-off SSE surface (`GET /agui/v1/stream` +
-`POST /agui/v1/emit_ui`), with a metadata-only privacy boundary, a shared-state
-`STATE_SNAPSHOT`/`STATE_DELTA` channel, a closed generative-UI allow-list, and
-reconnect/overflow resilience. L1 is deliberately *primitive*: it is a stateless,
-total mapping from one event record to one `(type, data)` pair plus two pure
-snapshot-framing helpers.
+CAO's merged **L1 AG-UI adapter** maps the fleet's normalized event primitives onto
+AG-UI-typed frames over a default-off SSE surface (`GET /agui/v1/stream` +
+`POST /agui/v1/emit_ui`), with a metadata-only privacy boundary, a
+`STATE_SNAPSHOT`/`STATE_DELTA` shared-state channel, a closed generative-UI
+allow-list, and reconnect/overflow resilience.
 
-**Phase 2 (this spec)** adds a small library of **named, subclassable L2 constructs**
-layered *over* that L1 surface. Each construct is a plain Python class that consumes
-the L1 stream (or the pure `to_agui_event` / snapshot helpers) and, where it produces
-output, does so exclusively through the existing `emit_ui` / event-bus path. There is
-**no bespoke SSE wiring in the app layer**: constructs never open sockets, never touch
-`SseBus` framing, and never widen the privacy boundary. They are composed abstractions
-that encode *recurring multi-agent UX patterns* (a supervisor dashboard, a handoff
-timeline, human-in-the-loop approvals, cross-provider shared state) so that an
-application author gets them by subclassing rather than by re-deriving the wire
-protocol.
+**Phase 2 (this spec)** adds:
 
-Four constructs are in scope, each shipping with documentation and a runnable example:
+1. A library of **named, subclassable L2 constructs** over that surface —
+   `SupervisorDashboardStream`, `MultiAgentSessionTimeline`,
+   `AgentHandoffWithApproval`, `CrossProviderStateSync` — each with docs and a
+   runnable example.
+2. The **L1 cleanups** from #458: a completed `TOOL_CALL_*` lifecycle (Cleanup A)
+   and a documented, hardened replay contract (Cleanup B).
+3. The piece the audit showed both AC3 and AC5 actually require: a
+   **protocol-faithful run plane** (`POST /agui/v1/run`, Cleanup C) that speaks the
+   stock AG-UI wire dialect — including the **interrupt lifecycle that is now
+   first-class on ag-ui main** (`RUN_FINISHED.outcome` + `RunAgentInput.resume`).
 
-1. **`SupervisorDashboardStream`** — a session/terminal hierarchy plus a supervisor
-   snapshot kept current with rolling `STATE_DELTA`s.
-2. **`MultiAgentSessionTimeline`** — a first-class, ordered handoff/delegation timeline
-   derived from `TOOL_CALL_*` and `TEXT_MESSAGE_CONTENT` frames.
-3. **`AgentHandoffWithApproval`** — bidirectional human-in-the-loop: it maps a real
-   provider permission/trust prompt onto AG-UI's interrupt lifecycle with
-   **provider-namespaced reasons** and resumes the live provider from a browser
-   decision (approve / deny / edit).
-4. **`CrossProviderStateSync`** — shared fleet state validated to converge across
-   **≥3 providers** (`kiro_cli`, `claude_code`, `codex`).
+### The two-plane model (the audit's central correction)
 
-Two of these depend on **L1 cleanups** that this spec also owns (a completed
-`TOOL_CALL_*` lifecycle, an explicit `?since=` + client-dedup replay contract on the
-stream, and a stock-client zero-adapter live demo). Those cleanups are scoped narrowly
-to what the L2 constructs require and are called out explicitly below.
+The initial draft assumed a stock AG-UI client could consume `GET /agui/v1/stream`.
+It cannot, for three verified reasons: the stock SSE parser reads **only `data:`
+lines** and ignores `event:`/`id:` (`ag-ui client/src/transform/sse.ts:5-12,66-89`);
+stock payloads must be **camelCase with a `type` field** (Python encoder
+`ag_ui/encoder/encoder.py:9-32`; zod `EventSchemas.parse` on receive), while CAO
+emits snake_case with the type only in the SSE `event:` line; and `HttpAgent` is
+**POST-only** with a `RunAgentInput` body (`client/src/agent/http.ts:14-84`). The
+stream is also not lifecycle-legal for the stock verifier
+(`client/src/verify/verify.ts`): bare `TEXT_MESSAGE_CONTENT`, unclosed
+`TOOL_CALL_START`, events outside a run, and the non-spec `GENERATIVE_UI` type.
+
+So L2 works across **two explicit planes**:
+
+| Plane | Endpoint | Dialect | Consumers |
+|---|---|---|---|
+| **Ambient** (existing, unchanged wire apart from Cleanup A) | `GET /agui/v1/stream` | CAO's AG-UI dialect: named SSE events, `id:` cursors, snake_case data, `GENERATIVE_UI`, `?since=`/`Last-Event-ID` replay (a CAO extension — no stock SDK implements resumption) | CAO-aware clients; the L2 folding constructs via `AguiStreamReader` |
+| **Run** (new, Cleanup C) | `POST /agui/v1/run` | Stock wire dialect: `data:`-only camelCase frames via the official `ag-ui-protocol` encoder, lifecycle-legal ordering, interrupts via `RUN_FINISHED.outcome` / `resume[]` | Unmodified `@ag-ui/client` / CopilotKit / Dojo |
+
+Constructs fold the ambient plane. The run plane is a *projection* of the same
+event source rendered in the stock dialect, and the carrier of the protocol-true
+interrupt lifecycle.
 
 ### Goals
 
-- Ship four subclassable constructs that compose purely over L1 (no new SSE plumbing).
-- Preserve L1's invariants *through* L2: privacy (no message bodies on the wire),
-  default-off enablement, totality of the mapping, and reconnect losslessness.
-- Make human-in-the-loop approval work against a **real** provider prompt, resumable
-  from a stock browser client.
-- Prove cross-provider shared-state convergence across at least three heterogeneous
-  providers.
+- Ship four subclassable constructs composing purely over the L2 seams (no bespoke
+  SSE plumbing in application code; one sanctioned `AguiStreamReader` in the library).
+- Preserve L1's invariants through L2: privacy (no message bodies), default-off
+  enablement, totality, reconnect losslessness via Seen_Set_Dedup.
+- Make human-in-the-loop approval work against a **real** provider prompt,
+  resumable from a browser via the thin REST route **and** via the protocol's own
+  interrupt lifecycle on the run plane.
+- Prove cross-provider shared-state convergence across `kiro_cli`, `claude_code`,
+  `codex`.
 
-### Non-Goals (explicitly out of scope for this spec)
+### Non-Goals
 
-- **Phase 3 / L3**: the reference dashboard application, authenticated *team* mode, and
-  the AG-UI Dojo ecosystem listing. L2 provides the constructs an L3 dashboard would
-  consume; it does not build that dashboard.
-- **A2A / Agent Card / ACP modules**: a different protocol surface, not part of the
-  #386/#458 acceptance criteria. (Note: the *existing* `a2a_delegation` CAO primitive
-  is in scope only insofar as it drives `TOOL_CALL_*` frames — this is about CAO's
-  internal delegation semantics, not the external A2A protocol.)
-- Re-designing anything in L1 beyond the three named cleanups below.
+- Phase 3 / L3 (reference dashboard app, authenticated team mode, Dojo ecosystem
+  listing). L2 provides what an L3 dashboard would consume.
+- A2A / Agent Card / ACP modules (different protocol surface). The *internal*
+  `a2a_delegation` event kind is in scope only as a forward-provisioned mapping —
+  ground truth: it currently has **no producer** (`services/event_primitives.py:40-72`).
+- Re-designing L1 beyond the named cleanups.
+
+---
+
+## Grounding notes (source-of-truth pins)
+
+Facts this design depends on, verified 2026-07-17:
+
+**ag-ui main @ `b646b46`:**
+- EventType enum has 33 values, identical across TS and Python SDKs
+  (`sdks/typescript/packages/core/src/events.ts:12-61`,
+  `sdks/python/ag_ui/core/events.py:42-78`). `GENERATIVE_UI` is not among them.
+- Interrupts: `RunFinishedEvent.outcome = {type:"success"} | {type:"interrupt",
+  interrupts: Interrupt[]}`; `Interrupt = {id, reason, message?, toolCallId?,
+  responseSchema?, expiresAt?, metadata?}`; resumption via `RunAgentInput.resume:
+  [{interruptId, status:"resolved"|"cancelled", payload?}]`
+  (`core/src/events.ts:233-262`, `core/src/types.ts:193-219`). Contract rules in
+  `docs/concepts/interrupts.mdx`: resume must cover ALL open interrupts; replays
+  idempotent; expiry → `RUN_ERROR`; emit `STATE_SNAPSHOT`/`MESSAGES_SNAPSHOT`
+  **before** the interrupting `RUN_FINISHED`; custom reasons are
+  `<framework>:<name>`-namespaced, `core:` reserved; approve-with-edits payload is
+  `{approved: boolean, editedArgs?}`.
+- Stock client: POST-only `HttpAgent`; SSE parsing is `data:`-line-only; event
+  ordering enforced by `verify.ts` (RUN_STARTED first, no events after finish,
+  START/END bracketing by id, no finish with open messages/tool-calls/steps).
+- State deltas: RFC 6902 via `fast-json-patch`, atomic `applyPatch(...,
+  validate=true, mutate=false)`; on failure the delta is **dropped with a warning**
+  and the run continues (`client/src/apply/default.ts:537-568`).
+
+**CAO main @ `1b00753`:**
+- Adapter mapping and constants: `services/agui_stream.py` (`_from_primitive`
+  :125-211; `GENERATIVE_UI_COMPONENTS` = {approval_card, choice_prompt,
+  diff_summary, progress, metric, agent_card} :89-98; 8192-byte props cap :102).
+- Stream endpoint: `api/main.py:860-1053` — register-before-replay, `?since=`
+  (ISO-8601, exclusive) precedence over `Last-Event-ID` (uuid cursor,
+  over-delivers when evicted/unknown), replayed frames carry `id:`, state frames
+  do not; snapshot emitted after replay, then per-event deltas
+  (`build_dashboard_snapshot`/`diff_snapshot`, `services/ui_state_service.py`).
+- Event records: `{id: uuid4, kind, terminal_id, session_name, timestamp, detail}`;
+  ring `RING_CAPACITY=500`, TTL 24h (`services/event_log_service.py`).
+- Orchestration ground truth: `handoff`/`assign`/`send_message` all normalize to
+  kind `handoff` discriminated by `detail.orchestration_type`; `a2a_delegation` and
+  `file_mod` have no producers (`services/event_primitives.py`, grep-verified).
+- Status/answer paths: `TerminalStatus.WAITING_USER_ANSWER`
+  (`models/terminal.py:13-21`); transitions publish only to the internal EventBus
+  topic `terminal.{id}.status` (`services/status_monitor.py:222`) — **never** to
+  the fleet EventLog; answers travel via `POST /terminals/{id}/input`
+  (`api/main.py:1659`) and `POST /terminals/{id}/key` (:1693); providers launch in
+  auto-approve mode by default (claude_code `--dangerously-skip-permissions` unless
+  the profile sets `permissionMode`, kiro `--trust-all-tools`, codex `--yolo`).
+- Scopes `cao:read|write|admin` (`security/auth.py`); `emit_ui` floor is
+  write/admin; surface gate `agui_surface_enabled()` (`services/agui_enablement.py`).
+- `hypothesis>=6.0` already in dev dependencies; `requests` already a runtime
+  dependency; **no** JSON-Patch library is present (constructs ship a small strict
+  apply helper — `diff_snapshot` emits only `add`/`remove`/`replace` ops).
 
 ---
 
@@ -78,118 +140,106 @@ graph TD
         EL[event_log_service.EventLog]
         BUS[sse_bus.SseBus]
         US[ui_state_service<br/>build_dashboard_snapshot / diff_snapshot]
-        TS[terminal_service.send_input]
-        PROV[providers.*<br/>get_status -> WAITING_USER_ANSWER]
+        TS["terminal_service.send_input / send_special_key"]
+        SM["status_monitor -> terminal.*.status (internal EventBus)"]
     end
 
-    subgraph L1["L1 adapter (merged — do NOT re-design)"]
-        MAP[agui_stream.to_agui_event]
-        SNAP[agui_stream.state_snapshot_frame / state_delta_frame]
+    subgraph L1["L1 surface (merged; Cleanups A+B touch here)"]
+        MAP["agui_stream.to_agui_event<br/>+ ToolCallLifecycleTracker (NEW)"]
         STREAM[GET /agui/v1/stream]
         EMIT[POST /agui/v1/emit_ui]
     end
 
+    subgraph RUNPLANE["Run plane (NEW — Cleanup C)"]
+        RUN["POST /agui/v1/run<br/>stock dialect via ag-ui-protocol encoder<br/>RUN_FINISHED outcome=interrupt / resume[]"]
+    end
+
     subgraph L2["L2 constructs (THIS spec)"]
-        BASE[AguiConstruct base]
+        READER[AguiStreamReader]
+        BASE[AguiConstruct base + UiEmitter]
         SUP[SupervisorDashboardStream]
         TL[MultiAgentSessionTimeline]
         APPR[AgentHandoffWithApproval]
         SYNC[CrossProviderStateSync]
+        BRIDGE[ApprovalBridge]
     end
 
-    subgraph Clients["AG-UI clients (stock, zero-adapter)"]
-        DOJO[AG-UI Dojo / CopilotKit]
-        VIEW[EventSource viewer]
+    subgraph Clients
+        DOJO["Stock AG-UI client<br/>(@ag-ui/client / CopilotKit)"]
+        VIEW[EventSource viewer / CAO-aware apps]
     end
 
-    EP --> EL --> BUS
-    US --> SNAP
-    BUS --> MAP --> STREAM
-    EMIT --> BUS
-    MAP --> SNAP
-
-    BASE --> SUP & TL & APPR & SYNC
-    STREAM -. consumed by .-> BASE
-    SNAP -. reused by .-> SUP & SYNC
-    MAP -. reused by .-> TL
-    APPR -->|decision resume| TS
-    PROV -->|prompt detected| APPR
-    APPR -->|interrupt frame| EMIT
-
-    STREAM --> DOJO & VIEW
+    EL --> BUS --> MAP --> STREAM
+    US --> STREAM
+    EMIT --> EL
+    STREAM --> VIEW
+    STREAM -. frames .-> READER --> SUP & TL & SYNC
+    SM -->|status transition| BRIDGE --> APPR
+    APPR -->|approval_card / resolution| EMIT
+    APPR -->|answer keystrokes| TS
+    BUS --> RUN
+    US --> RUN
+    APPR <-->|"interrupts / resume[]"| RUN
+    RUN --> DOJO
 ```
 
-**Key architectural rule (the L2 contract):** every L2 construct is a pure composition
-over L1 — it either (a) *reads* AG-UI frames off `/agui/v1/stream` and folds them into a
-projection, or (b) *writes* through `emit_ui` / the event bus, or both. No construct
-adds a route, opens an SSE connection of its own inside the app, or serializes SSE
-framing. This keeps the privacy boundary and totality guarantees inherited from L1
-intact by construction.
+**The L2 contract:** a construct either folds frames (`handle_frame`) or writes
+through the emit path (`emit`) — never both wire directions itself, never raw SSE.
+The **only** L2 component that touches the wire is `AguiStreamReader` (read) and
+`UiEmitter` (write), both owned by the library, so application authors compose
+`reader → construct → emitter` without protocol knowledge.
 
 ### Where L2 code lives
 
 ```
 src/cli_agent_orchestrator/services/agui/
-├── __init__.py               # re-exports the four constructs + base
-├── base.py                   # AguiConstruct (base class) + shared projection helpers
+├── __init__.py               # re-exports constructs, base, reader, emitters
+├── base.py                   # AguiConstruct + UiEmitter(s) + assert_no_body + strict JSON-Patch apply
+├── stream_reader.py          # AguiStreamReader (requests-based SSE reader, since/Last-Event-ID)
 ├── supervisor_dashboard.py   # SupervisorDashboardStream
 ├── session_timeline.py       # MultiAgentSessionTimeline
-├── handoff_approval.py       # AgentHandoffWithApproval + provider-namespaced reasons
-└── cross_provider_sync.py    # CrossProviderStateSync
+├── handoff_approval.py       # classify_reason + Interrupt + AgentHandoffWithApproval
+├── approval_bridge.py        # ApprovalBridge (internal-EventBus subscriber, lifespan-owned)
+└── run_plane.py              # run-plane event projection (used by the /agui/v1/run route)
 ```
 
-L1 cleanups touch the *existing* files only: `services/agui_stream.py` (TOOL_CALL
-lifecycle), `api/main.py` (`?since=` contract), and `docs/agui.md` (documentation).
-Approval resume reuses `services/terminal_service.send_input`. Examples live under
-`examples/agui-*/` following the existing `run.sh` / `showcase.sh` convention.
+L1 cleanups touch existing files: `services/agui_stream.py` (Cleanup A mapping +
+`ToolCallLifecycleTracker`), `api/main.py` (`?since=` 400, resume route, run route,
+lifespan wiring for the bridge), `docs/agui.md`, and the bundled EventSource viewer
+(updated for the corrected handoff mapping). Examples live under `examples/agui-*/`
+with `run.sh` / `showcase.sh`. Tests under `test/services/agui/` and `test/api/`.
 
-### Sequence: SupervisorDashboardStream hydrate + rolling deltas
+### Sequence: approval, both resume paths
 
 ```mermaid
 sequenceDiagram
-    participant C as AG-UI client
-    participant S as GET /agui/v1/stream
-    participant SUP as SupervisorDashboardStream
-    participant US as ui_state_service
-
-    C->>S: connect (EventSource)
-    S->>US: build_dashboard_snapshot(sessions, terminals)
-    US-->>S: DashboardSnapshot
-    S-->>C: STATE_SNAPSHOT {snapshot}
-    Note over SUP: fold snapshot -> supervisor projection
-    loop each fleet event
-        S->>US: build_dashboard_snapshot(...) (recompute)
-        US->>US: diff_snapshot(prev, curr)
-        S-->>C: STATE_DELTA {delta: [RFC-6902 ops]}
-        Note over SUP: apply ops -> supervisor projection stays convergent
-    end
-```
-
-### Sequence: AgentHandoffWithApproval (bidirectional HITL)
-
-```mermaid
-sequenceDiagram
-    participant P as Provider (kiro_cli / claude_code / codex)
-    participant SM as StatusMonitor / get_status
+    participant P as Provider terminal
+    participant SM as StatusMonitor
+    participant BR as ApprovalBridge
     participant APPR as AgentHandoffWithApproval
-    participant EMIT as POST /agui/v1/emit_ui
-    participant STREAM as GET /agui/v1/stream
-    participant B as Browser (stock AG-UI client)
-    participant TS as terminal_service.send_input
+    participant EMIT as Emit_Path
+    participant AMB as GET /agui/v1/stream
+    participant RUN as POST /agui/v1/run
+    participant B as Browser
 
-    P->>SM: renders permission / trust prompt
-    SM-->>APPR: status == WAITING_USER_ANSWER (+ raw prompt text)
-    APPR->>APPR: classify -> namespaced reason<br/>e.g. "claude-code:permission_request"
-    APPR->>EMIT: approval_card (interrupt_id, reason, options) [metadata only]
-    EMIT->>STREAM: GENERATIVE_UI frame (+ interrupt marker)
-    STREAM-->>B: render approval card
-    B->>APPR: POST /agui/v1/interrupts/{id}/resume {decision, edited_text?}
-    APPR->>APPR: validate decision vs interrupt state (single resolution)
-    APPR->>TS: send_input(terminal_id, keystrokes for approve|deny|edit)
-    TS->>P: resume the live provider prompt
-    APPR->>EMIT: resolution frame (interrupt_id, outcome) [metadata only]
-    EMIT->>STREAM: STATE_DELTA / GENERATIVE_UI update
-    STREAM-->>B: card resolves
+    P->>SM: renders permission prompt
+    SM->>BR: terminal.{id}.status -> WAITING_USER_ANSWER
+    BR->>BR: capture prompt tail + provider
+    BR->>APPR: on_provider_waiting(...)
+    APPR->>APPR: classify_reason -> "claude-code:permission_request"
+    APPR->>EMIT: approval_card {interrupt_id, reason, summary<=256} [metadata only]
+    EMIT-->>AMB: GENERATIVE_UI frame
+    Note over RUN: streaming run observes the open interrupt
+    RUN-->>B: STATE_SNAPSHOT, then RUN_FINISHED outcome=interrupt [{id, reason, ...}]
+    alt REST path (simple browser)
+        B->>APPR: POST /agui/v1/interrupts/{id}/resume {decision, edited_text?}
+    else Protocol path (stock client)
+        B->>RUN: POST /agui/v1/run {resume:[{interruptId, status, payload:{approved, editedArgs?}}]}
+        RUN->>APPR: resume(id, decision)
+    end
+    APPR->>P: exactly-once answer via /terminals/{id}/input or /key
+    APPR->>EMIT: resolution intent {interrupt_id, outcome} [metadata only]
+    RUN-->>B: RUN_STARTED (new run) + continued projection
 ```
 
 ---
@@ -198,698 +248,544 @@ sequenceDiagram
 
 ### Base construct: `AguiConstruct`
 
-**Purpose**: the subclassable foundation shared by all four constructs. It owns the
-*composition seam* to L1 — how a construct receives AG-UI frames and how it emits — so
-subclasses only implement domain folding, never wire mechanics.
-
-**Interface**:
-
 ```python
 class AguiConstruct(ABC):
-    """Base class for L2 constructs composed purely over the L1 AG-UI surface.
+    """Base class for L2 constructs composed over the L1 AG-UI surface.
 
-    A construct is fed AG-UI (type, data) frames via ``handle_frame`` and folds
-    them into an internal projection. Constructs that produce output do so ONLY
-    through ``emit`` (which routes to POST /agui/v1/emit_ui / the event bus) —
-    never by writing SSE bytes directly. This keeps the L1 privacy boundary and
-    the totality of the mapping intact for every subclass.
+    Frames arrive through ``handle_frame`` (total: unknown types are ignored);
+    output leaves ONLY through ``emit`` (validated against the same allow-list,
+    serializability, and 8192-byte guards as POST /agui/v1/emit_ui). Constructs
+    never parse SSE, open sockets, or add routes.
     """
 
     def __init__(self, *, emitter: "UiEmitter | None" = None) -> None: ...
 
     @abstractmethod
-    def handle_frame(self, agui_type: str, data: dict) -> None:
-        """Fold one AG-UI frame into this construct's projection. Total: an
-        unrecognized type is ignored, never raised on."""
+    def handle_frame(self, agui_type: str, data: dict, event_id: str | None = None) -> None: ...
 
     @abstractmethod
-    def projection(self) -> dict:
-        """Return the current JSON-serializable projection (metadata only)."""
+    def projection(self) -> dict: ...
 
     def emit(self, component: str, props: dict,
              terminal_id: str | None = None,
-             session_name: str | None = None) -> None:
-        """Publish an allow-listed generative-UI intent via the L1 emit path.
-        Refuses off-list components and non-serializable/oversized props BEFORE
-        the bus (mirrors emit_ui server-side validation)."""
+             session_name: str | None = None) -> None: ...
 
     @staticmethod
-    def assert_no_body(data: dict) -> None:
-        """Defense-in-depth: assert a frame carries no message-body field."""
+    def assert_no_body(data: dict) -> None: ...
 ```
 
-**Responsibilities**:
-- Provide the single read seam (`handle_frame`) and write seam (`emit`).
-- Enforce the metadata-only contract at the L2 boundary (`assert_no_body`, emit
-  validation) so a subclass cannot accidentally widen it.
-- Remain framework-agnostic: no FastAPI, no `SseBus` imports in `base.py` beyond the
-  thin emitter indirection.
+- `handle_frame` takes the optional `event_id` third argument so constructs can
+  apply **Seen_Set_Dedup** (ids are uuid4 — membership checks, never ordering).
+- Base provides `apply_json_patch_strict(doc, ops) -> dict | None`: pure,
+  non-mutating RFC 6902 apply for `add`/`remove`/`replace` (all `diff_snapshot`
+  emits); returns `None` on any failure so callers drop the delta — the same
+  observable behavior as the stock client's `fast-json-patch` validate-then-drop
+  (`apply/default.ts:537-568`).
 
-**`UiEmitter`** is a tiny indirection so constructs are unit-testable without a running
-server: the production emitter calls the same validation + `event_log.append` +
-`bus.publish` path that `POST /agui/v1/emit_ui` uses; a test emitter records intents.
+**`UiEmitter`** — one validation core, three transports:
+- `InProcessUiEmitter`: same path as the route — `event_log.append("other",
+  detail={"event_type":"agent_ui","ui":{component,props}})` + bus publish; refuses
+  (raises) when `agui_surface_enabled()` is false (server-resident constructs).
+- `HttpUiEmitter`: `requests.post(f"{base}/agui/v1/emit_ui", ...)`, mapping HTTP
+  400 to `ValueError` (out-of-process constructs / examples).
+- `RecordingUiEmitter`: records intents, publishes nothing (tests).
+
+Validation (allow-list membership, JSON-serializability, ≤ 8192 UTF-8 bytes,
+props never mutated) runs in the base **before** any transport, importing
+`GENERATIVE_UI_COMPONENTS` and the size constant from `services/agui_stream` —
+no duplicated component set.
+
+### `AguiStreamReader` (the one sanctioned wire reader)
+
+```python
+class AguiStreamReader:
+    """Reads GET /agui/v1/stream and yields (event_id, agui_type, data).
+
+    - Parses named SSE frames (id:/event:/data:) — the CAO dialect.
+    - Sends ?since= (ISO-8601) or Last-Event-ID on connect; tracks last_event_id.
+    - reconnect() resumes with Last-Event-ID = last seen id; callers fold with
+      Seen_Set_Dedup so the overlap is harmless.
+    - Uses `requests` (already a CAO dependency); no new runtime deps.
+    """
+    def __init__(self, base_url: str, *, since: str | None = None,
+                 access_token: str | None = None, timeout: float = 30.0) -> None: ...
+    def frames(self) -> Iterator[tuple[str | None, str, dict]]: ...
+    @property
+    def last_event_id(self) -> str | None: ...
+```
+
+Examples compose: `for event_id, t, d in reader.frames(): construct.handle_frame(t, d, event_id)`.
 
 ### Construct 1: `SupervisorDashboardStream`
 
-**Purpose**: maintain a supervisor-oriented projection of the fleet — the
-session→terminal hierarchy plus a rolling supervisor snapshot — kept current from the
-L1 `STATE_SNAPSHOT` on connect and each subsequent `STATE_DELTA`.
-
-**Interface**:
+Folds `STATE_SNAPSHOT` (deep-copy replace) and `STATE_DELTA` (strict
+apply-else-drop) into the fleet projection, and id-bearing `STEP_*`/`RUN_*`/
+`TOOL_CALL_*` frames into rollup counters with Seen_Set_Dedup.
 
 ```python
 class SupervisorDashboardStream(AguiConstruct):
-    def handle_frame(self, agui_type: str, data: dict) -> None:
-        """STATE_SNAPSHOT -> replace projection; STATE_DELTA -> apply RFC-6902
-        ops; RUN_*/STEP_* -> update per-session/per-terminal supervisor rollup."""
-
     def hierarchy(self) -> dict:
-        """{session_name: {terminals: [...], status, counts}} view."""
-
+        """{session_name: {"status": str, "terminal_ids": [...], "terminal_count": int}}"""
     def supervisor_snapshot(self) -> dict:
-        """Aggregate rollup: active sessions, per-provider terminal counts,
-        last activity — all derived from folded frames, metadata only."""
+        """{"active_sessions": int, "counts": {...}, "by_provider": {provider: int},
+            "waiting_terminals": [terminal_id, ...],
+            "last_activity": {"timestamp": str | None, "event_id": str | None}}"""
 ```
 
-**Responsibilities**:
-- Reuse `ui_state_service.build_dashboard_snapshot` / `diff_snapshot` semantics by
-  *applying* the deltas L1 already emits (no re-diffing on the client side).
-- Never recompute from a data source of its own; the L1 stream is the sole input.
+Grounded in the real snapshot shape (`ui_state_service.py:51-105`):
+`sessions[] = {id, name, status}`, `terminals[] = {id, session_name, provider,
+agent_profile, window, status, last_active}`, `counts`, `scopes`. `by_provider`
+counts **every** provider observed (10 provider ids exist); Supported_Providers
+matter only to the validation suite. No fetching of its own — folded frames are
+the sole input.
 
 ### Construct 2: `MultiAgentSessionTimeline`
-
-**Purpose**: turn the flat AG-UI event stream into a first-class, causally-ordered
-timeline of handoffs and delegations between agents.
-
-**Interface**:
 
 ```python
 @dataclass(frozen=True)
 class TimelineEntry:
-    id: str
-    kind: Literal["handoff", "delegation"]
+    id: str                                  # tool_call_id (delegation) or event_id (message)
+    kind: Literal["delegation", "message"]
+    orchestration_type: str | None           # "handoff" | "assign" | "send_message" | "a2a_delegation"
     sender: str | None
     receiver: str | None
-    tool_call_id: str | None      # set for delegation (TOOL_CALL_* correlation)
+    tool_call_name: str | None
     started_at: str
-    ended_at: str | None          # set when TOOL_CALL_END/RESULT arrives
-    status: Literal["open", "completed", "errored"]
+    ended_at: str | None
+    status: Literal["open", "completed", "failed"]
 
 class MultiAgentSessionTimeline(AguiConstruct):
-    def handle_frame(self, agui_type: str, data: dict) -> None:
-        """TEXT_MESSAGE_CONTENT (handoff) -> append entry;
-        TOOL_CALL_START (a2a_delegation) -> open entry keyed by tool_call_id;
-        TOOL_CALL_END/TOOL_CALL_RESULT -> close the matching open entry."""
-
     def entries(self) -> list[TimelineEntry]: ...
 ```
 
-**Responsibilities**:
-- Correlate `TOOL_CALL_START` → `TOOL_CALL_END`/`TOOL_CALL_RESULT` by `tool_call_id`
-  (this is why the L1 TOOL_CALL lifecycle cleanup is a dependency — see below).
-- Preserve ordering by event id / timestamp; tolerate out-of-order or missing closers
-  (entry stays `open`), never raising.
+Folding rules (post-Cleanup A wire):
+- `TOOL_CALL_START` → open delegation entry keyed by `tool_call_id` (duplicate
+  START for a known id: no-op).
+- `TOOL_CALL_END` / `TOOL_CALL_RESULT` with a known open id → `completed` (or
+  `failed` on a failure disposition) + `ended_at`; unknown id → no-op.
+- `TEXT_MESSAGE_CONTENT` with sender/receiver metadata → `message` entry;
+  `delta` never stored (it is empty on the wire by L1 construction, and the
+  construct must not store it regardless).
+- Entries append in arrival order; exposed ordering `(started_at, id)` is a
+  deterministic tiebreak only. Retention cap: constructor arg, default 1,000
+  (the construct's own bound — the L1 ring is 500 and is *not* the cap's source).
 
-### Construct 3: `AgentHandoffWithApproval`
-
-**Purpose**: bidirectional human-in-the-loop. Map a **real** provider permission/trust
-prompt onto AG-UI's interrupt lifecycle and resume the live provider from a browser
-decision.
-
-**Interface**:
+### Construct 3: `AgentHandoffWithApproval` (+ `ApprovalBridge`)
 
 ```python
 class ApprovalDecision(str, Enum):
-    APPROVE = "approve"
-    DENY = "deny"
-    EDIT = "edit"        # approve-with-modification (edited command / answer text)
+    APPROVE = "approve"; DENY = "deny"; EDIT = "edit"
 
 @dataclass
 class Interrupt:
-    id: str
-    terminal_id: str
-    session_name: str | None
-    provider: str
-    reason: str                    # PROVIDER-NAMESPACED, e.g. "kiro:trust_prompt"
-    options: list[str]             # decisions the client may offer
+    """Aligned to ag-ui core's Interrupt shape (types.ts:193-201)."""
+    id: str                      # fresh uuid4 (originating event id lives in metadata)
+    reason: str                  # "<namespace>:<local_name>"
+    message: str                 # redacted summary, <= 256 chars
+    metadata: dict               # {provider, terminal_id, session_name, source_event_id?}
+    options: list[str]           # decisions the provider prompt supports
     created_at: str
+    expires_at: str | None = None
     resolved: bool = False
-    outcome: ApprovalDecision | None = None
+    outcome: str | None = None   # "approve" | "deny" | "edit" | "expired"
 
 class AgentHandoffWithApproval(AguiConstruct):
-    def on_provider_waiting(self, terminal_id: str, provider: str,
-                            raw_prompt: str,
-                            session_name: str | None = None) -> Interrupt:
-        """Called when a provider transitions to WAITING_USER_ANSWER. Classifies
-        the prompt into a namespaced reason, opens an Interrupt, and emits an
-        approval_card GENERATIVE_UI frame (metadata only — the prompt CATEGORY
-        and a redacted summary, never raw sensitive command text unless the
-        provider marks it safe)."""
-
+    def on_provider_waiting(self, terminal_id: str, provider: str, raw_prompt: str,
+                            session_name: str | None = None) -> Interrupt: ...
     def resume(self, interrupt_id: str, decision: ApprovalDecision,
-               edited_text: str | None = None) -> Interrupt:
-        """Resolve an open interrupt exactly once: validate state, translate the
-        decision into provider keystrokes, send_input() to the live terminal,
-        emit a resolution frame. Idempotent on an already-resolved interrupt
-        (returns the recorded outcome; never double-sends keystrokes)."""
-
+               edited_text: str | None = None) -> Interrupt: ...
+    def expire(self, terminal_id: str) -> Interrupt | None: ...
     def pending(self) -> list[Interrupt]: ...
 ```
 
-**Responsibilities**:
-- Classify a provider prompt into a **provider-namespaced reason** (see scheme below).
-- Own the interrupt lifecycle: `open → (approve|deny|edit) → resolved`, with exactly one
-  resolution per interrupt.
-- Translate a decision into provider-appropriate keystrokes and resume via
-  `terminal_service.send_input` (the existing, tested input path).
-- A new thin route `POST /agui/v1/interrupts/{id}/resume` wires the browser to `resume`;
-  it reuses the same auth (`cao:write`) and default-off gating as `emit_ui`.
+**`ApprovalBridge`** is the trigger the audit found missing (F6): status
+transitions never reach the fleet stream, so the bridge subscribes to the internal
+EventBus (`terminal.*.status`, the same topic `InboxService` consumes,
+`services/inbox_service.py:34-175` is the wiring precedent), and:
+
+- on `→ WAITING_USER_ANSWER`: captures the prompt tail (rendered output via the
+  existing `terminal_service.get_output(mode=last)` path), resolves the provider
+  id from the terminal record, calls `on_provider_waiting`;
+- on leaving `WAITING_USER_ANSWER` with the interrupt still open: calls
+  `expire(terminal_id)` — which delivers **zero** keystrokes (audit F15) and emits
+  the expiration resolution intent;
+- runs only when `agui_surface_enabled()`; registered/stopped in the FastAPI
+  lifespan next to the other consumers (`api/main.py:509-513` precedent). The
+  approval registry is an app-scoped singleton shared by the bridge, the REST
+  resume route, and the run plane.
+
+**Decision → answer translation** reuses the existing, tested answer paths
+(`answer_user_prompt` → `POST /terminals/{id}/input`; `POST /terminals/{id}/key`
+for pickers) with a per-provider table validated against the providers' own
+detection patterns:
+
+| Provider / prompt | approve | deny | edit |
+|---|---|---|---|
+| claude_code picker (`↑/↓ to navigate`) | `Enter` (first option) | `Escape` | unsupported → validation error |
+| kiro_cli `[y/n/t]` & TUI permission | `y` | `n` | unsupported → validation error |
+| codex approval gate (`y/n`) | `y` | `n` | unsupported → validation error |
+| free-text prompts (provider accepts input) | n/a | n/a | edited_text (≤ 4,000 chars — the `answer_user_prompt` cap) via `/input` |
+
+Exactly-once delivery: the interrupt resolves under a lock before any keystroke is
+sent; a second `resume` (either path) returns the recorded outcome without
+re-sending. Expiry never sends. Registry bounds: resolved/expired evicted within
+300 s; max 1,000 entries, oldest resolved/expired first.
+
+**Reason classifier** (total, deterministic, never raises):
+
+| Provider | reason | Detected from (existing pattern) |
+|---|---|---|
+| `claude_code` | `claude-code:permission_request` | `WAITING_USER_ANSWER_PATTERN` (`↑/↓ to navigate`, `claude_code.py:79-81`) + permission phrasing |
+| `claude_code` | `claude-code:trust_prompt` | `TRUST_PROMPT_PATTERN` (`Yes, I trust this folder`, :82) |
+| `kiro_cli` | `kiro:permission_request` | legacy `Allow this action? [y/n/t]` (:183) or `TUI_PERMISSION_PATTERN` (:123-126) |
+| `kiro_cli` | `kiro:trust_prompt` | trust wording |
+| `codex` | `codex:approval_request` | `WAITING_PROMPT_PATTERN` (`^(?:Approve|Allow)…(y/n|yes/no)`, `codex.py:60`) |
+| `codex` | `codex:trust_prompt` | `allow Codex to work in this folder` (:80) |
+| *(any)* | `{ns}:unknown_prompt` | safe default |
+
+Namespace mapping `kiro_cli→kiro`, `claude_code→claude-code`, `codex→codex`,
+kebab-case otherwise; never `core:` (reserved by ag-ui, `interrupts.mdx:159-183`).
 
 ### Construct 4: `CrossProviderStateSync`
 
-**Purpose**: maintain one shared fleet-state projection fed by events originating from
-multiple heterogeneous providers, and validate that it **converges** to the same value
-regardless of provider mix or event interleaving — proven across `kiro_cli`,
-`claude_code`, and `codex`.
-
-**Interface**:
-
 ```python
 class CrossProviderStateSync(AguiConstruct):
-    def handle_frame(self, agui_type: str, data: dict) -> None:
-        """STATE_SNAPSHOT -> set baseline; STATE_DELTA -> apply RFC-6902 ops.
-        Provider-agnostic: the ops are already normalized by L1, so a kiro_cli,
-        claude_code, or codex origin folds identically."""
-
     def shared_state(self) -> dict: ...
-
-    def converges_with(self, authoritative_snapshot: dict) -> bool:
-        """True iff the folded shared_state is deep-equal to an authoritative
-        build_dashboard_snapshot of the same fleet (the convergence property)."""
+    def providers_seen(self) -> set[str]: ...   # from snapshot terminals[].provider
+    def converges_with(self, authoritative_snapshot: dict) -> bool: ...
 ```
 
-**Responsibilities**:
-- Apply RFC-6902 ops deterministically so that, for any ordering consistent with per-key
-  causal order, the folded state equals `build_dashboard_snapshot` of the same inputs.
-- Carry a `provider` tag on per-terminal entries so the validation can assert coverage of
-  ≥3 providers, without changing the wire shape.
+Snapshot → deep-copy replace; delta → strict apply-else-drop; Seen_Set_Dedup on
+id-bearing frames. The convergence claim is the **ordered-fold** property (audit
+F8): folding the per-connection stream (snapshot, then deltas diffed against the
+previous snapshot) — including any reconnect overlap — yields a state deep-equal
+to `build_dashboard_snapshot` of the same fleet. `providers_seen()` reads the
+`provider` field each snapshot terminal entry already carries
+(`ui_state_service.py:81-95`), so ≥3-provider coverage is assertable with no wire
+change.
+
+### Run plane: `POST /agui/v1/run` (Cleanup C)
+
+A thin route + `services/agui/run_plane.py` projection:
+
+- **Input**: `RunAgentInput` (camelCase; parsed with the official `ag-ui-protocol`
+  pydantic models). `threadId`/`runId` echoed into `RUN_STARTED`.
+- **Output framing**: official `EventEncoder` (`data:`-only, camelCase,
+  `exclude_none`) — byte-compatible with the stock parser.
+- **Projection** (lifecycle-legal per `verify.ts`): `RUN_STARTED` →
+  `STATE_SNAPSHOT` → live translation of fleet records: `STATE_DELTA`,
+  `STEP_STARTED/FINISHED`, complete `TOOL_CALL_START→END` (from the Cleanup A
+  tracker), `CUSTOM {name:"cao.generative_ui", value:{component,props}}` for
+  generative-UI intents, `CUSTOM {name:"cao.message_delivery", value: metadata}`
+  for message deliveries (bare `TEXT_MESSAGE_CONTENT` is not lifecycle-legal on
+  this plane), `CUSTOM {name:"cao.raw", ...}` for RAW-dialect frames.
+- **Interrupts**: when the approval registry has (or gains) open interrupts, the
+  run emits `STATE_SNAPSHOT` then `RUN_FINISHED outcome={type:"interrupt",
+  interrupts:[...]}` (state-before-finish rule, `interrupts.mdx:135-145`) and the
+  stream closes. A new POST with `resume[]` resolves through the same idempotent
+  registry path (payload mapping: `{approved:true}`→approve, `{approved:false}` or
+  status `cancelled`→deny, `{approved:true, editedArgs}`→edit), then streams a new
+  run. Uncovered open interrupts or an expired reference → `RUN_ERROR` (contract
+  rules, `interrupts.mdx:112-133`).
+- **Gating/auth**: same 404 gate as the stream; `cao:read` floor; `cao:write`/
+  `cao:admin` required when `resume[]` is non-empty (a resume authorizes a tool
+  action — same floor as `emit_ui`).
+- **Dependency**: `ag-ui-protocol` as a **version-pinned optional extra**
+  (`pip install cli-agent-orchestrator[agui]`); absent → 501 with an install hint;
+  the ambient plane never depends on it.
+
+### Resume endpoint (REST path)
+
+`POST /agui/v1/interrupts/{id}/resume` `{decision: "approve"|"deny"|"edit",
+edited_text?: str}` → same registry `resume`. Guards in order: surface gate (404),
+scope (`cao:write`/`cao:admin`), decision validation (422), unknown id (404),
+idempotent replay (200 with recorded outcome). Flat `@app.post` in `api/main.py`
+per repo convention (no routers exist).
 
 ---
 
 ## Data Models
 
-### Supervisor projection (folded from L1 STATE_SNAPSHOT/DELTA)
+### Supervisor projection
 
 ```python
 SupervisorProjection = {
-    "sessions": [ {"name": str, "status": str, "terminal_ids": [str, ...]} ],
-    "by_provider": { "kiro_cli": int, "claude_code": int, "codex": int, ... },
-    "counts": {"sessions": int, "terminals": int},
-    "last_event_id": str | None,     # cursor for reconnect dedup
+    "fleet": DashboardSnapshot,          # as folded: {sessions, terminals, counts, scopes}
+    "rollup": {
+        "active_sessions": int,
+        "by_provider": {str: int},       # every observed provider
+        "waiting_terminals": [str, ...],
+        "last_activity": {"timestamp": str | None, "event_id": str | None},
+    },
 }
 ```
 
-**Validation rules**:
-- Every field is derived only from folded frames (no external fetch).
-- No message body, no terminal stdout — metadata only.
+### Interrupt (wire shape on the run plane)
 
-### Interrupt (approval lifecycle)
+Serialized exactly as ag-ui's `Interrupt` (camelCase): `{id, reason, message,
+expiresAt?, metadata: {provider, terminalId, sessionName}}` — `responseSchema` set
+to the approve-with-edits object schema (`{approved: boolean, editedArgs?:
+{text: string}}`) so generic clients can render a decision form.
 
-```python
-Interrupt = {
-    "id": str,                 # opaque interrupt id (== originating event id)
-    "terminal_id": str,
-    "session_name": str | None,
-    "provider": str,           # "kiro_cli" | "claude_code" | "codex" | ...
-    "reason": str,             # PROVIDER-NAMESPACED (see scheme)
-    "options": [str, ...],     # e.g. ["approve", "deny", "edit"]
-    "created_at": str,         # ISO-8601 UTC
-    "resolved": bool,
-    "outcome": str | None,     # "approve" | "deny" | "edit"
-}
-```
+**Validation rules**
+- `reason` matches `^[a-z0-9-]+:[a-z0-9_]+$`; namespace never `core`.
+- `resolved == True ⟺ outcome != None`; resolved interrupts are immutable.
+- `message` ≤ 256 chars, redacted (category + trimmed prompt tail; never full
+  command lines unless the provider pattern marks them safe).
 
-**Validation rules**:
-- `reason` MUST match `^[a-z0-9-]+:[a-z0-9_]+$` (namespace `:` local-name).
-- `resolved == True` ⟺ `outcome is not None`.
-- Once `resolved`, the interrupt is immutable (idempotent resume).
+### Timeline entry
 
-### Provider-namespaced reason scheme
-
-The `reason` string is `"{provider-namespace}:{prompt-kind}"`. The namespace is the
-provider identity (kebab-cased); the local name is a stable, closed prompt category. The
-scheme is **extensible per provider** but each provider contributes a *closed* set so a
-client can switch on it exhaustively with a safe default.
-
-| Provider | `reason` value | Detected from (existing signal) |
-|---|---|---|
-| `claude_code` | `claude-code:permission_request` | `WAITING_USER_ANSWER` + tool-permission prompt |
-| `claude_code` | `claude-code:trust_prompt` | trust-this-folder prompt |
-| `kiro_cli` | `kiro:trust_prompt` | trust/permission confirmation (`WAITING_USER_ANSWER`) |
-| `kiro_cli` | `kiro:permission_request` | per-tool permission confirmation |
-| `codex` | `codex:approval_request` | approval prompt at the idle/approval gate |
-| *(any)* | `{ns}:unknown_prompt` | `WAITING_USER_ANSWER` with no matched pattern (safe default) |
-
-Classification is a **total** function: any `(provider, raw_prompt)` maps to exactly one
-reason, defaulting to `{ns}:unknown_prompt`, so a new or unrecognized prompt shape never
-raises and never silently drops the interrupt. Detection reuses each provider's existing
-`get_status`/pattern surface (e.g. Kiro's `WAITING_USER_ANSWER`, Claude's
-`WAITING_PROMPT_PATTERN`); L2 classifies, it does not re-parse terminals from scratch.
+See `TimelineEntry` above; `ended_at`/`status` transitions only via matching
+`tool_call_id`; count(`completed|failed`) ≤ count(opened) is an invariant.
 
 ---
 
-## L1 Cleanups (owned by this spec, scoped to L2 dependencies)
+## L1 Cleanups (owned by this spec)
 
 ### Cleanup A — Complete the `TOOL_CALL_*` lifecycle
 
-**Current state (verified in `services/agui_stream.py`):** the adapter maps
-`a2a_delegation` → `TOOL_CALL_START` and `handoff` → `TEXT_MESSAGE_CONTENT`, but there is
-**no** emission of the matching `TOOL_CALL_END` / `TOOL_CALL_RESULT`. A delegation
-therefore appears to start and never finish on the wire. `docs/agui.md` already advertises
-`TOOL_CALL_END` in the mapping table, so the docs and adapter currently disagree.
+**Verified current state:** `TOOL_CALL_START` is emitted only for kind
+`a2a_delegation` (`agui_stream.py:170-180`) — which no producer emits; every real
+dispatch arrives as kind `handoff` and maps to a bare `TEXT_MESSAGE_CONTENT`
+(:155-168). `TOOL_CALL_END`/`TOOL_CALL_RESULT` appear nowhere. Meanwhile
+`docs/agui.md:33-41` already documents "handoff / delegation →
+`TOOL_CALL_START` / `TOOL_CALL_END`" and "message delivery →
+`TEXT_MESSAGE_CONTENT`". **The change aligns code with the published table:**
 
-**Change:** when a delegation/handoff *completes* (the corresponding completion primitive
-arrives, correlated by the originating event/tool-call id), emit `TOOL_CALL_END` and,
-where a result payload exists, `TOOL_CALL_RESULT` — carrying the same `tool_call_id` as
-the `START`, metadata only. This is a localized addition to the primitive mapping plus a
-correlation key; it does not change existing START/START-less paths.
+1. `_from_primitive`: kind `handoff` with `orchestration_type ∈ {handoff, assign}`
+   → `TOOL_CALL_START` (`tool_call_id` = record id, `tool_call_name` =
+   orchestration type, metadata sender/receiver); `send_message`/absent →
+   `TEXT_MESSAGE_CONTENT` unchanged; kind `a2a_delegation` unchanged.
+2. New `ToolCallLifecycleTracker` (stateful, per stream generator instance, also
+   reusable by constructs): registers `receiver → (tool_call_id, kind)` on START;
+   on a completion record for that receiver terminal (or session end) synthesizes
+   exactly one `TOOL_CALL_END` (+ one metadata-only `TOOL_CALL_RESULT` for
+   `a2a_delegation` opens) after the mapped frame; bounded map (cap + oldest-first
+   eviction); no orphan closers. Deterministic: replaying the same records
+   synthesizes the same frames, so `?since=` folds stay consistent.
+3. Same-change updates: `docs/agui.md` table footnotes the disposition metadata;
+   the EventSource viewer's known-names/rendering updated; mapping tests extended.
 
-**Why L2 needs it:** `MultiAgentSessionTimeline` closes timeline entries on END/RESULT;
-without it, every delegation entry is stuck `open`.
+### Cleanup B — Replay contract: document what exists, harden one edge
 
-### Cleanup B — `?since=` replay contract on the stream itself + client-side dedup
+**Verified current state:** register-before-replay, `?since=` (ISO-8601 exclusive)
+precedence over `Last-Event-ID`, `id:` cursors on replayed frames, server-side
+overlap dedup, over-delivery on evicted/unknown id, snapshot-after-replay —
+all already implemented and tested (`api/main.py:972-1049`;
+`test_agui_stream_reconnect.py`, `test_agui_stream_overflow.py`).
 
-**Current state (verified in `api/main.py`):** `/agui/v1/stream` already accepts `?since=`
-and `Last-Event-ID`, registers the live subscription before replaying, re-emits buffered
-records as AG-UI frames, and de-duplicates the replay/live overlap **server-side** by
-event id. The generic `/events/history` also provides replay.
+**Changes:** (1) validate `?since=` before streaming — malformed → HTTP 400
+(today it is swallowed by the failure-isolated replay block); (2) document the
+full contract in `docs/agui.md` incl. Seen_Set_Dedup (uuid ids — membership, not
+ordering) and its status as a CAO extension (no stock SDK resumes streams;
+protocol-plane recovery is snapshot re-sync per `state.mdx:47-56`); (3) regression
+tests pinning snapshot-before-delta on reconnect and `since` precedence for the
+AG-UI path.
 
-**Change (contract hardening, not new plumbing):**
-1. Make the **client-side dedup by event id** an explicit, documented contract: every
-   replayed frame carries its `id:` cursor, and a client resuming across a *fresh*
-   connection with `?since=` must dedup by that id. Document it in `docs/agui.md`.
-2. Guarantee **STATE_SNAPSHOT idempotency on replay**: a reconnect must not leave the
-   client with a torn projection — the snapshot-then-deltas ordering after replay is
-   pinned by property tests (see Correctness Properties).
-3. Ensure `?since=` and `Last-Event-ID` precedence (since wins) is covered for the AG-UI
-   frame path, not only the raw event path.
+### Cleanup C — Run plane + stock-client zero-adapter live demo (AC3)
 
-**Why L2 needs it:** `SupervisorDashboardStream` and `CrossProviderStateSync` must
-survive a reconnect without a gap or a double-applied delta, or their projections diverge.
-
-### Cleanup C — AC3 live-server zero-adapter demo
-
-**Current state:** `examples/agui-eventsource-viewer/` renders the live stream with a
-dependency-free viewer; `examples/agui-dashboard/` drives generative UI via `showcase.sh`.
-
-**Change:** add a **stock AG-UI client (AG-UI Dojo / CopilotKit)** rendering a *live* run
-that is **driving the live server** (not a recorded replay) — a credentials-free
-`run.sh` that starts `cao-server` with the surface enabled and points the stock client at
-`/agui/v1/stream`, proving zero CAO-specific adapter code is required end-to-end.
+Covered in Components. The demo (`examples/agui-stock-client-live/`): `run.sh`
+boots `cao-server` with `CAO_AGUI_ENABLED=1` and a `mock_cli`-driven fleet
+(credentials-free, `examples/agui-dashboard/` precedent), waits ≤ 30 s for
+readiness, then runs a pinned stock client (`@ag-ui/client` `HttpAgent` /
+minimal CopilotKit page — upstream packages only, zero CAO wire code) against
+`POST /agui/v1/run` and asserts at least one frame rendered that the server
+produced **after** the client connected. Non-zero exit + process cleanup on any
+failure. CI smoke reuses the repo's existing example-recording harness pattern.
 
 ---
 
 ## Low-Level Design
 
-Language: **Python** (the constructs are Python classes in the existing codebase). Code
-below is illustrative of the contracts; formal specs (preconditions/postconditions/loop
-invariants) accompany each key function.
+### `apply_json_patch_strict(doc, ops) -> dict | None`
 
-### Core interfaces / types
+**Preconditions:** `doc` is a JSON-shaped dict; `ops` a list of RFC 6902 ops.
+**Postconditions:** returns a **new** dict with all ops applied in order, or
+`None` if any op is malformed / targets a missing path (`add` on object members
+allowed per RFC 6902 §4.1); `doc` is never mutated.
+**Invariant:** partial application is impossible (copy-then-apply, discard on error).
 
-```python
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from enum import Enum
-from typing import Callable, Literal
-
-AguiFrame = tuple[str, dict]        # (AGUI_TYPE, data) — exactly what to_agui_event returns
-RfcOp = dict                         # RFC-6902 op: {"op","path", "value"?}
-
-class UiEmitter:
-    """Production emitter: validate -> event_log.append("other", ...) -> bus.publish.
-    Mirrors POST /agui/v1/emit_ui exactly so constructs share one validation path."""
-    def emit(self, component: str, props: dict,
-             terminal_id: str | None, session_name: str | None) -> str: ...
-```
-
-### Key functions with formal specifications
-
-#### `AguiConstruct.emit(component, props, terminal_id, session_name)`
-
-```python
-def emit(self, component, props, terminal_id=None, session_name=None) -> None
-```
-
-**Preconditions:**
-- `component` is a non-empty string.
-- `props` is a mapping.
-
-**Postconditions:**
-- If `component ∈ GENERATIVE_UI_COMPONENTS` and `props` is JSON-serializable and
-  `len(json(props)) ≤ 8 KiB`: exactly one intent is published via the L1 emit path and it
-  contains no message-body field.
-- Otherwise: nothing is published and the call raises `ValueError` (client-side refusal),
-  matching `emit_ui`'s 400 semantics — a bad intent never reaches the bus.
-- No side effects on `props` (not mutated).
-
-**Loop invariants:** N/A.
-
-#### `MultiAgentSessionTimeline.handle_frame(agui_type, data)`
-
-```python
-def handle_frame(self, agui_type, data) -> None
-```
-
-**Preconditions:**
-- `(agui_type, data)` is a well-formed AG-UI frame from `to_agui_event`.
-
-**Postconditions:**
-- `TOOL_CALL_START` → a new entry with `status == "open"`, keyed by `data["tool_call_id"]`.
-- `TOOL_CALL_END`/`TOOL_CALL_RESULT` with a known `tool_call_id` → that entry becomes
-  `status == "completed"` with `ended_at` set; unknown id → no-op (tolerated).
-- `TEXT_MESSAGE_CONTENT` → a `handoff` entry appended, `delta` never stored (privacy).
-- Any other type → projection unchanged (totality).
-- The number of `open` entries is non-increasing under close frames.
-
-**Loop invariants (over the folded event sequence):**
-- Every `completed` entry was previously `open` (no entry closes without opening).
-- Entries remain ordered by `(timestamp, id)`.
-
-#### `AgentHandoffWithApproval.resume(interrupt_id, decision, edited_text=None)`
-
-```python
-def resume(self, interrupt_id, decision, edited_text=None) -> Interrupt
-```
-
-**Preconditions:**
-- `interrupt_id` identifies a known interrupt.
-- `decision ∈ {APPROVE, DENY, EDIT}`; if `decision == EDIT`, `edited_text` is non-empty.
-
-**Postconditions:**
-- If the interrupt was already `resolved`: returns the recorded interrupt unchanged; **no**
-  keystrokes are sent (idempotent).
-- Else: the interrupt becomes `resolved` with `outcome == decision`, provider keystrokes
-  are sent to the live terminal **exactly once** via `send_input`, and exactly one
-  resolution frame is emitted.
-- No raw sensitive command body is placed on the wire beyond what the provider marked safe.
-
-**Loop invariants:** N/A (single-shot resolution).
-
-#### `classify_reason(provider, raw_prompt)`
-
-```python
-def classify_reason(provider: str, raw_prompt: str) -> str
-```
-
-**Preconditions:** `provider` and `raw_prompt` are strings (any value, including empty).
-
-**Postconditions:**
-- Returns exactly one string matching `^[a-z0-9-]+:[a-z0-9_]+$`.
-- Total: never raises; an unmatched prompt returns `f"{namespace(provider)}:unknown_prompt"`.
-- Deterministic: same inputs → same reason.
-
-**Loop invariants:** N/A.
-
-### Algorithmic pseudocode
-
-#### STATE_DELTA convergence fold (Supervisor / CrossProviderStateSync)
+### `foldStream` (Supervisor / CrossProviderStateSync)
 
 ```pascal
-ALGORITHM foldStream(frames)
-INPUT: frames — ordered AG-UI frames beginning with a STATE_SNAPSHOT
-OUTPUT: state — the folded shared-state projection
-
-BEGIN
-  state ← {}
-  seen  ← empty set        // event ids already applied (reconnect dedup)
-
-  FOR each (type, data, event_id) IN frames DO
-    ASSERT stateConsistent(state)              // loop invariant
-
-    IF event_id ≠ NULL AND event_id IN seen THEN
-      CONTINUE                                 // dedup: never apply twice
-    END IF
-
-    IF type = "STATE_SNAPSHOT" THEN
-      state ← deepCopy(data.snapshot)          // baseline (idempotent on replay)
-    ELSE IF type = "STATE_DELTA" THEN
-      state ← applyRfc6902(state, data.delta)  // minimal patch
-    ELSE
-      // RUN_*/STEP_*/TOOL_CALL_* update rollups only; never a body
-      state ← updateRollup(state, type, data)
-    END IF
-
-    IF event_id ≠ NULL THEN seen.add(event_id) END IF
-  END FOR
-
-  ASSERT stateConsistent(state)
-  RETURN state
-END
+ALGORITHM foldStream(frames)          // frames: (event_id | NULL, type, data) in arrival order
+state ← NULL; seen ← ∅
+FOR each (id, type, data) IN frames DO
+    IF id ≠ NULL AND id ∈ seen THEN CONTINUE          // Seen_Set_Dedup (uuid membership)
+    IF type = STATE_SNAPSHOT THEN state ← deepCopy(data.snapshot)
+    ELSE IF type = STATE_DELTA THEN
+        IF state ≠ NULL THEN
+            next ← apply_json_patch_strict(state, data.delta)
+            IF next ≠ NULL THEN state ← next          // else: drop (client parity)
+    ELSE updateRollups(type, data)                    // metadata only
+    IF id ≠ NULL THEN seen ← seen ∪ {id}
+RETURN projection(state, rollups)
 ```
 
-**Preconditions:** the first STATE-bearing frame is a `STATE_SNAPSHOT`; every `STATE_DELTA`
-is a valid RFC-6902 patch against the running state.
+**Postcondition (convergence):** for the per-connection stream the server emits
+(snapshot, then deltas each diffed from the previously-emitted snapshot),
+`foldStream(frames ++ overlappingReplay)` = `build_dashboard_snapshot(fleet_now)`
+— replay overlap is inert under `seen`; state frames are per-connection and
+arrive exactly once per connection.
 
-**Postconditions:** `foldStream(frames)` is deep-equal to
-`build_dashboard_snapshot(sessions, terminals)` of the same underlying fleet, for any
-frame ordering consistent with per-key causal order (convergence).
+### `ToolCallLifecycleTracker.feed(record, mapped_frame) -> [frames]`
 
-**Loop invariants:** `state` is always a valid DashboardSnapshot shape; `seen` contains
-exactly the event ids already applied, so no delta is applied twice across a reconnect.
+**Postconditions:** yields `mapped_frame` plus zero or more synthesized closers;
+every synthesized `TOOL_CALL_END`/`TOOL_CALL_RESULT` carries a `tool_call_id`
+previously seen as START in this tracker; a receiver correlates to at most one
+open call (newest wins; older evicted entries close with disposition
+`superseded`); map size ≤ cap.
+**Invariant:** closers(ids) ⊆ starts(ids); at most one END per id.
 
-#### Interrupt lifecycle
+### `AgentHandoffWithApproval.resume`
 
 ```pascal
-ALGORITHM handleApproval(provider, terminal_id, raw_prompt)
-BEGIN
-  reason ← classify_reason(provider, raw_prompt)     // total, namespaced
-  intr   ← Interrupt(id=newId(), provider=provider,
-                     terminal_id=terminal_id, reason=reason,
-                     options=["approve","deny","edit"], resolved=false)
-  registry[intr.id] ← intr
-  emit("approval_card", { reason, options: intr.options,
-                          summary: redact(raw_prompt) })   // metadata only
-  RETURN intr
-END
-
 ALGORITHM resume(intr_id, decision, edited_text)
-BEGIN
-  intr ← registry[intr_id]
-  ASSERT intr ≠ NULL
-
-  IF intr.resolved THEN
-    RETURN intr                                  // idempotent, no re-send
-  END IF
-
-  keystrokes ← translate(intr.provider, decision, edited_text)
-  send_input(intr.terminal_id, keystrokes)       // resume the LIVE provider
-  intr.resolved ← true
-  intr.outcome  ← decision
-  emit("approval_card", { reason: intr.reason, resolved: true,
-                          outcome: decision })    // resolution, metadata only
-  RETURN intr
-END
+intr ← registry.get(intr_id);  IF intr = NULL THEN ERROR not_found
+WITH intr.lock:
+    IF intr.resolved THEN RETURN intr                      // idempotent, no re-send
+    IF decision = EDIT AND NOT valid(edited_text, ≤4000) THEN ERROR validation (stay open)
+    IF decision ∉ intr.options THEN ERROR unsupported_decision (stay open)
+    intr.resolved ← true; intr.outcome ← decision          // resolve BEFORE sending
+answer ← translate(intr.provider_category, decision, edited_text)
+TRY deliver(answer)                                        // /input or /key, exactly once
+CATCH e: log; intr.metadata.delivery_error ← summary(e)    // resolution stands
+emit(approval_card, {interrupt_id, reason, resolved: true, outcome})
+RETURN intr
 ```
 
-**Postconditions:** every opened interrupt reaches `resolved` at most once; `send_input`
-is invoked exactly once per resolved interrupt; a duplicate `resume` is a no-op.
+`expire(terminal_id)`: same lock; resolve with `outcome=expired`; **no deliver**.
 
 ### Example usage
 
 ```python
-# --- SupervisorDashboardStream: fold the live stream into a supervisor view ---
-sup = SupervisorDashboardStream()
-for agui_type, data in client_frames():          # frames off /agui/v1/stream
-    sup.handle_frame(agui_type, data)
-print(sup.hierarchy(), sup.supervisor_snapshot())
-
-# --- MultiAgentSessionTimeline: causal handoff/delegation timeline ---
-tl = MultiAgentSessionTimeline()
-for agui_type, data in client_frames():
-    tl.handle_frame(agui_type, data)
-open_delegations = [e for e in tl.entries() if e.status == "open"]
-
-# --- AgentHandoffWithApproval: real provider prompt -> browser -> resume ---
-appr = AgentHandoffWithApproval(emitter=production_emitter)
-intr = appr.on_provider_waiting(
-    terminal_id="dev-abcd", provider="claude_code",
-    raw_prompt="Do you want to allow Write to /etc/hosts? (y/n)")
-assert intr.reason == "claude-code:permission_request"
-# ... browser POSTs the decision ...
-appr.resume(intr.id, ApprovalDecision.DENY)       # resumes the live terminal
-
-# --- CrossProviderStateSync: converge across kiro_cli + claude_code + codex ---
-sync = CrossProviderStateSync()
-for agui_type, data in mixed_provider_frames():
-    sync.handle_frame(agui_type, data)
-assert sync.converges_with(build_dashboard_snapshot(sessions, terminals))
+reader = AguiStreamReader("http://127.0.0.1:9889")
+sup, tl, sync = SupervisorDashboardStream(), MultiAgentSessionTimeline(), CrossProviderStateSync()
+for event_id, agui_type, data in reader.frames():
+    for c in (sup, tl, sync):
+        c.handle_frame(agui_type, data, event_id)
 ```
 
 ---
 
 ## Correctness Properties
 
-These are the universally-quantified properties targeted by property-based tests
-(library: **Hypothesis**, matching the Python codebase). Each is stated as
-`∀ inputs. property`.
+Property-based (Hypothesis, already a dev dependency) unless noted:
 
-1. **Interrupt lifecycle round-trip.**
-   `∀ provider, prompt, decision`: opening an interrupt then resuming it once yields
-   `resolved == True ∧ outcome == decision`, and a *second* `resume` leaves state
-   unchanged and sends no further keystrokes.
-   → *exactly one resolution; idempotent resume.*
-
-2. **Reason is total and well-formed.**
-   `∀ provider, raw_prompt` (any strings): `classify_reason` returns a string matching
-   `^[a-z0-9-]+:[a-z0-9_]+$` and never raises.
-
-3. **State-delta convergence across providers.**
-   `∀ fleet, ∀ ordering consistent with per-key causal order` mixing events from
-   `kiro_cli`, `claude_code`, `codex`: `foldStream(frames)` is deep-equal to
-   `build_dashboard_snapshot(sessions, terminals)`.
-   → *the shared state converges regardless of provider mix or interleaving.*
-
-4. **Reconnect dedup idempotency.**
-   `∀ frames, ∀ split point`: folding `frames` equals folding
-   `frames[:k] ++ replay(frames[j:])` for `j ≤ k` (an overlapping `?since=` replay),
-   because event-id dedup drops the overlap — no gap, no double-applied delta.
-
-5. **Privacy boundary preserved through L2.**
-   `∀ frame handled or emitted by any construct`: the resulting projection and every
-   emitted intent contain no message-body field (`assert_no_body` holds), and
-   `TEXT_MESSAGE_CONTENT` folding never stores `delta`.
-
-6. **TOOL_CALL lifecycle well-formedness.**
-   `∀ delegation event sequence`: every emitted `TOOL_CALL_END`/`TOOL_CALL_RESULT` carries
-   a `tool_call_id` matching a prior `TOOL_CALL_START`; in the timeline, the count of
-   `completed` entries ≤ count of opened entries, and no entry is completed without being
-   opened first.
-
-7. **Emit refusal parity.**
-   `∀ component, props`: `AguiConstruct.emit` publishes iff `component` is on the L1
-   allow-list and `props` is JSON-serializable and ≤ 8 KiB — identical to the `emit_ui`
-   server-side guard (no L2 bypass of L1 safety).
-
-8. **Subclass substitutability.**
-   `∀ construct subclass, ∀ frame`: `handle_frame` is total (an unrecognized `agui_type`
-   leaves the projection unchanged and does not raise) and `projection()` is
-   JSON-serializable.
+1. **Interrupt round-trip / idempotent resume.** ∀ provider, prompt, decision:
+   open→resume yields `resolved ∧ outcome == decision`; a second resume (either
+   path) changes nothing and delivers nothing.
+2. **Reason totality.** ∀ provider, raw_prompt (arbitrary strings): result matches
+   `^[a-z0-9-]+:[a-z0-9_]+$`, is deterministic, never raises, never `core:`.
+3. **Ordered-fold convergence.** ∀ fleets and mutation sequences (provider mix
+   over kiro_cli/claude_code/codex): folding the emitted snapshot+delta stream
+   deep-equals `build_dashboard_snapshot` of the final fleet.
+4. **Reconnect dedup idempotency.** ∀ frame sequences, ∀ overlap replays of
+   id-bearing frames: fold(frames) == fold(frames ++ replayed overlap).
+5. **Privacy through L2.** ∀ folded/emitted values: no message-body field
+   (`assert_no_body`); `TEXT_MESSAGE_CONTENT.delta` never stored.
+6. **Tool-call lifecycle well-formedness.** ∀ record sequences: synthesized
+   closers ⊆ opens (by id), ≤ 1 END per id, no orphans; timeline
+   `completed+failed ≤ opened`.
+7. **Emit refusal parity.** ∀ component, props: L2 `emit` publishes iff the L1
+   guard would accept (allow-list ∧ serializable ∧ ≤ 8192 bytes); props unmutated.
+8. **Substitutability / totality.** ∀ subclass, ∀ frames (fuzzed types/shapes):
+   `handle_frame` never raises; `projection()` is JSON-serializable.
+9. **Run-plane lifecycle legality** (integration): every emitted run stream passes
+   the stock verifier rules (RUN_STARTED first; no frames after FINISHED/ERROR;
+   START/END bracketing; snapshot precedes interrupting FINISHED).
 
 ---
 
 ## Error Handling
 
-### Scenario 1: Unknown / malformed AG-UI frame
-**Condition**: a frame with an unrecognized `agui_type` or missing expected fields reaches
-a construct.
-**Response**: `handle_frame` treats it as a no-op (totality); the projection is unchanged.
-**Recovery**: none needed — the next well-formed frame folds normally.
-
-### Scenario 2: Off-list / oversized generative-UI intent from a construct
-**Condition**: a subclass calls `emit` with an off-list component or non-serializable /
-> 8 KiB props.
-**Response**: refuse client-side with `ValueError` before the bus (mirrors `emit_ui` 400).
-**Recovery**: the construct catches and degrades (e.g. emits a smaller `metric`), or logs;
-the stream is never corrupted.
-
-### Scenario 3: Resume on an already-resolved or unknown interrupt
-**Condition**: a duplicate or stale browser POST hits `resume`.
-**Response**: unknown id → 404 at the route; already-resolved → idempotent no-op returning
-the recorded outcome, no second `send_input`.
-**Recovery**: the client reconciles from the resolution frame it will receive on the stream.
-
-### Scenario 4: Provider prompt disappears before resume (timeout / agent gave up)
-**Condition**: the terminal leaves `WAITING_USER_ANSWER` before a decision arrives.
-**Response**: `resume` still records the outcome but the keystroke send is best-effort;
-`send_input` failure is caught and the interrupt is marked `resolved` with an
-`expired`-flavored resolution frame.
-**Recovery**: the client shows the card as expired; no exception propagates to the stream.
-
-### Scenario 5: Reconnect with `?since=`
-**Condition**: the client drops and reconnects.
-**Response**: server replays buffered frames after the cursor; the construct's event-id
-dedup drops the overlap (Property 4).
-**Recovery**: automatic — projection stays convergent with neither gap nor duplicate.
+| # | Condition | Response |
+|---|---|---|
+| 1 | Unknown/malformed frame reaches a construct | No-op (totality); projection unchanged |
+| 2 | Off-list / oversized / non-serializable emit | `ValueError` before any transport; nothing published (parity with HTTP 400) |
+| 3 | `STATE_DELTA` fails strict apply or precedes a snapshot | Delta dropped, no raise — parity with stock client warn-and-drop |
+| 4 | Resume on unknown id | REST 404; run-plane `RUN_ERROR` per contract |
+| 5 | Resume on resolved interrupt | Recorded outcome returned; zero keystrokes (idempotent) |
+| 6 | `edit` without valid text / unsupported decision for the prompt | Validation error; interrupt stays open; zero keystrokes |
+| 7 | Prompt vanishes before decision | `expired` resolution; **zero keystrokes**; expiration intent emitted; late resume gets the record |
+| 8 | Keystroke delivery fails after resolution | Resolution stands; delivery error recorded in metadata; no exception to the stream |
+| 9 | Malformed `?since=` | HTTP 400 before streaming (new) |
+| 10 | Evicted/unknown `Last-Event-ID` | Over-delivery + Seen_Set_Dedup (documented) |
+| 11 | `run` with uncovered/expired open interrupts | `RUN_ERROR` (interrupt contract) |
+| 12 | `ag-ui-protocol` extra missing | Run plane 501 + hint; ambient plane unaffected |
+| 13 | Subscriber queue overflow on ambient stream | Existing behavior: stream closes (gap signal); reader reconnects with cursor; constructs dedup |
 
 ---
 
 ## Testing Strategy
 
-### Unit testing
-- Each construct: frame-folding tables (snapshot/delta/run/step/tool_call/text), emit
-  validation parity with `emit_ui`, and `assert_no_body` on every emitted intent.
-- `classify_reason`: a table per provider mapping representative real prompt fixtures
-  (reuse existing provider fixtures, e.g. Kiro/Claude/Codex prompt captures) to expected
-  namespaced reasons, plus the `unknown_prompt` default.
-- `resume`: approve/deny/edit keystroke translation per provider, idempotency, and the
-  expired path.
-
-### Property-based testing (Hypothesis)
-Covers Correctness Properties 1–8. Notable generators:
-- Random RFC-6902-consistent fleet mutation sequences tagged with random provider origins
-  (Property 3) and random reconnect split points (Property 4).
-- Arbitrary `(provider, prompt)` strings for reason totality (Property 2).
-- Arbitrary interrupt/decision sequences for lifecycle round-trip and idempotency
-  (Property 1).
-
-**Property Test Library**: Hypothesis (Python), consistent with the existing test suite
-under `test/services` and `test/api`.
-
-### Integration testing
-- **Cross-provider convergence (≥3 providers)**: spin up `kiro_cli`, `claude_code`, and
-  `codex` terminals (mock/fixture-backed where a real CLI is unavailable in CI), drive
-  handoffs/delegations, and assert `CrossProviderStateSync.converges_with(...)` against the
-  authoritative snapshot.
-- **HITL against a real prompt**: drive a provider into `WAITING_USER_ANSWER`, assert the
-  interrupt/reason, POST a decision to `/agui/v1/interrupts/{id}/resume`, and assert the
-  live terminal advances (via `send_input` observation).
-- **Reconnect losslessness**: connect, kill the connection mid-stream, reconnect with
-  `?since=`, assert the folded projection equals the uninterrupted fold.
-- **AC3 zero-adapter demo**: a CI smoke test that boots `cao-server` with the surface
-  enabled and asserts the stock AG-UI client renders live frames from `/agui/v1/stream`.
-
----
+- **Unit** (`test/services/agui/`): folding tables per construct; emit parity incl.
+  the exact 8192-byte boundary and props-unmutated; `assert_no_body`; classifier
+  fixtures per provider (reuse the providers' pattern fixtures); keystroke
+  translation tables; registry TTL/caps; tracker correlation incl. eviction,
+  session-end closure, orphan suppression, `a2a_delegation` RESULT
+  (forward-provisioned, synthetic records).
+- **Property** (Hypothesis): Properties 1–8 above; generators for fleet mutation
+  sequences with provider mixes, overlap replays with uuid ids, arbitrary
+  `(provider, prompt)` strings, interleaved resume/expiry races.
+- **API integration** (`test/api/`): resume-route guard matrix (gate 404 / scope /
+  422 / unknown 404 / idempotent 200); `?since=` 400; snapshot-before-delta
+  reconnect regression; run-plane: RunAgentInput parse, gating/scope incl.
+  `resume[]` write-floor, interrupt outcome emission, resume coverage RUN_ERROR,
+  lifecycle-legality assertions against recorded streams.
+- **End-to-end approval (CI, credentials-free):** extend `mock_cli` with a
+  scripted-prompt mode (env-triggered marker → `WAITING_USER_ANSWER`, an answer
+  clears it — today mock_cli never returns that status, `mock_cli.py:79-96`);
+  drive prompt → interrupt → approve/deny via **both** resume paths → assert
+  exactly-once delivery and terminal advance.
+- **Live real-provider procedure (manual, documented + recorded):** approval-mode
+  claude_code profile (`permissionMode` at provider default) → real permission
+  prompt → browser approve/deny → terminal advances. This is the AC5 evidence for
+  a *real* prompt; CI keeps the automated equivalent.
+- **AC3 smoke:** stock client against the run plane per Cleanup C.
 
 ## Performance Considerations
 
-- **Delta recompute cadence**: the L1 stream currently recomputes the fleet snapshot on
-  every event (documented as an acceptable follow-up for the opt-in dashboard surface). L2
-  constructs must **not** add a second recompute — they *apply* the deltas L1 already
-  emits, so per-event L2 work is O(size of the RFC-6902 patch), not O(fleet size).
-- **Timeline growth**: `MultiAgentSessionTimeline` is bounded by the L1 ring buffer window
-  it consumes; it should cap retained entries (mirror `RING_CAPACITY`) so a long-running
-  session cannot grow the projection without bound.
-- **Interrupt registry**: bounded and TTL-swept (resolved/expired interrupts evicted) so a
-  flapping provider prompt cannot leak memory.
+- L2 folding is O(patch size) per delta — constructs apply the deltas L1 already
+  computes; no second fleet recompute (the known per-event recompute on the server
+  side stays a documented L1 follow-up).
+- Bounded memory everywhere: timeline cap (default 1,000), tracker map cap,
+  interrupt registry (1,000 / 300 s TTL), reader buffers one frame at a time.
+- Run plane shares the existing bus subscription machinery (per-subscriber queue
+  256, overflow-close) — one extra subscriber per connected stock client.
 
 ## Security Considerations
 
-- **Privacy boundary is inherited, not re-implemented**: constructs fold metadata-only
-  frames and emit only allow-listed components; `assert_no_body` and emit validation are
-  defense-in-depth. No construct reads terminal stdout onto the wire.
-- **Approval is a privileged action**: `POST /agui/v1/interrupts/{id}/resume` requires
-  `cao:write` (same as `emit_ui`) and is default-off with the AG-UI surface. Resuming a
-  provider prompt is effectively authorizing a tool action, so the auth floor must not be
-  lower than `emit_ui`.
-- **Redaction on the approval card**: the raw prompt may contain sensitive command text;
-  the card carries a redacted category/summary by default, surfacing full detail only when
-  the provider marks it safe.
-- **Namespaced reasons prevent spoofing ambiguity**: a client switches on
-  `{provider}:{kind}` and MUST fall back safely on `unknown_prompt`, so a novel prompt
-  never renders as a more-trusted category.
+- **Privacy boundary inherited and re-asserted**: constructs fold metadata-only
+  frames; `assert_no_body` + emit validation are defense-in-depth; approval cards
+  and interrupts carry category + ≤ 256-char redacted summary, never raw command
+  bodies; run-plane CUSTOM values carry the same metadata-only payloads.
+- **Approval is privileged**: REST resume and run-plane `resume[]` both require
+  the `cao:write` floor (an approval authorizes a tool action — same floor as
+  `emit_ui`); everything is default-off behind the existing surface gate; server
+  stays loopback-bound by default.
+- **Answer injection safety**: decisions translate only to closed per-provider
+  answer sets (`y`/`n`/`Enter`/`Escape`/validated text ≤ 4,000 chars) through the
+  existing `/input`/`/key` routes (which already whitelist key names); expiry never
+  types into a live terminal.
+- **Namespaced reasons prevent spoofing ambiguity**: clients switch on
+  `{provider}:{kind}` with `unknown_prompt` fallback; `core:` never emitted.
 
 ## Dependencies
 
-- **Existing L1 surface** (merged): `services/agui_stream.py`, `services/ui_state_service.py`,
-  `services/event_primitives.py`, `services/event_log_service.py`, `services/sse_bus.py`,
-  `api/main.py` (`/agui/v1/stream`, `/agui/v1/emit_ui`), `docs/agui.md`.
-- **Provider surface**: `providers/base.py` + `providers/{kiro_cli,claude_code,codex}.py`
-  for `WAITING_USER_ANSWER` detection and prompt patterns; `services/terminal_service.send_input`
-  for resume.
-- **Testing**: Hypothesis (property-based), pytest (existing).
-- **Demo (AC3)**: a stock AG-UI client (AG-UI Dojo / CopilotKit) — pinned in the example's
-  own tooling, not added to the CAO runtime dependencies.
-- **No new runtime services**: constructs are in-process Python composed over L1; the only
-  new HTTP route is the thin `interrupts/{id}/resume` resume endpoint reusing existing auth.
-```
+- **Existing L1/CAO surface** (unchanged unless named): `services/agui_stream.py`,
+  `services/event_log_service.py`, `services/sse_bus.py`,
+  `services/ui_state_service.py`, `services/event_bus.py` (status topic),
+  `services/terminal_service.py` (`send_input`/`send_special_key`),
+  `api/main.py`, `security/auth.py`, `docs/agui.md`.
+- **Providers**: existing detection patterns in
+  `providers/{claude_code,kiro_cli,codex}.py`; `mock_cli` gains the scripted-prompt
+  mode (test-only behavior, env-gated).
+- **New optional extra `[agui]`**: `ag-ui-protocol` (official Python SDK — models +
+  `EventEncoder`), version-pinned at implementation time to a release carrying the
+  interrupt lifecycle (`RunFinishedEvent.outcome` / `RunAgentInput.resume`);
+  run plane only. No new required runtime dependencies (`requests` already
+  present; JSON-Patch apply is in-repo).
+- **Testing**: pytest + `hypothesis>=6.0` (already present).
+- **AC3 demo**: pinned upstream `@ag-ui/client` / CopilotKit packages inside the
+  example's own tooling — never CAO runtime dependencies.
