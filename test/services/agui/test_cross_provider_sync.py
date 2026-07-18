@@ -32,12 +32,9 @@ def _multi_provider_state() -> dict:
             {"id": "s1", "name": "main", "status": "active"},
         ],
         "terminals": [
-            {"id": "t1", "session_name": "main", "provider": "kiro_cli",
-             "status": "running"},
-            {"id": "t2", "session_name": "main", "provider": "claude_code",
-             "status": "idle"},
-            {"id": "t3", "session_name": "main", "provider": "codex",
-             "status": "running"},
+            {"id": "t1", "session_name": "main", "provider": "kiro_cli", "status": "running"},
+            {"id": "t2", "session_name": "main", "provider": "claude_code", "status": "idle"},
+            {"id": "t3", "session_name": "main", "provider": "codex", "status": "running"},
         ],
         "counts": {"sessions": 1, "terminals": 3},
         "scopes": [],
@@ -51,9 +48,7 @@ class TestSnapshotReplace:
         sync = CrossProviderStateSync(_emitter())
         state = _multi_provider_state()
 
-        sync.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None
-        )
+        sync.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None)
 
         assert sync.shared_state() == state
 
@@ -63,12 +58,8 @@ class TestSnapshotReplace:
         state2 = copy.deepcopy(state1)
         state2["sessions"][0]["status"] = "closed"
 
-        sync.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": state1}, event_id=None
-        )
-        sync.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": state2}, event_id=None
-        )
+        sync.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": state1}, event_id=None)
+        sync.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": state2}, event_id=None)
 
         assert sync.shared_state()["sessions"][0]["status"] == "closed"
 
@@ -76,9 +67,7 @@ class TestSnapshotReplace:
         sync = CrossProviderStateSync(_emitter())
         state = _multi_provider_state()
 
-        sync.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None
-        )
+        sync.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None)
 
         # Mutate original - should not affect internal state.
         state["sessions"][0]["status"] = "mutated"
@@ -92,15 +81,15 @@ class TestDeltaApply:
         sync = CrossProviderStateSync(_emitter())
         state = _multi_provider_state()
 
-        sync.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None
-        )
+        sync.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None)
 
         sync.handle_frame(
             AGUI_STATE_DELTA,
-            {"delta": [
-                {"op": "replace", "path": "/counts/terminals", "value": 4},
-            ]},
+            {
+                "delta": [
+                    {"op": "replace", "path": "/counts/terminals", "value": 4},
+                ]
+            },
             event_id="d-1",
         )
 
@@ -121,9 +110,7 @@ class TestDeltaApply:
         sync = CrossProviderStateSync(_emitter())
         state = _multi_provider_state()
 
-        sync.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None
-        )
+        sync.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None)
 
         # Invalid path.
         sync.handle_frame(
@@ -143,9 +130,7 @@ class TestConvergesWith:
         sync = CrossProviderStateSync(_emitter())
         state = _multi_provider_state()
 
-        sync.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None
-        )
+        sync.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None)
 
         authoritative = copy.deepcopy(state)
         assert sync.converges_with(authoritative) is True
@@ -154,9 +139,7 @@ class TestConvergesWith:
         sync = CrossProviderStateSync(_emitter())
         state = _multi_provider_state()
 
-        sync.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None
-        )
+        sync.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None)
 
         authoritative = copy.deepcopy(state)
         authoritative["counts"]["terminals"] = 99
@@ -170,9 +153,7 @@ class TestConvergesWith:
         sync = CrossProviderStateSync(_emitter())
         state = _multi_provider_state()
 
-        sync.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None
-        )
+        sync.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None)
 
         # Apply a delta.
         sync.handle_frame(
@@ -194,9 +175,7 @@ class TestProvidersSeen:
         sync = CrossProviderStateSync(_emitter())
         state = _multi_provider_state()
 
-        sync.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None
-        )
+        sync.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None)
 
         providers = sync.providers_seen()
         assert providers == ["claude_code", "codex", "kiro_cli"]
@@ -218,9 +197,7 @@ class TestProvidersSeen:
             "scopes": [],
         }
 
-        sync.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None
-        )
+        sync.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None)
 
         assert sync.providers_seen() == ["kiro_cli"]
 
@@ -237,9 +214,7 @@ class TestProvidersSeen:
             "scopes": [],
         }
 
-        sync.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None
-        )
+        sync.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None)
 
         assert sync.providers_seen() == ["claude_code", "kiro_cli"]
 
@@ -251,9 +226,7 @@ class TestSeenSetDedup:
         sync = CrossProviderStateSync(_emitter())
         state = _multi_provider_state()
 
-        sync.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None
-        )
+        sync.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None)
 
         # Same event_id delta should be skipped on replay.
         sync.handle_frame(
@@ -276,12 +249,8 @@ class TestSeenSetDedup:
         state2 = copy.deepcopy(state1)
         state2["counts"]["terminals"] = 99
 
-        sync.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": state1}, event_id=None
-        )
-        sync.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": state2}, event_id=None
-        )
+        sync.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": state1}, event_id=None)
+        sync.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": state2}, event_id=None)
 
         assert sync.shared_state()["counts"]["terminals"] == 99
 
@@ -297,8 +266,6 @@ class TestProjection:
         sync = CrossProviderStateSync(_emitter())
         state = _multi_provider_state()
 
-        sync.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None
-        )
+        sync.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": state}, event_id=None)
 
         assert sync.projection() == state

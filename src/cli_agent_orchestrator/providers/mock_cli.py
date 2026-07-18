@@ -102,7 +102,7 @@ class MockCliProvider(BaseProvider):
         if _scripted_prompts_enabled() and SCRIPTED_PROMPT_MARKER in clean:
             # Find the marker position
             marker_idx = clean.rfind(SCRIPTED_PROMPT_MARKER)
-            after_marker = clean[marker_idx + len(SCRIPTED_PROMPT_MARKER):]
+            after_marker = clean[marker_idx + len(SCRIPTED_PROMPT_MARKER) :]
             # The marker line may contain the prompt text (e.g. "APPROVAL_REQUIRED: Allow?")
             # The answer is delivered when there is a SUBSEQUENT line with non-whitespace
             # content after the marker line.

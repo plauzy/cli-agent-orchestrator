@@ -19,13 +19,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from cli_agent_orchestrator.services.agui.base import RecordingUiEmitter
 from cli_agent_orchestrator.services.agui.handoff_approval import (
     AgentHandoffWithApproval,
     ApprovalDecision,
     Interrupt,
 )
-from cli_agent_orchestrator.services.agui.base import RecordingUiEmitter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -67,7 +66,7 @@ def _parse_frames(raw_frames: List[str]) -> List[Dict[str, Any]]:
         # Each frame is "data: {...}\n\n"
         for line in frame.strip().split("\n"):
             if line.startswith("data: "):
-                payload = line[len("data: "):]
+                payload = line[len("data: ") :]
                 results.append(json.loads(payload))
     return results
 
@@ -83,9 +82,7 @@ async def test_run_plane_emits_run_started_first():
     from cli_agent_orchestrator.services.agui.run_plane import run_plane_stream
 
     input_data = _minimal_run_input()
-    frames = await _collect_stream(
-        run_plane_stream(input_data=input_data)
-    )
+    frames = await _collect_stream(run_plane_stream(input_data=input_data))
     parsed = _parse_frames(frames)
 
     assert len(parsed) >= 2
@@ -100,9 +97,7 @@ async def test_run_plane_emits_run_finished_last():
     from cli_agent_orchestrator.services.agui.run_plane import run_plane_stream
 
     input_data = _minimal_run_input()
-    frames = await _collect_stream(
-        run_plane_stream(input_data=input_data)
-    )
+    frames = await _collect_stream(run_plane_stream(input_data=input_data))
     parsed = _parse_frames(frames)
 
     last = parsed[-1]
@@ -134,9 +129,7 @@ async def test_run_plane_no_snapshot_fn():
     from cli_agent_orchestrator.services.agui.run_plane import run_plane_stream
 
     input_data = _minimal_run_input()
-    frames = await _collect_stream(
-        run_plane_stream(input_data=input_data, snapshot_fn=None)
-    )
+    frames = await _collect_stream(run_plane_stream(input_data=input_data, snapshot_fn=None))
     parsed = _parse_frames(frames)
 
     assert len(parsed) == 2
@@ -238,11 +231,13 @@ async def test_run_plane_resume_approve():
     )
 
     input_data = _minimal_run_input(
-        resume=[{
-            "interruptId": interrupt.id,
-            "status": "resolved",
-            "payload": {"approved": True},
-        }]
+        resume=[
+            {
+                "interruptId": interrupt.id,
+                "status": "resolved",
+                "payload": {"approved": True},
+            }
+        ]
     )
 
     frames = await _collect_stream(
@@ -279,11 +274,13 @@ async def test_run_plane_resume_deny():
     )
 
     input_data = _minimal_run_input(
-        resume=[{
-            "interruptId": interrupt.id,
-            "status": "resolved",
-            "payload": {"approved": False},
-        }]
+        resume=[
+            {
+                "interruptId": interrupt.id,
+                "status": "resolved",
+                "payload": {"approved": False},
+            }
+        ]
     )
 
     frames = await _collect_stream(
@@ -318,11 +315,13 @@ async def test_run_plane_resume_edit():
     )
 
     input_data = _minimal_run_input(
-        resume=[{
-            "interruptId": interrupt.id,
-            "status": "resolved",
-            "payload": {"editedArgs": "modified command"},
-        }]
+        resume=[
+            {
+                "interruptId": interrupt.id,
+                "status": "resolved",
+                "payload": {"editedArgs": "modified command"},
+            }
+        ]
     )
 
     frames = await _collect_stream(
@@ -355,11 +354,13 @@ async def test_run_plane_resume_cancelled_maps_to_deny():
     )
 
     input_data = _minimal_run_input(
-        resume=[{
-            "interruptId": interrupt.id,
-            "status": "cancelled",
-            "payload": {},
-        }]
+        resume=[
+            {
+                "interruptId": interrupt.id,
+                "status": "cancelled",
+                "payload": {},
+            }
+        ]
     )
 
     frames = await _collect_stream(
@@ -388,11 +389,13 @@ async def test_run_plane_resume_unknown_interrupt():
     construct = AgentHandoffWithApproval(emitter=emitter, answer_delivery=None)
 
     input_data = _minimal_run_input(
-        resume=[{
-            "interruptId": "nonexistent-id",
-            "status": "resolved",
-            "payload": {"approved": True},
-        }]
+        resume=[
+            {
+                "interruptId": "nonexistent-id",
+                "status": "resolved",
+                "payload": {"approved": True},
+            }
+        ]
     )
 
     frames = await _collect_stream(
@@ -428,11 +431,13 @@ async def test_run_plane_resume_already_resolved_is_idempotent():
 
     # Now try to resume it again through run_plane
     input_data = _minimal_run_input(
-        resume=[{
-            "interruptId": interrupt.id,
-            "status": "resolved",
-            "payload": {"approved": True},
-        }]
+        resume=[
+            {
+                "interruptId": interrupt.id,
+                "status": "resolved",
+                "payload": {"approved": True},
+            }
+        ]
     )
 
     frames = await _collect_stream(
@@ -467,7 +472,11 @@ async def test_run_plane_live_projection():
             "terminal_id": "t-1",
             "session_name": "s-1",
             "timestamp": "2026-07-04T00:00:00Z",
-            "detail": {"event_type": "post_create_terminal", "agent_name": "worker", "provider": "claude_code"},
+            "detail": {
+                "event_type": "post_create_terminal",
+                "agent_name": "worker",
+                "provider": "claude_code",
+            },
         },
         {
             "id": "evt-2",
@@ -511,9 +520,7 @@ async def test_encoder_produces_data_only_camel_case():
     from cli_agent_orchestrator.services.agui.run_plane import run_plane_stream
 
     input_data = _minimal_run_input()
-    frames = await _collect_stream(
-        run_plane_stream(input_data=input_data)
-    )
+    frames = await _collect_stream(run_plane_stream(input_data=input_data))
 
     for frame in frames:
         # Must start with "data: "
@@ -521,7 +528,7 @@ async def test_encoder_produces_data_only_camel_case():
         # Must end with \n\n
         assert frame.endswith("\n\n"), f"Frame does not end with \\n\\n: {frame!r}"
         # Parse the JSON
-        payload = json.loads(frame[len("data: "):-2])
+        payload = json.loads(frame[len("data: ") : -2])
         # Must have a "type" field
         assert "type" in payload, f"Frame missing 'type' field: {payload}"
         # threadId and runId should be camelCase where present
@@ -544,9 +551,7 @@ async def test_run_plane_501_without_extra():
         run_plane_mod.AG_UI_AVAILABLE = False
 
         input_data = _minimal_run_input()
-        frames = await _collect_stream(
-            run_plane_mod.run_plane_stream(input_data=input_data)
-        )
+        frames = await _collect_stream(run_plane_mod.run_plane_stream(input_data=input_data))
         parsed = _parse_frames(frames)
         assert len(parsed) == 1
         assert "ag-ui-protocol not installed" in parsed[0]["error"]
@@ -607,11 +612,13 @@ async def test_run_plane_resume_empty_payload_produces_error():
     )
 
     input_data = _minimal_run_input(
-        resume=[{
-            "interruptId": interrupt.id,
-            "status": "resolved",
-            "payload": {},
-        }]
+        resume=[
+            {
+                "interruptId": interrupt.id,
+                "status": "resolved",
+                "payload": {},
+            }
+        ]
     )
 
     frames = await _collect_stream(
@@ -645,11 +652,13 @@ async def test_run_plane_resume_non_dict_payload_produces_error():
     )
 
     input_data = _minimal_run_input(
-        resume=[{
-            "interruptId": interrupt.id,
-            "status": "resolved",
-            "payload": None,
-        }]
+        resume=[
+            {
+                "interruptId": interrupt.id,
+                "status": "resolved",
+                "payload": None,
+            }
+        ]
     )
 
     frames = await _collect_stream(
@@ -682,11 +691,13 @@ async def test_run_plane_resume_non_boolean_approved_produces_error():
     )
 
     input_data = _minimal_run_input(
-        resume=[{
-            "interruptId": interrupt.id,
-            "status": "resolved",
-            "payload": {"approved": "yes"},
-        }]
+        resume=[
+            {
+                "interruptId": interrupt.id,
+                "status": "resolved",
+                "payload": {"approved": "yes"},
+            }
+        ]
     )
 
     frames = await _collect_stream(
@@ -719,11 +730,13 @@ async def test_run_plane_resume_cancelled_status_still_works_with_empty_payload(
     )
 
     input_data = _minimal_run_input(
-        resume=[{
-            "interruptId": interrupt.id,
-            "status": "cancelled",
-            "payload": {},
-        }]
+        resume=[
+            {
+                "interruptId": interrupt.id,
+                "status": "cancelled",
+                "payload": {},
+            }
+        ]
     )
 
     frames = await _collect_stream(

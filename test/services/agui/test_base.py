@@ -17,10 +17,9 @@ from cli_agent_orchestrator.services.agui.base import (
     apply_json_patch_strict,
 )
 from cli_agent_orchestrator.services.agui_stream import (
-    GENERATIVE_UI_COMPONENTS,
     _MAX_GENERATIVE_PROPS_BYTES,
+    GENERATIVE_UI_COMPONENTS,
 )
-
 
 # ---------------------------------------------------------------------------
 # Minimal concrete subclass for testing

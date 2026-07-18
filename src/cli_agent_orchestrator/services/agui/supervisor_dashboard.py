@@ -36,15 +36,17 @@ from cli_agent_orchestrator.services.agui_stream import (
 )
 
 # Frame types that update rollup counters.
-_ROLLUP_TYPES = frozenset({
-    AGUI_STEP_STARTED,
-    AGUI_STEP_FINISHED,
-    AGUI_RUN_STARTED,
-    AGUI_RUN_FINISHED,
-    AGUI_TOOL_CALL_START,
-    AGUI_TOOL_CALL_END,
-    AGUI_TOOL_CALL_RESULT,
-})
+_ROLLUP_TYPES = frozenset(
+    {
+        AGUI_STEP_STARTED,
+        AGUI_STEP_FINISHED,
+        AGUI_RUN_STARTED,
+        AGUI_RUN_FINISHED,
+        AGUI_TOOL_CALL_START,
+        AGUI_TOOL_CALL_END,
+        AGUI_TOOL_CALL_RESULT,
+    }
+)
 
 
 class SupervisorDashboardStream(AguiConstruct):
@@ -185,10 +187,13 @@ class SupervisorDashboardStream(AguiConstruct):
 
         sessions: List[Dict[str, Any]] = self._fleet.get("sessions", [])
         terminals: List[Dict[str, Any]] = self._fleet.get("terminals", [])
-        counts = self._fleet.get("counts", {
-            "sessions": len(sessions),
-            "terminals": len(terminals),
-        })
+        counts = self._fleet.get(
+            "counts",
+            {
+                "sessions": len(sessions),
+                "terminals": len(terminals),
+            },
+        )
 
         # Active sessions: not terminated.
         active_sessions = sum(
@@ -203,9 +208,7 @@ class SupervisorDashboardStream(AguiConstruct):
 
         # Waiting terminals.
         waiting_terminals = [
-            t.get("id", "")
-            for t in terminals
-            if t.get("status") == "waiting_user_answer"
+            t.get("id", "") for t in terminals if t.get("status") == "waiting_user_answer"
         ]
 
         return {

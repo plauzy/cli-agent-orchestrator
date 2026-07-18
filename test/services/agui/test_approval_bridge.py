@@ -21,7 +21,6 @@ from cli_agent_orchestrator.services.agui.handoff_approval import (
 )
 from cli_agent_orchestrator.services.event_bus import EventBus
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -74,11 +73,12 @@ class TestBridgeOnWaiting:
         loop = asyncio.get_event_loop()
         test_bus.set_loop(loop)
 
-        with patch(
-            "cli_agent_orchestrator.services.agui.approval_bridge.bus", test_bus
-        ), patch(
-            "cli_agent_orchestrator.services.agui_enablement.agui_surface_enabled",
-            return_value=True,
+        with (
+            patch("cli_agent_orchestrator.services.agui.approval_bridge.bus", test_bus),
+            patch(
+                "cli_agent_orchestrator.services.agui_enablement.agui_surface_enabled",
+                return_value=True,
+            ),
         ):
             task = asyncio.create_task(bridge.run())
             await asyncio.sleep(0.01)
@@ -113,11 +113,12 @@ class TestBridgeOnWaiting:
         loop = asyncio.get_event_loop()
         test_bus.set_loop(loop)
 
-        with patch(
-            "cli_agent_orchestrator.services.agui.approval_bridge.bus", test_bus
-        ), patch(
-            "cli_agent_orchestrator.services.agui_enablement.agui_surface_enabled",
-            return_value=True,
+        with (
+            patch("cli_agent_orchestrator.services.agui.approval_bridge.bus", test_bus),
+            patch(
+                "cli_agent_orchestrator.services.agui_enablement.agui_surface_enabled",
+                return_value=True,
+            ),
         ):
             task = asyncio.create_task(bridge.run())
             await asyncio.sleep(0.01)
@@ -163,11 +164,12 @@ class TestBridgeOnLeaveWaiting:
         loop = asyncio.get_event_loop()
         test_bus.set_loop(loop)
 
-        with patch(
-            "cli_agent_orchestrator.services.agui.approval_bridge.bus", test_bus
-        ), patch(
-            "cli_agent_orchestrator.services.agui_enablement.agui_surface_enabled",
-            return_value=True,
+        with (
+            patch("cli_agent_orchestrator.services.agui.approval_bridge.bus", test_bus),
+            patch(
+                "cli_agent_orchestrator.services.agui_enablement.agui_surface_enabled",
+                return_value=True,
+            ),
         ):
             task = asyncio.create_task(bridge.run())
             await asyncio.sleep(0.01)
@@ -186,9 +188,7 @@ class TestBridgeOnLeaveWaiting:
             await asyncio.sleep(0.05)
 
             assert len(construct.pending()) == 0
-            all_interrupts = [
-                i for i in construct._interrupts.values() if i.outcome == "expired"
-            ]
+            all_interrupts = [i for i in construct._interrupts.values() if i.outcome == "expired"]
             assert len(all_interrupts) == 1
 
             task.cancel()

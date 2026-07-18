@@ -97,9 +97,7 @@ class TestFailedPatchDrop:
         fleet = _fleet_snapshot()
 
         # Feed snapshot first.
-        dashboard.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None
-        )
+        dashboard.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None)
 
         # Feed an invalid delta (path does not exist).
         dashboard.handle_frame(
@@ -116,9 +114,7 @@ class TestFailedPatchDrop:
         dashboard = SupervisorDashboardStream(_emitter())
         fleet = _fleet_snapshot()
 
-        dashboard.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None
-        )
+        dashboard.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None)
 
         # Valid delta: add a new terminal.
         new_terminal = {
@@ -132,10 +128,12 @@ class TestFailedPatchDrop:
         }
         dashboard.handle_frame(
             AGUI_STATE_DELTA,
-            {"delta": [
-                {"op": "add", "path": "/terminals/-", "value": new_terminal},
-                {"op": "replace", "path": "/counts/terminals", "value": 4},
-            ]},
+            {
+                "delta": [
+                    {"op": "add", "path": "/terminals/-", "value": new_terminal},
+                    {"op": "replace", "path": "/counts/terminals", "value": 4},
+                ]
+            },
             event_id="good-delta",
         )
 
@@ -151,9 +149,7 @@ class TestProviderRollup:
         dashboard = SupervisorDashboardStream(_emitter())
         fleet = _fleet_snapshot()
 
-        dashboard.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None
-        )
+        dashboard.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None)
 
         snapshot = dashboard.supervisor_snapshot()
         assert snapshot["by_provider"] == {
@@ -166,20 +162,20 @@ class TestProviderRollup:
         dashboard = SupervisorDashboardStream(_emitter())
         fleet = _fleet_snapshot()
         # Add another kiro_cli terminal.
-        fleet["terminals"].append({
-            "id": "t4",
-            "session_name": "dev-session",
-            "provider": "kiro_cli",
-            "agent_profile": None,
-            "window": "extra",
-            "status": "running",
-            "last_active": None,
-        })
+        fleet["terminals"].append(
+            {
+                "id": "t4",
+                "session_name": "dev-session",
+                "provider": "kiro_cli",
+                "agent_profile": None,
+                "window": "extra",
+                "status": "running",
+                "last_active": None,
+            }
+        )
         fleet["counts"]["terminals"] = 4
 
-        dashboard.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None
-        )
+        dashboard.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None)
 
         snapshot = dashboard.supervisor_snapshot()
         assert snapshot["by_provider"]["kiro_cli"] == 2
@@ -192,9 +188,7 @@ class TestWaitingTerminals:
         dashboard = SupervisorDashboardStream(_emitter())
         fleet = _fleet_snapshot()
 
-        dashboard.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None
-        )
+        dashboard.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None)
 
         snapshot = dashboard.supervisor_snapshot()
         assert snapshot["waiting_terminals"] == ["t2"]
@@ -205,9 +199,7 @@ class TestWaitingTerminals:
         # Remove waiting status.
         fleet["terminals"][1]["status"] = "running"
 
-        dashboard.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None
-        )
+        dashboard.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None)
 
         snapshot = dashboard.supervisor_snapshot()
         assert snapshot["waiting_terminals"] == []
@@ -220,9 +212,7 @@ class TestHierarchy:
         dashboard = SupervisorDashboardStream(_emitter())
         fleet = _fleet_snapshot()
 
-        dashboard.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None
-        )
+        dashboard.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None)
 
         h = dashboard.hierarchy()
         assert "dev-session" in h
@@ -246,17 +236,11 @@ class TestSeenSetDedup:
         dashboard = SupervisorDashboardStream(_emitter())
         fleet = _fleet_snapshot()
 
-        dashboard.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None
-        )
+        dashboard.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None)
 
         # Feed two STEP_STARTED with the same event_id.
-        dashboard.handle_frame(
-            AGUI_STEP_STARTED, {"timestamp": "t1"}, event_id="step-1"
-        )
-        dashboard.handle_frame(
-            AGUI_STEP_STARTED, {"timestamp": "t2"}, event_id="step-1"
-        )
+        dashboard.handle_frame(AGUI_STEP_STARTED, {"timestamp": "t1"}, event_id="step-1")
+        dashboard.handle_frame(AGUI_STEP_STARTED, {"timestamp": "t2"}, event_id="step-1")
 
         # Only one should have been counted.
         assert dashboard._rollup[AGUI_STEP_STARTED] == 1
@@ -268,12 +252,8 @@ class TestSeenSetDedup:
         fleet2["sessions"][0]["status"] = "closed"
 
         # Feed two snapshots without event_id (both should be processed).
-        dashboard.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": fleet1}, event_id=None
-        )
-        dashboard.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": fleet2}, event_id=None
-        )
+        dashboard.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": fleet1}, event_id=None)
+        dashboard.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": fleet2}, event_id=None)
 
         # Second snapshot should have replaced the first.
         snapshot = dashboard.supervisor_snapshot()
@@ -287,9 +267,7 @@ class TestRollupCounters:
         dashboard = SupervisorDashboardStream(_emitter())
         fleet = _fleet_snapshot()
 
-        dashboard.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None
-        )
+        dashboard.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None)
 
         dashboard.handle_frame(AGUI_RUN_STARTED, {}, event_id="run-1")
         dashboard.handle_frame(AGUI_STEP_STARTED, {}, event_id="step-1")
@@ -313,9 +291,7 @@ class TestLastActivity:
         dashboard = SupervisorDashboardStream(_emitter())
         fleet = _fleet_snapshot()
 
-        dashboard.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None
-        )
+        dashboard.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None)
 
         dashboard.handle_frame(
             AGUI_STEP_STARTED, {"timestamp": "2026-07-04T00:05:00Z"}, event_id="e1"
@@ -340,8 +316,6 @@ class TestProjection:
         dashboard = SupervisorDashboardStream(_emitter())
         fleet = _fleet_snapshot()
 
-        dashboard.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None
-        )
+        dashboard.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": fleet}, event_id=None)
 
         assert dashboard.projection() == dashboard.supervisor_snapshot()

@@ -60,9 +60,7 @@ class TestMalformedSince:
         if not bad_since:
             return
 
-        monkeypatch.setattr(
-            "cli_agent_orchestrator.services.sse_bus.get_bus", lambda: _FakeBus()
-        )
+        monkeypatch.setattr("cli_agent_orchestrator.services.sse_bus.get_bus", lambda: _FakeBus())
 
         resp = client.get("/agui/v1/stream", params={"since": bad_since})
         assert resp.status_code == 400
@@ -78,9 +76,7 @@ class TestMalformedSince:
             def after_id(self, event_id, **kwargs):
                 return []
 
-        monkeypatch.setattr(
-            "cli_agent_orchestrator.services.sse_bus.get_bus", lambda: _FakeBus()
-        )
+        monkeypatch.setattr("cli_agent_orchestrator.services.sse_bus.get_bus", lambda: _FakeBus())
         monkeypatch.setattr(
             "cli_agent_orchestrator.services.event_log_service.get_event_log", lambda: _Log()
         )
@@ -106,9 +102,7 @@ class TestSincePrecedence:
                 calls["after_id"] += 1
                 return []
 
-        monkeypatch.setattr(
-            "cli_agent_orchestrator.services.sse_bus.get_bus", lambda: _FakeBus()
-        )
+        monkeypatch.setattr("cli_agent_orchestrator.services.sse_bus.get_bus", lambda: _FakeBus())
         monkeypatch.setattr(
             "cli_agent_orchestrator.services.event_log_service.get_event_log", lambda: _Log()
         )
