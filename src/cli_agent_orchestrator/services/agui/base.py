@@ -18,8 +18,8 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Protocol, Tuple
 
 from cli_agent_orchestrator.services.agui_stream import (
-    GENERATIVE_UI_COMPONENTS,
     _MAX_GENERATIVE_PROPS_BYTES,
+    GENERATIVE_UI_COMPONENTS,
 )
 
 # Fields whose presence (with a non-empty string value) in a frame data dict
@@ -164,7 +164,9 @@ def _resolve_pointer(doc: Any, path: str) -> Tuple[Any, str]:
     return parent, parts[-1]
 
 
-def apply_json_patch_strict(doc: Dict[str, Any], ops: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def apply_json_patch_strict(
+    doc: Dict[str, Any], ops: List[Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
     """Apply a list of RFC-6902 ops (add/remove/replace only) to a deep copy of *doc*.
 
     Returns the patched document on success, or ``None`` on any failure

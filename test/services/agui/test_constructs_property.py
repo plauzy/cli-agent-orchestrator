@@ -12,7 +12,7 @@ import copy
 import json
 from typing import Any, Dict, List
 
-from hypothesis import given, settings, assume
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from cli_agent_orchestrator.services.agui.base import RecordingUiEmitter
@@ -40,7 +40,6 @@ from cli_agent_orchestrator.services.ui_state_service import (
     diff_snapshot,
 )
 
-
 # ---------------------------------------------------------------------------
 # Strategies
 # ---------------------------------------------------------------------------
@@ -56,11 +55,13 @@ def fleet_sessions(draw, min_size=0, max_size=5):
     n = draw(st.integers(min_value=min_size, max_value=max_size))
     sessions = []
     for i in range(n):
-        sessions.append({
-            "id": f"s{i}",
-            "name": f"session-{i}",
-            "status": draw(session_statuses),
-        })
+        sessions.append(
+            {
+                "id": f"s{i}",
+                "name": f"session-{i}",
+                "status": draw(session_statuses),
+            }
+        )
     return sessions
 
 
@@ -72,15 +73,17 @@ def fleet_terminals(draw, session_names, min_size=0, max_size=10):
     n = draw(st.integers(min_value=min_size, max_value=max_size))
     terminals = []
     for i in range(n):
-        terminals.append({
-            "id": f"t{i}",
-            "session_name": draw(st.sampled_from(session_names)),
-            "provider": draw(provider_names),
-            "agent_profile": None,
-            "window": f"w{i}",
-            "status": draw(terminal_statuses),
-            "last_active": None,
-        })
+        terminals.append(
+            {
+                "id": f"t{i}",
+                "session_name": draw(st.sampled_from(session_names)),
+                "provider": draw(provider_names),
+                "agent_profile": None,
+                "window": f"w{i}",
+                "status": draw(terminal_statuses),
+                "last_active": None,
+            }
+        )
     return terminals
 
 
@@ -115,17 +118,14 @@ class TestP3FoldConvergence:
         session_names = [s["name"] for s in sessions]
         # Build a simple terminal list.
         terminals = [
-            {"id": f"t{i}", "tmux_session": name, "provider": "kiro_cli",
-             "agent_profile": None}
+            {"id": f"t{i}", "tmux_session": name, "provider": "kiro_cli", "agent_profile": None}
             for i, name in enumerate(session_names)
         ]
 
         authoritative = build_dashboard_snapshot(sessions, terminals)
 
         sync = CrossProviderStateSync(RecordingUiEmitter())
-        sync.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": authoritative}, event_id=None
-        )
+        sync.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": authoritative}, event_id=None)
 
         assert sync.converges_with(authoritative)
 
@@ -134,9 +134,7 @@ class TestP3FoldConvergence:
     def test_snapshot_then_delta_converges(self, snapshot):
         """A snapshot followed by a delta from diff_snapshot converges."""
         sync = CrossProviderStateSync(RecordingUiEmitter())
-        sync.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": snapshot}, event_id=None
-        )
+        sync.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": snapshot}, event_id=None)
 
         # Mutate the snapshot to create a new version.
         updated = copy.deepcopy(snapshot)
@@ -146,9 +144,7 @@ class TestP3FoldConvergence:
         # Compute the delta.
         delta_ops = diff_snapshot(snapshot, updated)
         if delta_ops:
-            sync.handle_frame(
-                AGUI_STATE_DELTA, {"delta": delta_ops}, event_id="delta-1"
-            )
+            sync.handle_frame(AGUI_STATE_DELTA, {"delta": delta_ops}, event_id="delta-1")
 
         assert sync.converges_with(updated)
 
@@ -196,9 +192,11 @@ class TestP4ReplayIdempotency:
         # Use an id-bearing snapshot so dedup applies uniformly.
         frames = [
             (AGUI_STATE_SNAPSHOT, {"snapshot": snapshot}, "snap-1"),
-            (AGUI_STATE_DELTA,
-             {"delta": [{"op": "replace", "path": "/counts/sessions", "value": 99}]},
-             "d-1"),
+            (
+                AGUI_STATE_DELTA,
+                {"delta": [{"op": "replace", "path": "/counts/sessions", "value": 99}]},
+                "d-1",
+            ),
         ]
 
         s1 = CrossProviderStateSync(RecordingUiEmitter())
@@ -256,9 +254,7 @@ class TestP5ProjectionPrivacy:
     def test_supervisor_projection_has_no_body(self, snapshot):
         """Supervisor projection never contains body fields."""
         dashboard = SupervisorDashboardStream(RecordingUiEmitter())
-        dashboard.handle_frame(
-            AGUI_STATE_SNAPSHOT, {"snapshot": snapshot}, event_id=None
-        )
+        dashboard.handle_frame(AGUI_STATE_SNAPSHOT, {"snapshot": snapshot}, event_id=None)
 
         proj = dashboard.projection()
         serialized = json.dumps(proj)
@@ -311,9 +307,7 @@ class TestP6TimelineWellFormedness:
 
         entries = timeline.entries()
         delegation_entries = [e for e in entries if e.kind == "delegation"]
-        completed_or_failed = [
-            e for e in delegation_entries if e.status in ("completed", "failed")
-        ]
+        completed_or_failed = [e for e in delegation_entries if e.status in ("completed", "failed")]
         # completed+failed <= total opened delegations
         assert len(completed_or_failed) <= len(delegation_entries)
 
@@ -354,7 +348,5 @@ class TestP6TimelineWellFormedness:
 
         entries = timeline.entries()
         delegation_entries = [e for e in entries if e.kind == "delegation"]
-        completed_or_failed = [
-            e for e in delegation_entries if e.status in ("completed", "failed")
-        ]
+        completed_or_failed = [e for e in delegation_entries if e.status in ("completed", "failed")]
         assert len(completed_or_failed) <= len(delegation_entries)

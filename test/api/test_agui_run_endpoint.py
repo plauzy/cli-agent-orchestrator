@@ -55,7 +55,7 @@ def _parse_sse_frames(content: str) -> List[Dict[str, Any]]:
     results = []
     for line in content.split("\n"):
         if line.startswith("data: "):
-            payload = line[len("data: "):]
+            payload = line[len("data: ") :]
             try:
                 results.append(json.loads(payload))
             except json.JSONDecodeError:
@@ -93,9 +93,7 @@ def _agui_on(monkeypatch):
 def _auth_off(monkeypatch):
     """Disable auth by default (tests that need auth override this)."""
     monkeypatch.setattr(main, "is_auth_enabled", lambda: False)
-    monkeypatch.setattr(
-        "cli_agent_orchestrator.security.auth.is_auth_enabled", lambda: False
-    )
+    monkeypatch.setattr("cli_agent_orchestrator.security.auth.is_auth_enabled", lambda: False)
 
 
 @pytest.fixture(autouse=True)
@@ -152,9 +150,7 @@ def test_run_501_without_agui_extra(monkeypatch):
 def test_run_requires_read_scope(monkeypatch):
     """POST /agui/v1/run requires at least cao:read scope when auth is enabled."""
     monkeypatch.setattr(main, "is_auth_enabled", lambda: True)
-    monkeypatch.setattr(
-        "cli_agent_orchestrator.security.auth.is_auth_enabled", lambda: True
-    )
+    monkeypatch.setattr("cli_agent_orchestrator.security.auth.is_auth_enabled", lambda: True)
     monkeypatch.setattr(
         "cli_agent_orchestrator.security.auth.extract_scopes_from_token", lambda tok: []
     )
@@ -170,9 +166,7 @@ def test_run_requires_read_scope(monkeypatch):
 def test_run_read_scope_sufficient_without_resume(monkeypatch):
     """cao:read is sufficient when resume[] is empty."""
     monkeypatch.setattr(main, "is_auth_enabled", lambda: True)
-    monkeypatch.setattr(
-        "cli_agent_orchestrator.security.auth.is_auth_enabled", lambda: True
-    )
+    monkeypatch.setattr("cli_agent_orchestrator.security.auth.is_auth_enabled", lambda: True)
     monkeypatch.setattr(
         "cli_agent_orchestrator.security.auth.extract_scopes_from_token",
         lambda tok: ["cao:read"],
@@ -190,19 +184,21 @@ def test_run_read_scope_sufficient_without_resume(monkeypatch):
 def test_run_write_required_for_resume(monkeypatch):
     """cao:write is required when resume[] is non-empty."""
     monkeypatch.setattr(main, "is_auth_enabled", lambda: True)
-    monkeypatch.setattr(
-        "cli_agent_orchestrator.security.auth.is_auth_enabled", lambda: True
-    )
+    monkeypatch.setattr("cli_agent_orchestrator.security.auth.is_auth_enabled", lambda: True)
     monkeypatch.setattr(
         "cli_agent_orchestrator.security.auth.extract_scopes_from_token",
         lambda tok: ["cao:read"],
     )
 
-    body = _minimal_body(resume=[{
-        "interruptId": "int-1",
-        "status": "resolved",
-        "payload": {"approved": True},
-    }])
+    body = _minimal_body(
+        resume=[
+            {
+                "interruptId": "int-1",
+                "status": "resolved",
+                "payload": {"approved": True},
+            }
+        ]
+    )
 
     resp = client.post(
         "/agui/v1/run",
@@ -216,9 +212,7 @@ def test_run_write_required_for_resume(monkeypatch):
 def test_run_write_scope_allows_resume(monkeypatch):
     """cao:write permits resume[] entries."""
     monkeypatch.setattr(main, "is_auth_enabled", lambda: True)
-    monkeypatch.setattr(
-        "cli_agent_orchestrator.security.auth.is_auth_enabled", lambda: True
-    )
+    monkeypatch.setattr("cli_agent_orchestrator.security.auth.is_auth_enabled", lambda: True)
     monkeypatch.setattr(
         "cli_agent_orchestrator.security.auth.extract_scopes_from_token",
         lambda tok: ["cao:read", "cao:write"],
@@ -230,11 +224,15 @@ def test_run_write_scope_allows_resume(monkeypatch):
     construct = AgentHandoffWithApproval(emitter=emitter, answer_delivery=None)
     app.state.approval_bridge = _FakeBridge(construct)
 
-    body = _minimal_body(resume=[{
-        "interruptId": "nonexistent",
-        "status": "resolved",
-        "payload": {"approved": True},
-    }])
+    body = _minimal_body(
+        resume=[
+            {
+                "interruptId": "nonexistent",
+                "status": "resolved",
+                "payload": {"approved": True},
+            }
+        ]
+    )
 
     try:
         resp = client.post(
@@ -334,11 +332,15 @@ def test_run_resume_approve_via_http():
     app.state.approval_bridge = _FakeBridge(construct)
 
     try:
-        body = _minimal_body(resume=[{
-            "interruptId": interrupt.id,
-            "status": "resolved",
-            "payload": {"approved": True},
-        }])
+        body = _minimal_body(
+            resume=[
+                {
+                    "interruptId": interrupt.id,
+                    "status": "resolved",
+                    "payload": {"approved": True},
+                }
+            ]
+        )
 
         resp = client.post("/agui/v1/run", json=body)
         assert resp.status_code == 200
@@ -366,11 +368,15 @@ def test_run_resume_unknown_interrupt_via_http():
     app.state.approval_bridge = _FakeBridge(construct)
 
     try:
-        body = _minimal_body(resume=[{
-            "interruptId": "does-not-exist",
-            "status": "resolved",
-            "payload": {"approved": True},
-        }])
+        body = _minimal_body(
+            resume=[
+                {
+                    "interruptId": "does-not-exist",
+                    "status": "resolved",
+                    "payload": {"approved": True},
+                }
+            ]
+        )
 
         resp = client.post("/agui/v1/run", json=body)
         assert resp.status_code == 200

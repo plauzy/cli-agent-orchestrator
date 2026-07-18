@@ -59,9 +59,7 @@ class MultiAgentSessionTimeline(AguiConstruct):
         entries = timeline.entries()
     """
 
-    def __init__(
-        self, emitter: UiEmitter, retention_cap: int = DEFAULT_RETENTION_CAP
-    ) -> None:
+    def __init__(self, emitter: UiEmitter, retention_cap: int = DEFAULT_RETENTION_CAP) -> None:
         super().__init__(emitter)
         self._retention_cap = retention_cap
         # Ordered list of entries (arrival order).

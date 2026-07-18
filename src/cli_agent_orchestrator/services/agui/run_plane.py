@@ -32,15 +32,17 @@ AG_UI_AVAILABLE = False
 try:
     from ag_ui.core.events import (
         CustomEvent,
-        Interrupt as AgUiInterrupt,
+    )
+    from ag_ui.core.events import Interrupt as AgUiInterrupt
+    from ag_ui.core.events import (
         RunAgentInput,
         RunErrorEvent,
         RunFinishedEvent,
         RunFinishedInterruptOutcome,
         RunFinishedSuccessOutcome,
         RunStartedEvent,
-        StateSnapshotEvent,
         StateDeltaEvent,
+        StateSnapshotEvent,
         StepFinishedEvent,
         StepStartedEvent,
         ToolCallEndEvent,
@@ -302,9 +304,7 @@ async def run_plane_stream(
 
             # Feed through the lifecycle tracker for TOOL_CALL bracketing
             for ftype, fdata in tracker.feed(event, (agui_type, data)):
-                frame = _translate_live_frame(
-                    ftype, fdata, thread_id, run_id, encoder
-                )
+                frame = _translate_live_frame(ftype, fdata, thread_id, run_id, encoder)
                 if frame is not None:
                     yield frame
 

@@ -14,15 +14,14 @@ from hypothesis import strategies as st
 
 from cli_agent_orchestrator.services.agui.base import RecordingUiEmitter
 from cli_agent_orchestrator.services.agui.handoff_approval import (
+    _REGISTRY_CAP,
+    _RESOLVED_TTL_SECONDS,
     AgentHandoffWithApproval,
     ApprovalDecision,
     Interrupt,
-    _REGISTRY_CAP,
-    _RESOLVED_TTL_SECONDS,
     _translate_decision,
     classify_reason,
 )
-
 
 # ---------------------------------------------------------------------------
 # Test fixtures
@@ -118,9 +117,7 @@ class TestResume:
 
     @pytest.mark.asyncio
     async def test_approve_claude_code(self, construct, delivery):
-        interrupt = construct.on_provider_waiting(
-            "t-1", "claude_code", "\u2191/\u2193 to navigate"
-        )
+        interrupt = construct.on_provider_waiting("t-1", "claude_code", "\u2191/\u2193 to navigate")
         result = await construct.resume(interrupt.id, ApprovalDecision.APPROVE)
         assert result.resolved
         assert result.outcome == "approve"
@@ -129,9 +126,7 @@ class TestResume:
 
     @pytest.mark.asyncio
     async def test_deny_claude_code(self, construct, delivery):
-        interrupt = construct.on_provider_waiting(
-            "t-1", "claude_code", "\u2191/\u2193 to navigate"
-        )
+        interrupt = construct.on_provider_waiting("t-1", "claude_code", "\u2191/\u2193 to navigate")
         result = await construct.resume(interrupt.id, ApprovalDecision.DENY)
         assert result.resolved
         assert result.outcome == "deny"
@@ -140,36 +135,28 @@ class TestResume:
 
     @pytest.mark.asyncio
     async def test_approve_kiro_cli(self, construct, delivery):
-        interrupt = construct.on_provider_waiting(
-            "t-1", "kiro_cli", "Allow this action? [y/n/t]:"
-        )
+        interrupt = construct.on_provider_waiting("t-1", "kiro_cli", "Allow this action? [y/n/t]:")
         result = await construct.resume(interrupt.id, ApprovalDecision.APPROVE)
         assert result.outcome == "approve"
         assert ("send_input", "t-1", "y") in delivery.calls
 
     @pytest.mark.asyncio
     async def test_deny_kiro_cli(self, construct, delivery):
-        interrupt = construct.on_provider_waiting(
-            "t-1", "kiro_cli", "Allow this action? [y/n/t]:"
-        )
+        interrupt = construct.on_provider_waiting("t-1", "kiro_cli", "Allow this action? [y/n/t]:")
         result = await construct.resume(interrupt.id, ApprovalDecision.DENY)
         assert result.outcome == "deny"
         assert ("send_input", "t-1", "n") in delivery.calls
 
     @pytest.mark.asyncio
     async def test_approve_codex(self, construct, delivery):
-        interrupt = construct.on_provider_waiting(
-            "t-1", "codex", "Approve execution? (y/n)"
-        )
+        interrupt = construct.on_provider_waiting("t-1", "codex", "Approve execution? (y/n)")
         result = await construct.resume(interrupt.id, ApprovalDecision.APPROVE)
         assert result.outcome == "approve"
         assert ("send_input", "t-1", "y") in delivery.calls
 
     @pytest.mark.asyncio
     async def test_deny_codex(self, construct, delivery):
-        interrupt = construct.on_provider_waiting(
-            "t-1", "codex", "Approve execution? (y/n)"
-        )
+        interrupt = construct.on_provider_waiting("t-1", "codex", "Approve execution? (y/n)")
         result = await construct.resume(interrupt.id, ApprovalDecision.DENY)
         assert result.outcome == "deny"
         assert ("send_input", "t-1", "n") in delivery.calls
@@ -183,9 +170,7 @@ class TestResume:
 
     @pytest.mark.asyncio
     async def test_emits_resolution_intent(self, construct, emitter):
-        interrupt = construct.on_provider_waiting(
-            "t-1", "claude_code", "\u2191/\u2193 to navigate"
-        )
+        interrupt = construct.on_provider_waiting("t-1", "claude_code", "\u2191/\u2193 to navigate")
         await construct.resume(interrupt.id, ApprovalDecision.APPROVE)
         # Should have 2 intents: one for creation, one for resolution
         assert len(emitter.intents) == 2
@@ -204,9 +189,7 @@ class TestIdempotentResume:
 
     @pytest.mark.asyncio
     async def test_second_resume_returns_recorded_outcome(self, construct, delivery):
-        interrupt = construct.on_provider_waiting(
-            "t-1", "claude_code", "\u2191/\u2193 to navigate"
-        )
+        interrupt = construct.on_provider_waiting("t-1", "claude_code", "\u2191/\u2193 to navigate")
         first = await construct.resume(interrupt.id, ApprovalDecision.APPROVE)
         # Clear delivery history
         delivery.calls.clear()
@@ -233,9 +216,7 @@ class TestEditDecision:
 
     @pytest.mark.asyncio
     async def test_edit_with_valid_text(self, construct, delivery):
-        interrupt = construct.on_provider_waiting(
-            "t-1", "claude_code", "\u2191/\u2193 to navigate"
-        )
+        interrupt = construct.on_provider_waiting("t-1", "claude_code", "\u2191/\u2193 to navigate")
         result = await construct.resume(
             interrupt.id, ApprovalDecision.EDIT, edited_text="custom response"
         )
@@ -244,9 +225,7 @@ class TestEditDecision:
 
     @pytest.mark.asyncio
     async def test_edit_without_text_rejects(self, construct):
-        interrupt = construct.on_provider_waiting(
-            "t-1", "claude_code", "\u2191/\u2193 to navigate"
-        )
+        interrupt = construct.on_provider_waiting("t-1", "claude_code", "\u2191/\u2193 to navigate")
         with pytest.raises(ValueError, match="non-empty edited_text"):
             await construct.resume(interrupt.id, ApprovalDecision.EDIT, edited_text=None)
         # Interrupt should still be open
@@ -254,22 +233,16 @@ class TestEditDecision:
 
     @pytest.mark.asyncio
     async def test_edit_with_empty_text_rejects(self, construct):
-        interrupt = construct.on_provider_waiting(
-            "t-1", "claude_code", "\u2191/\u2193 to navigate"
-        )
+        interrupt = construct.on_provider_waiting("t-1", "claude_code", "\u2191/\u2193 to navigate")
         with pytest.raises(ValueError, match="non-empty edited_text"):
             await construct.resume(interrupt.id, ApprovalDecision.EDIT, edited_text="   ")
         assert not interrupt.resolved
 
     @pytest.mark.asyncio
     async def test_edit_with_too_long_text_rejects(self, construct):
-        interrupt = construct.on_provider_waiting(
-            "t-1", "claude_code", "\u2191/\u2193 to navigate"
-        )
+        interrupt = construct.on_provider_waiting("t-1", "claude_code", "\u2191/\u2193 to navigate")
         with pytest.raises(ValueError, match="too long"):
-            await construct.resume(
-                interrupt.id, ApprovalDecision.EDIT, edited_text="x" * 4001
-            )
+            await construct.resume(interrupt.id, ApprovalDecision.EDIT, edited_text="x" * 4001)
         assert not interrupt.resolved
 
 
@@ -284,9 +257,7 @@ class TestUnsupportedDecision:
     @pytest.mark.asyncio
     async def test_edit_not_supported_for_trust_prompt(self, construct):
         # Trust prompt only supports approve/deny (not edit)
-        interrupt = construct.on_provider_waiting(
-            "t-1", "claude_code", "Yes, I trust this folder"
-        )
+        interrupt = construct.on_provider_waiting("t-1", "claude_code", "Yes, I trust this folder")
         assert "edit" not in interrupt.options
         with pytest.raises(ValueError, match="not supported"):
             await construct.resume(interrupt.id, ApprovalDecision.EDIT, edited_text="text")
@@ -342,9 +313,7 @@ class TestRegistryBounds:
         construct = AgentHandoffWithApproval(emitter=emitter, answer_delivery=delivery)
         # Create and resolve _REGISTRY_CAP interrupts
         for i in range(_REGISTRY_CAP):
-            it = construct.on_provider_waiting(
-                f"t-{i}", "codex", "Approve? (y/n)"
-            )
+            it = construct.on_provider_waiting(f"t-{i}", "codex", "Approve? (y/n)")
             construct.expire(f"t-{i}")
 
         # Now create one more -- should trigger eviction

@@ -100,9 +100,7 @@ class TestInvalidDecision:
     def test_invalid_decision_value(self, approval_bridge):
         # Create an interrupt first
         construct = approval_bridge.construct
-        interrupt = construct.on_provider_waiting(
-            "t-1", "claude_code", "\u2191/\u2193 to navigate"
-        )
+        interrupt = construct.on_provider_waiting("t-1", "claude_code", "\u2191/\u2193 to navigate")
         resp = client.post(
             f"/agui/v1/interrupts/{interrupt.id}/resume",
             json={"decision": "invalid_decision"},
@@ -112,9 +110,7 @@ class TestInvalidDecision:
     def test_unsupported_decision_for_category(self, approval_bridge):
         """Edit not supported for trust_prompt (only approve/deny)."""
         construct = approval_bridge.construct
-        interrupt = construct.on_provider_waiting(
-            "t-1", "claude_code", "Yes, I trust this folder"
-        )
+        interrupt = construct.on_provider_waiting("t-1", "claude_code", "Yes, I trust this folder")
         assert "edit" not in interrupt.options
         resp = client.post(
             f"/agui/v1/interrupts/{interrupt.id}/resume",
@@ -125,9 +121,7 @@ class TestInvalidDecision:
 
     def test_edit_without_text(self, approval_bridge):
         construct = approval_bridge.construct
-        interrupt = construct.on_provider_waiting(
-            "t-1", "claude_code", "\u2191/\u2193 to navigate"
-        )
+        interrupt = construct.on_provider_waiting("t-1", "claude_code", "\u2191/\u2193 to navigate")
         resp = client.post(
             f"/agui/v1/interrupts/{interrupt.id}/resume",
             json={"decision": "edit"},
@@ -137,9 +131,7 @@ class TestInvalidDecision:
 
     def test_edit_with_too_long_text(self, approval_bridge):
         construct = approval_bridge.construct
-        interrupt = construct.on_provider_waiting(
-            "t-1", "claude_code", "\u2191/\u2193 to navigate"
-        )
+        interrupt = construct.on_provider_waiting("t-1", "claude_code", "\u2191/\u2193 to navigate")
         resp = client.post(
             f"/agui/v1/interrupts/{interrupt.id}/resume",
             json={"decision": "edit", "edited_text": "x" * 4001},
@@ -158,9 +150,7 @@ class TestSuccessfulResume:
 
     def test_approve(self, approval_bridge):
         construct = approval_bridge.construct
-        interrupt = construct.on_provider_waiting(
-            "t-1", "claude_code", "\u2191/\u2193 to navigate"
-        )
+        interrupt = construct.on_provider_waiting("t-1", "claude_code", "\u2191/\u2193 to navigate")
         resp = client.post(
             f"/agui/v1/interrupts/{interrupt.id}/resume",
             json={"decision": "approve"},
@@ -174,9 +164,7 @@ class TestSuccessfulResume:
 
     def test_deny(self, approval_bridge):
         construct = approval_bridge.construct
-        interrupt = construct.on_provider_waiting(
-            "t-1", "codex", "Approve execution? (y/n)"
-        )
+        interrupt = construct.on_provider_waiting("t-1", "codex", "Approve execution? (y/n)")
         resp = client.post(
             f"/agui/v1/interrupts/{interrupt.id}/resume",
             json={"decision": "deny"},
@@ -186,9 +174,7 @@ class TestSuccessfulResume:
 
     def test_edit(self, approval_bridge):
         construct = approval_bridge.construct
-        interrupt = construct.on_provider_waiting(
-            "t-1", "claude_code", "\u2191/\u2193 to navigate"
-        )
+        interrupt = construct.on_provider_waiting("t-1", "claude_code", "\u2191/\u2193 to navigate")
         resp = client.post(
             f"/agui/v1/interrupts/{interrupt.id}/resume",
             json={"decision": "edit", "edited_text": "custom command"},
@@ -207,9 +193,7 @@ class TestIdempotentResume:
 
     def test_second_resume_returns_same_outcome(self, approval_bridge):
         construct = approval_bridge.construct
-        interrupt = construct.on_provider_waiting(
-            "t-1", "claude_code", "\u2191/\u2193 to navigate"
-        )
+        interrupt = construct.on_provider_waiting("t-1", "claude_code", "\u2191/\u2193 to navigate")
         # First resume
         resp1 = client.post(
             f"/agui/v1/interrupts/{interrupt.id}/resume",

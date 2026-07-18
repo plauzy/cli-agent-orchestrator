@@ -11,7 +11,7 @@ import json
 from typing import Any, Dict, Optional
 
 import pytest
-from hypothesis import given, settings, assume
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from cli_agent_orchestrator.services.agui.base import (
@@ -20,10 +20,9 @@ from cli_agent_orchestrator.services.agui.base import (
     apply_json_patch_strict,
 )
 from cli_agent_orchestrator.services.agui_stream import (
-    GENERATIVE_UI_COMPONENTS,
     _MAX_GENERATIVE_PROPS_BYTES,
+    GENERATIVE_UI_COMPONENTS,
 )
-
 
 # ---------------------------------------------------------------------------
 # Minimal concrete subclass for property tests
@@ -74,11 +73,21 @@ invalid_components = st.text(min_size=1, max_size=30).filter(
 
 # AG-UI type strings (mix of known and unknown).
 agui_types = st.one_of(
-    st.sampled_from([
-        "RUN_STARTED", "RUN_FINISHED", "STEP_STARTED", "STEP_FINISHED",
-        "TEXT_MESSAGE_CONTENT", "STATE_DELTA", "STATE_SNAPSHOT",
-        "GENERATIVE_UI", "RAW", "RUN_ERROR", "TOOL_CALL_START",
-    ]),
+    st.sampled_from(
+        [
+            "RUN_STARTED",
+            "RUN_FINISHED",
+            "STEP_STARTED",
+            "STEP_FINISHED",
+            "TEXT_MESSAGE_CONTENT",
+            "STATE_DELTA",
+            "STATE_SNAPSHOT",
+            "GENERATIVE_UI",
+            "RAW",
+            "RUN_ERROR",
+            "TOOL_CALL_START",
+        ]
+    ),
     st.text(min_size=1, max_size=30),
 )
 
@@ -122,7 +131,9 @@ class TestP7EmitRefusalParity:
 class TestP8SubclassTotality:
     """Subclass handle_frame never crashes on arbitrary types; projection is serializable."""
 
-    @given(agui_type=agui_types, data=json_props, event_id=st.one_of(st.none(), st.text(max_size=20)))
+    @given(
+        agui_type=agui_types, data=json_props, event_id=st.one_of(st.none(), st.text(max_size=20))
+    )
     @settings(max_examples=100)
     def test_handle_frame_never_raises(self, agui_type: str, data: dict, event_id):
         rec = RecordingUiEmitter()
@@ -195,6 +206,7 @@ class TestPatchImmutability:
     def test_add_never_mutates_original(self, key: str, value):
         doc = {"existing": "data", "nested": {"a": 1}}
         import copy
+
         original = copy.deepcopy(doc)
         ops = [{"op": "add", "path": f"/{key}", "value": value}]
         apply_json_patch_strict(doc, ops)

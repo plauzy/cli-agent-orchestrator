@@ -139,9 +139,7 @@ class ToolCallLifecycleTracker:
 
         return superseded_frames
 
-    def _try_close(
-        self, terminal_id: Optional[str], record: Dict[str, Any]
-    ) -> List[Frame]:
+    def _try_close(self, terminal_id: Optional[str], record: Dict[str, Any]) -> List[Frame]:
         """Attempt to close an open tool call matching the terminal_id."""
         if terminal_id is None or terminal_id not in self._open:
             # No orphan closers: if we don't know about this terminal, emit nothing.
@@ -171,25 +169,29 @@ class ToolCallLifecycleTracker:
 
         # For a2a_delegation opens, also synthesize TOOL_CALL_RESULT.
         if open_info["kind"] == "a2a_delegation":
-            frames.append((
-                AGUI_TOOL_CALL_RESULT,
+            frames.append(
+                (
+                    AGUI_TOOL_CALL_RESULT,
+                    {
+                        "tool_call_id": tool_call_id,
+                        "result": "",  # Metadata-only: no body content.
+                        "metadata": metadata,
+                        "timestamp": timestamp,
+                    },
+                )
+            )
+
+        # Always synthesize TOOL_CALL_END.
+        frames.append(
+            (
+                AGUI_TOOL_CALL_END,
                 {
                     "tool_call_id": tool_call_id,
-                    "result": "",  # Metadata-only: no body content.
+                    "tool_call_name": open_info["tool_call_name"],
                     "metadata": metadata,
                     "timestamp": timestamp,
                 },
-            ))
-
-        # Always synthesize TOOL_CALL_END.
-        frames.append((
-            AGUI_TOOL_CALL_END,
-            {
-                "tool_call_id": tool_call_id,
-                "tool_call_name": open_info["tool_call_name"],
-                "metadata": metadata,
-                "timestamp": timestamp,
-            },
-        ))
+            )
+        )
 
         return frames

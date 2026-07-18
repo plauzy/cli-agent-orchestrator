@@ -30,12 +30,12 @@ logger = logging.getLogger(__name__)
 
 from cli_agent_orchestrator.providers.claude_code import (
     TRUST_PROMPT_PATTERN as CLAUDE_TRUST_PATTERN,
+)
+from cli_agent_orchestrator.providers.claude_code import (
     WAITING_USER_ANSWER_PATTERN as CLAUDE_WAITING_PATTERN,
 )
-from cli_agent_orchestrator.providers.codex import (
-    TRUST_PROMPT_PATTERN as CODEX_TRUST_PATTERN,
-    WAITING_PROMPT_PATTERN as CODEX_WAITING_PATTERN,
-)
+from cli_agent_orchestrator.providers.codex import TRUST_PROMPT_PATTERN as CODEX_TRUST_PATTERN
+from cli_agent_orchestrator.providers.codex import WAITING_PROMPT_PATTERN as CODEX_WAITING_PATTERN
 from cli_agent_orchestrator.providers.kiro_cli import TUI_PERMISSION_PATTERN as KIRO_TUI_PATTERN
 
 # Legacy kiro permission pattern (instantiated on the provider instance normally,
@@ -154,9 +154,7 @@ class Interrupt:
     message: str = ""
     metadata: Dict[str, Any] = field(default_factory=dict)
     options: List[str] = field(default_factory=list)
-    created_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     expires_at: Optional[str] = None
     resolved: bool = False
     outcome: Optional[str] = None
@@ -170,11 +168,11 @@ class Interrupt:
 class AnswerDelivery(Protocol):
     """Protocol for delivering an answer to a terminal."""
 
-    def send_input(self, terminal_id: str, text: str, **kwargs: Any) -> None:
-        ...  # pragma: no cover
+    def send_input(
+        self, terminal_id: str, text: str, **kwargs: Any
+    ) -> None: ...  # pragma: no cover
 
-    def send_special_key(self, terminal_id: str, key: str) -> bool:
-        ...  # pragma: no cover
+    def send_special_key(self, terminal_id: str, key: str) -> bool: ...  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------
@@ -287,11 +285,7 @@ class AgentHandoffWithApproval(AguiConstruct):
     def projection(self) -> Dict[str, Any]:
         """Return current state as JSON-serializable dict."""
         return {
-            "pending": [
-                _interrupt_to_dict(i)
-                for i in self._interrupts.values()
-                if not i.resolved
-            ],
+            "pending": [_interrupt_to_dict(i) for i in self._interrupts.values() if not i.resolved],
             "total": len(self._interrupts),
         }
 
@@ -389,9 +383,7 @@ class AgentHandoffWithApproval(AguiConstruct):
                 if not edited_text or not edited_text.strip():
                     raise ValueError("Edit decision requires non-empty edited_text")
                 if len(edited_text) > 4000:
-                    raise ValueError(
-                        f"edited_text too long ({len(edited_text)} chars, max 4000)"
-                    )
+                    raise ValueError(f"edited_text too long ({len(edited_text)} chars, max 4000)")
 
             # Resolve the interrupt
             interrupt.resolved = True
@@ -416,7 +408,8 @@ class AgentHandoffWithApproval(AguiConstruct):
                 except Exception as e:
                     logger.warning(
                         "Failed to deliver answer for interrupt %s: %s",
-                        interrupt_id, e,
+                        interrupt_id,
+                        e,
                     )
 
             # Emit resolution intent

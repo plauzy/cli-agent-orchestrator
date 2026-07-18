@@ -129,15 +129,15 @@ class TestCursorPropagation:
         lines = [
             "id: a",
             "event: X",
-            'data: {}',
+            "data: {}",
             "",
             "id: b",
             "event: Y",
-            'data: {}',
+            "data: {}",
             "",
             "id: c",
             "event: Z",
-            'data: {}',
+            "data: {}",
             "",
         ]
         reader, frames = _make_reader(lines)
@@ -150,7 +150,7 @@ class TestReconnectResume:
     def test_reconnect_sends_last_event_id(self):
         reader = AguiStreamReader("http://localhost:8420")
         # Simulate first connection that yields one event.
-        lines1 = ["id: evt-5", "event: A", 'data: {}', ""]
+        lines1 = ["id: evt-5", "event: A", "data: {}", ""]
         fake_resp1 = _FakeResponse(lines1)
         with patch("cli_agent_orchestrator.services.agui.stream_reader.requests.get") as mock_get:
             mock_get.return_value = fake_resp1
@@ -159,7 +159,7 @@ class TestReconnectResume:
         assert reader.last_event_id == "evt-5"
 
         # Simulate reconnect; verify Last-Event-ID header is sent.
-        lines2 = ["id: evt-6", "event: B", 'data: {}', ""]
+        lines2 = ["id: evt-6", "event: B", "data: {}", ""]
         fake_resp2 = _FakeResponse(lines2)
         with patch("cli_agent_orchestrator.services.agui.stream_reader.requests.get") as mock_get:
             mock_get.return_value = fake_resp2
@@ -170,7 +170,7 @@ class TestReconnectResume:
 
     def test_since_param_in_url(self):
         reader = AguiStreamReader("http://localhost:8420", since="2024-01-01T00:00:00Z")
-        lines = ["id: e1", "event: A", 'data: {}', ""]
+        lines = ["id: e1", "event: A", "data: {}", ""]
         fake_resp = _FakeResponse(lines)
         with patch("cli_agent_orchestrator.services.agui.stream_reader.requests.get") as mock_get:
             mock_get.return_value = fake_resp
@@ -265,13 +265,11 @@ class TestMalformedLineTolerance:
         assert frames[0][2] == {"_raw": [1, 2, 3]}
 
     def test_access_token_sent_in_header(self):
-        lines = ["id: e1", "event: A", 'data: {}', ""]
+        lines = ["id: e1", "event: A", "data: {}", ""]
         fake_resp = _FakeResponse(lines)
         with patch("cli_agent_orchestrator.services.agui.stream_reader.requests.get") as mock_get:
             mock_get.return_value = fake_resp
-            reader = AguiStreamReader(
-                "http://localhost:8420", access_token="my-secret-token"
-            )
+            reader = AguiStreamReader("http://localhost:8420", access_token="my-secret-token")
             list(reader.frames())
             headers = mock_get.call_args[1]["headers"]
             assert headers["Authorization"] == "Bearer my-secret-token"
