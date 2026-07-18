@@ -379,6 +379,46 @@ Each construct has a runnable example in `examples/`:
 - [`agui-cross-provider-sync/`](../examples/agui-cross-provider-sync/) - CrossProviderStateSync convergence
 - [`agui-stock-client-live/`](../examples/agui-stock-client-live/) - Stock AG-UI run plane (POST /agui/v1/run)
 
+### Shift-left video evidence (per feature)
+
+Each new L2 construct ships a **gated** demo recording — proof-of-work, not
+decoration. The recorder in
+[`examples/agui-construct-demos/tools/`](../examples/agui-construct-demos/tools/)
+runs the construct's own asserting example (the `run.sh` above, in
+offline/synthetic mode — no live provider, network, or secrets), and **only**
+produces a GIF if the example exits `0` and prints its `PASS` marker. If a
+construct regresses, the example exits non-zero, the recorder fails, and CI goes
+red (see the `AG-UI construct demos (shift-left recordings)` job) — so a broken
+construct cannot yield a green recording. Regenerate locally with:
+
+```sh
+cd examples/agui-construct-demos/tools
+npm ci && npm run playwright:install && npm run record   # ONLY=<slug> for one
+```
+
+The GIFs are committed under [`docs/media/`](media/) and re-generated + uploaded
+as CI artifacts (`agui-construct-demos`) on every run.
+
+**SupervisorDashboardStream** — folds `STATE_SNAPSHOT`/`STATE_DELTA` into a live
+fleet view (active sessions, provider distribution, waiting terminals):
+
+![SupervisorDashboardStream example asserting its fold logic](media/agui-supervisor-dashboard-demo.gif)
+
+**MultiAgentSessionTimeline** — reconstructs the delegation + message timeline
+from tool-call frames and closes entries on `TOOL_CALL_END`/`RESULT`:
+
+![MultiAgentSessionTimeline example asserting delegation tracking](media/agui-session-timeline-demo.gif)
+
+**AgentHandoffWithApproval** — human-in-the-loop lifecycle: classify the prompt,
+raise an interrupt, resume exactly-once (idempotent), and expire on transition:
+
+![AgentHandoffWithApproval example asserting the approval lifecycle](media/agui-handoff-approval-demo.gif)
+
+**CrossProviderStateSync** — convergent shared state across `claude_code`,
+`kiro_cli`, and `codex`, verified with `converges_with()` before and after a delta:
+
+![CrossProviderStateSync example asserting convergence](media/agui-cross-provider-sync-demo.gif)
+
 ---
 
 ## Privacy boundary
