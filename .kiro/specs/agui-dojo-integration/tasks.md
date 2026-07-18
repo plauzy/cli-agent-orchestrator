@@ -93,8 +93,8 @@ graph TD
 - [ ] 4. Scaffold the Python example server
   - [ ] 4.1 Create `integrations/cli-agent-orchestrator/python/examples/pyproject.toml`: uv-managed, dep on `cli-agent-orchestrator[agui]` (pinned), dep on `fastapi`, `uvicorn`
     - _Requirements: 3.1_
-  - [ ] 4.2 Create `server/__init__.py` (or `server/main.py`): FastAPI app, bind `HOST`/`PORT` (default 8024), health check endpoint
-    - _Requirements: 3.2_
+  - [ ] 4.2 Create `server/__init__.py` (or `server/main.py`): FastAPI app, bind `HOST`/`PORT` (default 8024), `/health` route at the root path, CORS per upstream convention (never `allow_credentials=True` with wildcard origins — `CORS_ALLOW_ORIGINS` pattern from ag-ui `3b370a5`)
+    - _Requirements: 3.2, 3.7_
   - [ ] 4.3 Implement child-process management: on startup boot `cao-server` + tmux + `mock_cli` fleet; on shutdown kill child; readiness check (accept connections within 30s)
     - _Requirements: 3.3, 3.6_
   - [ ] 4.4 Add `dev` script in pyproject.toml for `uv run dev` to start with uvicorn
@@ -235,5 +235,7 @@ graph TD
 - Each e2e spec follows the same pattern as existing integration tests -- the work
   is adapting the page-helper interactions to CAO's response timing.
 - Task 21 is tracking only (no code in our PR); items are raised in the issue.
-- All claims cite the grounding commits: ag-ui main @ `b646b46`, CAO main @ `1b00753`.
+- All claims cite the grounding commits: ag-ui main @ `b646b46`, CAO main @
+  `1b00753` — re-verified unchanged 2026-07-18 @ ag-ui `3a7433e` / CAO `41c8ce7`
+  (see `.kiro/specs/agui-l2-constructs/audit.md` addendum).
 

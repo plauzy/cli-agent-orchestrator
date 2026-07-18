@@ -7,7 +7,9 @@
 >
 > **Grounding:** every upstream mechanical claim below was verified against
 > **ag-ui main @ `b646b46`** (CONTRIBUTING.md, `apps/dojo/*`, `integrations/*`,
-> `render.yaml`, `.github/workflows/dojo-e2e.yml`) on 2026-07-17. CAO-side
+> `render.yaml`, `.github/workflows/dojo-e2e.yml`) on 2026-07-17, and re-audited
+> 2026-07-18 @ ag-ui `3a7433e` / CAO `41c8ce7` (no cited surface changed; two new
+> example-server conventions folded in — see §4). CAO-side
 > capabilities reference the merged L1 (awslabs PR #436) and the Phase-2 spec in
 > `.kiro/specs/agui-l2-constructs/` (this branch). This plan operationalizes the
 > vision of awslabs issues **#386** / **#458** and the partnership offer in
@@ -149,7 +151,12 @@ events (via the official `ag-ui-protocol` encoder — same machinery as CAO's ru
 plane). Keyless by construction: `mock_cli` needs no credentials, satisfying the
 CI reality that external API keys are absent (dojo CI routes LLM traffic to an
 aimock server on `:5555` for nearly all suites — langroid alone needs a real
-`OPENAI_API_KEY` secret and is skipped on fork PRs; CAO needs neither).
+`OPENAI_API_KEY` secret and is skipped on fork PRs; CAO needs neither). Two
+upstream example-server conventions from the `b646b46..3a7433e` delta apply:
+never combine `allow_credentials=True` with a wildcard CORS origin (the
+`CORS_ALLOW_ORIGINS` pattern applied across example servers in `3b370a5`,
+#1939/#1940 — credentials only for explicit origins), and expose `/health` at
+the root path (`691dae8`).
 
 **Design rule learned from the recon**: dojo feature pages are *standardized
 demos with fixed UI contracts* (the shared-state page is a recipe editor; HITL

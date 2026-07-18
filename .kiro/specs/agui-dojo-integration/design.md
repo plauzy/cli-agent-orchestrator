@@ -7,7 +7,9 @@
 >
 > **Grounding:** every upstream mechanical claim was verified against **ag-ui main @
 > `b646b46`** (CONTRIBUTING.md, `apps/dojo/*`, `integrations/*`, `render.yaml`,
-> `.github/workflows/dojo-e2e.yml`) on 2026-07-17. CAO-side capabilities reference
+> `.github/workflows/dojo-e2e.yml`) on 2026-07-17, and re-audited 2026-07-18 @
+> **ag-ui `3a7433e`** / **CAO `41c8ce7`** (no cited surface changed; two new
+> example-server conventions folded in below). CAO-side capabilities reference
 > **cli-agent-orchestrator main @ `1b00753`** (merged L1 from PR #436) and the Phase-2
 > spec.
 
@@ -49,7 +51,9 @@ into a live terminal.
 
 ## Grounding Notes (Source-of-Truth Pins)
 
-Facts this design depends on, verified 2026-07-17:
+Facts this design depends on, verified 2026-07-17 and re-verified unchanged
+2026-07-18 @ ag-ui `3a7433e` / CAO `41c8ce7` (delta details:
+`.kiro/specs/agui-l2-constructs/audit.md` addendum):
 
 **ag-ui main @ `b646b46`:**
 - CONTRIBUTING.md: issue first; you maintain it; required structure
@@ -230,6 +234,11 @@ A thin FastAPI application (`uv run dev`) that:
 - **Keyless CI**: `mock_cli` scripted mode requires no credentials. The dojo CI
   routes LLM traffic to aimock (`:5555`) for most suites, but CAO needs neither
   aimock nor real keys.
+- **Upstream server conventions (added in the `b646b46..3a7433e` delta)**: expose
+  `/health` at the root path (langroid fix `691dae8`), and never combine
+  `allow_credentials=True` with a wildcard CORS origin — follow the
+  `CORS_ALLOW_ORIGINS` pattern applied across example servers in `3b370a5`
+  (#1939/#1940): credentials only for explicit, non-wildcard origins.
 
 ### Dojo Wiring
 
@@ -470,6 +479,8 @@ service additionally needs **tmux present in the runtime image**.
 - **Port binding**: server binds `0.0.0.0` only because the CONTRIBUTING.md server
   env contract requires it; in production the server runs in a container with
   network isolation.
+- **CORS posture**: credentials are never enabled for wildcard origins (upstream
+  security convention `3b370a5`); explicit origins come from `CORS_ALLOW_ORIGINS`.
 
 ## Dependencies
 

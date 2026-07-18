@@ -15,7 +15,9 @@ target in view. This spec operationalizes the partnership offer in issue **#386*
 
 **Grounding:** every upstream structural/mechanical claim was verified against
 **ag-ui main @ `b646b46`** (CONTRIBUTING.md, `apps/dojo/*`, `integrations/*`,
-`render.yaml`, `.github/workflows/dojo-e2e.yml`) on 2026-07-17. CAO-side capabilities
+`render.yaml`, `.github/workflows/dojo-e2e.yml`) on 2026-07-17, and re-audited
+2026-07-18 @ **ag-ui `3a7433e`** / **CAO `41c8ce7`** (no cited surface changed;
+see `.kiro/specs/agui-l2-constructs/audit.md` addendum). CAO-side capabilities
 reference the merged L1 (awslabs PR #436) and the Phase-2 spec in
 `.kiro/specs/agui-l2-constructs/`.
 
@@ -62,7 +64,7 @@ maintainers before significant work begins.
 
 #### Acceptance Criteria
 
-1. THE integration author SHALL file an issue on `ag-ui-protocol/ag-ui` pitching the integration (uniqueness case, MVP feature set, hosted-demo question, maintenance commitment), tag a CODEOWNER, and post in Discord `#-contributing` / Discussions.
+1. THE integration author SHALL file an issue on `ag-ui-protocol/ag-ui` pitching the integration (uniqueness case, MVP feature set, hosted-demo question, maintenance commitment), tag a CODEOWNER, and post in Discord `#-💎-contributing` / Discussions.
 2. THE issue SHALL reference awslabs #386's partnership framing and propose tiering (community vs 1st-party, beside AWS Strands / Bedrock AgentCore).
 3. THE issue SHALL explicitly ask maintainers about appetite for a `multi_agent_fleet` feature page and the interrupt-feature scope.
 4. THE integration author SHALL NOT open the implementation PR until assigned on the issue.
@@ -94,6 +96,7 @@ driven by real orchestrated processes.
 4. THE example server SHALL expose one AG-UI-protocol endpoint per MVP feature: `/agentic-chat`, `/shared-state`, `/human-in-the-loop`, `/interrupt`.
 5. WHEN any feature endpoint receives a valid `RunAgentInput` POST, THE example server SHALL translate the dojo scenario into real fleet operations and stream results as protocol events via the official `ag-ui-protocol` encoder.
 6. IF the example server is started via `uv run dev`, THEN it SHALL be ready to accept connections within 30 seconds.
+7. THE example server SHALL expose a `/health` route at the root path and SHALL NOT combine `allow_credentials=True` with a wildcard CORS origin, following the `CORS_ALLOW_ORIGINS` pattern upstream applied across example servers (ag-ui `3b370a5`, #1939/#1940: credentials only for explicit, non-wildcard origins).
 
 ### Requirement 4: Dojo menu and agents wiring
 

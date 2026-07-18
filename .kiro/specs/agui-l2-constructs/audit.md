@@ -5,6 +5,8 @@
 > Ground truth: **ag-ui main @ `b646b46`** (protocol source of truth) and
 > **cli-agent-orchestrator main @ `1b00753`** (merged L1 from PR #436).
 > Scope: issue awslabs/cli-agent-orchestrator **#458**.
+> Re-audit: 2026-07-18 against ag-ui `3a7433e` / CAO `41c8ce7` — no cited surface
+> changed; see the addendum at the end of this document.
 >
 > Verdicts: ✅ **Grounded** (claim matches code) · ❌ **Contradicted** (claim is
 > wrong vs. code) · ⚠️ **Gap** (real prerequisite the spec does not cover) ·
@@ -192,3 +194,35 @@ atomic apply-else-drop, mirroring the stock client (`fast-json-patch` with
 | CAO adapter mapping | `services/agui_stream.py:108-211` |
 | CAO stream endpoint (replay/snapshot/delta) | `api/main.py:860-1053` |
 | CAO status detection + answer paths | `services/status_monitor.py`, `providers/{claude_code,kiro_cli,codex}.py`, `mcp_server/server.py:319-429,1243-1258`, `api/main.py:1659-1719` |
+
+## Re-audit addendum (2026-07-18) — pins refreshed to ag-ui `3a7433e` / CAO `41c8ce7`
+
+Both fork mains advanced after the original audit; every file in each delta was
+compared against the claims above.
+
+**ag-ui `b646b46..3a7433e`** (5 commits): GitHub-Actions chores (`094c6da`,
+`bc0a2c1`); `3b370a5` fix(security) — integration **example servers** no longer
+combine `allow_credentials=True` with a wildcard CORS origin (adk, aws-strands,
+claude-agent-sdk, langroid; new `CORS_ALLOW_ORIGINS` env pattern, credentials only
+for explicit non-wildcard origins); `691dae8` — langroid registers `/health` at the
+root path. **No change** to the core event schemas, the client
+(verify/sse/http/apply), the encoder, `docs/concepts/*`, CONTRIBUTING.md,
+`apps/dojo/*`, or `render.yaml` — every F1–F22 pin above remains valid verbatim at
+`3a7433e`.
+
+**CAO `1b00753..41c8ce7`** (3 commits): `a614f32` (inline jinja autoescape),
+`8b552bb` (run_agent_step inherits the supervisor working directory server-side),
+`41c8ce7` (CodeQL path-guard colocation) — touching `agent_scaffold.py`,
+`agent_step.py`, `workflow_spec_service.py`, and tests only. **No change** to
+`services/agui_stream.py`, the `/agui/v1/*` routes,
+`event_log_service`/`sse_bus`/`event_primitives`/`ui_state_service`, the providers'
+status patterns, `emit_ui`, `terminal_service.send_input`, or `docs/agui.md`.
+`8b552bb` alters handoff *working-directory* semantics only — no effect on the
+event mapping, statuses, or approval paths this spec relies on. CAO's own CORS
+remains an explicit-origin list + credentials (`constants.py:310-319`,
+`api/main.py:644-650`) — not the wildcard pattern upstream fixed.
+
+**Spec deltas applied in this re-audit:** grounding pins refreshed across all spec
+documents; the dojo example-server design adopts the two new upstream conventions
+(no credentialed wildcard CORS via the `CORS_ALLOW_ORIGINS` pattern; `/health` at
+the root path).
