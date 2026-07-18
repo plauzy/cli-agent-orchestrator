@@ -5,7 +5,8 @@
 > initial draft after a grounding audit against **ag-ui main @ `b646b46`** and
 > **cli-agent-orchestrator main @ `1b00753`** — see `audit.md` for the
 > finding-by-finding evidence trail. Every protocol claim below cites the source of
-> truth it was verified against.
+> truth it was verified against. Re-audited 2026-07-18 against ag-ui `3a7433e` /
+> CAO `41c8ce7`: no cited surface changed (see the audit.md addendum).
 
 ## Overview
 
@@ -77,7 +78,8 @@ interrupt lifecycle.
 
 ## Grounding notes (source-of-truth pins)
 
-Facts this design depends on, verified 2026-07-17:
+Facts this design depends on, verified 2026-07-17 and re-verified unchanged
+2026-07-18 @ ag-ui `3a7433e` / CAO `41c8ce7`:
 
 **ag-ui main @ `b646b46`:**
 - EventType enum has 33 values, identical across TS and Python SDKs
