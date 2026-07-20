@@ -200,7 +200,7 @@ graph TD
 - [x] 19. Validate the AC5 exit gate (depends on Tasks 12, 16, 17, 18)
   - [ ] 19.1 Automated gate test asserting: four constructs each have docs + a runnable example; approve **and** deny land exactly once on a live `mock_cli` scripted prompt via **both** the REST resume route and the run-plane `resume[]`; `converges_with(...)` true across `kiro_cli`/`claude_code`/`codex`; the AC3 run-plane stream passes stock verification; report the failing condition on any miss
     - _Requirements: 15.1, 15.2, 15.4, 15.5, 15.6_
-  - [ ] 19.2 Record the live real-provider evidence (approval-mode profile procedure run once, documented with capture) and link it from the approval example docs
+  - [x] 19.2 Record the live real-provider evidence (approval-mode profile procedure run once, documented with capture) and link it from the approval example docs
     - _Requirements: 15.3_
 
 - [x] 20. Final checkpoint
