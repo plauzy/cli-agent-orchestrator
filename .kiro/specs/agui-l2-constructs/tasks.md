@@ -182,13 +182,13 @@ graph TD
     - _Requirements: 14.1, 14.2, 14.3, 14.5_
   - [ ] 16.3 `examples/agui-handoff-approval/` + docs: CI-path demo over `mock_cli` scripted prompts (browser-equivalent client → REST resume), **plus** the documented live real-provider procedure (approval-mode claude_code profile with provider-default `permissionMode` so a genuine permission prompt occurs)
     - _Requirements: 14.1, 14.2, 14.3, 14.4, 14.5_
-  - [ ] 16.4 `examples/agui-cross-provider-sync/` + docs (same conventions)
+  - [x] 16.4 `examples/agui-cross-provider-sync/` + docs (same conventions)
     - _Requirements: 14.1, 14.2, 14.3, 14.5_
-  - [ ] 16.5 Update `docs/agui.md` with the two-plane model (ambient dialect vs stock run plane) and links to construct docs
+  - [x] 16.5 Update `docs/agui.md` with the two-plane model (ambient dialect vs stock run plane) and links to construct docs
     - _Requirements: 14.1_
 
 - [x] 17. AC3 stock-client zero-adapter live demo (depends on Tasks 13, 16)
-  - [ ] 17.1 `examples/agui-stock-client-live/`: `run.sh` boots `cao-server` (`CAO_AGUI_ENABLED=1`, `mock_cli` fleet driver), waits ≤30 s for readiness, runs a pinned upstream stock client (`@ag-ui/client` HttpAgent / minimal CopilotKit page — zero CAO wire code) against `POST /agui/v1/run`, asserts ≥1 frame rendered from post-connect server activity; non-zero exit + cleanup on failure
+  - [x] 17.1 `examples/agui-stock-client-live/`: `run.sh` boots `cao-server` (`CAO_AGUI_ENABLED=1`, `mock_cli` fleet driver), waits ≤30 s for readiness, runs a pinned upstream stock client (`@ag-ui/client` HttpAgent / minimal CopilotKit page — zero CAO wire code) against `POST /agui/v1/run`, asserts ≥1 frame rendered from post-connect server activity; non-zero exit + cleanup on failure
     - _Requirements: 13.1, 13.2, 13.3, 13.4_
   - [ ]* 17.2 CI smoke test following the existing example-recorder harness pattern
     - _Requirements: 13.1, 13.3_

@@ -1,14 +1,15 @@
 # AG-UI Stock Client Live Example
 
-Proves the AG-UI run plane (`POST /agui/v1/run`) works with a raw HTTP client
-speaking the stock protocol. No CopilotKit, no JavaScript, no custom adapter
-needed.
+Proves the AG-UI run plane (`POST /agui/v1/run`) works with the **pinned upstream
+`@ag-ui/client` SDK** (`HttpAgent`) speaking the stock protocol — the literal AC3
+artifact. No CopilotKit page, no CAO-specific adapter, **zero CAO wire code**:
+`HttpAgent` is the reference client.
 
 ## What it shows
 
 - Booting `cao-server` with `CAO_AGUI_ENABLED=1`
-- POSTing a `RunAgentInput` payload (threadId, runId) to `/agui/v1/run`
-- Parsing `data:`-only SSE frames (camelCase JSON with `type` field)
+- A stock `@ag-ui/client` `HttpAgent` POSTing a `RunAgentInput` to `/agui/v1/run`
+- The SDK decoding the `data:`-only SSE stream into typed `BaseEvent`s
 - Verifying lifecycle-legal frame order (RUN_STARTED first)
 - At least one frame received from post-connect server activity
 
@@ -18,8 +19,10 @@ needed.
 ./examples/agui-stock-client-live/run.sh
 ```
 
-Uses `mock_cli` on PATH for credentials-free operation. The server starts in
-the background, the client POSTs and verifies, then everything is cleaned up.
+Requires **Node.js** (for the `@ag-ui/client` SDK) and the `[agui]` extra
+(`uv sync --extra agui`). Uses `mock_cli` on PATH for credentials-free
+operation. The server starts in the background, the SDK client connects and
+verifies, then everything is cleaned up.
 
 ## What the run plane returns
 
@@ -32,24 +35,17 @@ STATE_SNAPSHOT     -> current fleet state
 RUN_FINISHED       -> outcome: {type: "success"} or {type: "interrupt", ...}
 ```
 
-If the `[agui]` extra (`ag-ui-protocol`) is not installed, the endpoint returns
-HTTP 501 with an install hint. This is also considered a PASS for this example
-(it proves the endpoint responds correctly).
+## Stock client code (minimal — `client.mjs`)
 
-## Stock client code (minimal)
+```js
+import { HttpAgent } from "@ag-ui/client"; // pinned upstream SDK, no CAO wire code
 
-```python
-import requests, json, uuid
-
-payload = {"threadId": str(uuid.uuid4()), "runId": str(uuid.uuid4())}
-resp = requests.post(
-    "http://localhost:9889/agui/v1/run",
-    json=payload,
-    stream=True,
-    timeout=30,
-)
-for line in resp.iter_lines(decode_unicode=True):
-    if line.startswith("data: "):
-        frame = json.loads(line[6:])
-        print(frame["type"])
+const agent = new HttpAgent({ url: "http://localhost:9889/agui/v1/run" });
+agent
+  .run({ threadId: "t", runId: "r", state: {}, messages: [], tools: [], context: [], forwardedProps: {} })
+  .subscribe((event) => console.log(event.type)); // RUN_STARTED, STATE_SNAPSHOT, ...
 ```
+
+The `@ag-ui/client` version is pinned in `package.json`; `run.sh` installs it on
+first run. Because the client is solely `@ag-ui/*` packages, a passing run proves
+the run plane is stock-AG-UI-protocol compliant.

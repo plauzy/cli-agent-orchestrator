@@ -16,10 +16,11 @@ Design constraints:
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 from cli_agent_orchestrator.services.agui.base import (
     AguiConstruct,
+    BoundedSeen,
     UiEmitter,
     apply_json_patch_strict,
 )
@@ -67,8 +68,8 @@ class SupervisorDashboardStream(AguiConstruct):
         super().__init__(emitter)
         # Fleet state derived from STATE_SNAPSHOT/STATE_DELTA frames.
         self._fleet: Optional[Dict[str, Any]] = None
-        # Seen set for deduplication of id-bearing frames.
-        self._seen: Set[str] = set()
+        # Bounded seen set for deduplication of id-bearing frames.
+        self._seen = BoundedSeen()
         # Rollup counters for lifecycle events.
         self._rollup: Dict[str, int] = {
             AGUI_STEP_STARTED: 0,

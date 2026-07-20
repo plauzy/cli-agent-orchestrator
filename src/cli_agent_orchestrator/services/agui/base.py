@@ -223,6 +223,56 @@ def apply_json_patch_strict(
 
 
 # ---------------------------------------------------------------------------
+# BoundedSeen: insertion-ordered dedup set with a hard size cap
+# ---------------------------------------------------------------------------
+
+# Default cap for per-construct dedup sets. On a long-lived stream an unbounded
+# ``set`` of event ids grows without limit (a memory leak); BoundedSeen evicts
+# the oldest ~half once this cap is exceeded while preserving dedup correctness
+# for recent ids.
+_SEEN_CAP = 10_000
+
+
+class BoundedSeen:
+    """An insertion-ordered set of ids with a hard size cap.
+
+    Drop-in replacement for the plain ``set`` the constructs used, supporting
+    exactly the two operations they rely on — ``x in seen`` and ``seen.add(x)``.
+    Once ``cap`` is exceeded it evicts the oldest ~half (in insertion order) in
+    a single pass, so memory is bounded while the most recent ids still dedup
+    correctly. Eviction only affects ids old enough that a duplicate is
+    vanishingly unlikely on an ordered event stream.
+    """
+
+    __slots__ = ("_cap", "_ids")
+
+    def __init__(self, cap: int = _SEEN_CAP) -> None:
+        if cap < 2:
+            raise ValueError("cap must be >= 2")
+        self._cap = cap
+        # dict preserves insertion order (CPython 3.7+); values are unused.
+        self._ids: Dict[str, None] = {}
+
+    def __contains__(self, item: object) -> bool:
+        return item in self._ids
+
+    def __len__(self) -> int:
+        return len(self._ids)
+
+    def add(self, item: str) -> None:
+        """Record *item*. Evicts the oldest ~half once the cap is exceeded."""
+        if item in self._ids:
+            return
+        self._ids[item] = None
+        if len(self._ids) > self._cap:
+            # Evict oldest half in insertion order; the just-added item is
+            # newest and is always retained.
+            evict = len(self._ids) - (self._cap // 2)
+            for key in list(self._ids)[:evict]:
+                del self._ids[key]
+
+
+# ---------------------------------------------------------------------------
 # AguiConstruct base class
 # ---------------------------------------------------------------------------
 
