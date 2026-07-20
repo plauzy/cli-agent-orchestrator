@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from cli_agent_orchestrator.services.agui.base import (
     AguiConstruct,
+    BoundedSeen,
     UiEmitter,
     apply_json_patch_strict,
 )
@@ -47,8 +48,8 @@ class CrossProviderStateSync(AguiConstruct):
     def __init__(self, emitter: UiEmitter) -> None:
         super().__init__(emitter)
         self._state: Optional[Dict[str, Any]] = None
-        # Seen set for deduplication of id-bearing frames.
-        self._seen: Set[str] = set()
+        # Bounded seen set for deduplication of id-bearing frames.
+        self._seen = BoundedSeen()
 
     def handle_frame(
         self, agui_type: str, data: Dict[str, Any], event_id: Optional[str] = None

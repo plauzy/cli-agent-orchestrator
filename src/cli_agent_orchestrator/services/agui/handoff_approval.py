@@ -179,6 +179,30 @@ class AnswerDelivery(Protocol):
 # Per-provider answer translation
 # ---------------------------------------------------------------------------
 
+# ANSI/VT escape sequences: CSI (ESC[ ... final), OSC (ESC] ... BEL/ST), and
+# lone two-char escapes (ESC + Fe). C0/C1 control bytes (incl. NUL) are stripped
+# separately, preserving only tab/newline/carriage-return.
+_ANSI_ESCAPE_RE = re.compile(
+    r"\x1b\[[0-?]*[ -/]*[@-~]"  # CSI
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC ... BEL or ST
+    r"|\x1b[@-Z\\-_]"  # two-char escapes
+)
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _sanitize_edited_text(text: str) -> str:
+    """Strip ANSI/VT escape sequences and control bytes (incl. NUL) from
+    operator-supplied edit text before it is written to a terminal via
+    ``send_input``.
+
+    Preserves tab / newline / carriage-return. Prevents terminal
+    escape-sequence injection through the approval edit path (P1-4). Any bare
+    ESC left after escape-sequence removal is caught by the control-byte pass
+    (0x1b is within \\x0e-\\x1f).
+    """
+    without_ansi = _ANSI_ESCAPE_RE.sub("", text)
+    return _CONTROL_CHARS_RE.sub("", without_ansi)
+
 
 def _translate_decision(
     provider: str,
@@ -192,8 +216,9 @@ def _translate_decision(
     - {"type": "key", "value": str} for special key
     """
     if decision == ApprovalDecision.EDIT:
-        # Edit always sends the edited text
-        return {"type": "text", "value": edited_text or ""}
+        # Edit always sends the edited text, sanitized against terminal escape
+        # injection (ANSI/VT sequences + control bytes) before send_input.
+        return {"type": "text", "value": _sanitize_edited_text(edited_text or "")}
 
     if provider == "claude_code":
         if decision == ApprovalDecision.APPROVE:
@@ -260,6 +285,17 @@ class AgentHandoffWithApproval(AguiConstruct):
     - Translates decisions to per-provider terminal input.
     - Expires interrupts with zero keystrokes on status transitions.
     - Bounded registry with TTL eviction for resolved entries.
+
+    Concurrency invariant (single event loop):
+        ``resume()`` guards mutations with an ``asyncio.Lock``, but the sync
+        methods ``on_provider_waiting()`` and ``expire()`` mutate the same
+        shared registries (``_interrupts``, ``_terminal_to_interrupt``,
+        ``_resolved_at``) WITHOUT that lock. This is safe ONLY when every
+        caller runs on the one asyncio event loop (the CAO server model): a
+        sync method and the async ``resume`` critical section can never truly
+        interleave because control yields only at ``await`` points. Do NOT call
+        these methods from a separate OS thread or a second event loop — doing
+        so reintroduces the check-then-act races the lock exists to prevent.
     """
 
     def __init__(

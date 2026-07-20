@@ -16,8 +16,10 @@ Interrupt lifecycle:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import os
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -124,12 +126,18 @@ def _extract_edited_text(payload: Any) -> Optional[str]:
 # Run plane stream generator
 # ---------------------------------------------------------------------------
 
+# Production default for the idle SSE heartbeat (seconds). Overridable via env
+# for deployment tuning; the per-call ``heartbeat_interval`` param overrides
+# both (used by tests to run at sub-second cadence — F-SL6).
+RUN_PLANE_HEARTBEAT_SECONDS = float(os.environ.get("CAO_AGUI_HEARTBEAT_SECONDS", "15.0"))
+
 
 async def run_plane_stream(
     input_data: Dict[str, Any],
     approval_construct: Optional[Any] = None,
     snapshot_fn: Optional[Any] = None,
     bus_subscribe_fn: Optional[Any] = None,
+    heartbeat_interval: Optional[float] = None,
 ) -> AsyncGenerator[str, None]:
     """Stream lifecycle-legal AG-UI SSE frames for a single run.
 
@@ -295,10 +303,30 @@ async def run_plane_stream(
         from cli_agent_orchestrator.services.agui_stream import to_agui_event
 
         tracker = ToolCallLifecycleTracker()
+        interval = (
+            heartbeat_interval if heartbeat_interval is not None else RUN_PLANE_HEARTBEAT_SECONDS
+        )
+        aiter = bus_subscribe_fn().__aiter__()
+        # Persistent task for the pending read: shielding it across wait_for
+        # timeouts means a heartbeat never cancels the generator's in-flight
+        # step (which would corrupt the async generator).
+        next_task: Optional["asyncio.Task[Any]"] = None
 
-        async for event in bus_subscribe_fn():
-            if finished:
+        while not finished:
+            if next_task is None:
+                next_task = asyncio.ensure_future(aiter.__anext__())
+            try:
+                event = await asyncio.wait_for(asyncio.shield(next_task), timeout=interval)
+            except asyncio.TimeoutError:
+                # Idle for `interval` seconds: emit a proxy-friendly SSE comment
+                # keep-alive so intermediaries don't drop the stream (P1-2). The
+                # shielded read stays pending across the timeout.
+                yield ":keep-alive\n\n"
+                continue
+            except StopAsyncIteration:
+                next_task = None
                 break
+            next_task = None
 
             agui_type, data = to_agui_event(event)
 

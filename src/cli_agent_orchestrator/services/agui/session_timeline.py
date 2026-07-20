@@ -16,9 +16,9 @@ Design constraints:
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
-from cli_agent_orchestrator.services.agui.base import AguiConstruct, UiEmitter
+from cli_agent_orchestrator.services.agui.base import AguiConstruct, BoundedSeen, UiEmitter
 from cli_agent_orchestrator.services.agui_stream import (
     AGUI_TEXT_MESSAGE_CONTENT,
     AGUI_TOOL_CALL_END,
@@ -66,10 +66,10 @@ class MultiAgentSessionTimeline(AguiConstruct):
         self._entries: List[TimelineEntry] = []
         # Index of open delegations by tool_call_id for fast lookup.
         self._open_by_id: Dict[str, int] = {}
-        # Seen set for deduplication of id-bearing frames.
-        self._seen: Set[str] = set()
-        # Track all tool_call_ids we have opened (to detect duplicate starts).
-        self._started_ids: Set[str] = set()
+        # Bounded seen set for deduplication of id-bearing frames.
+        self._seen = BoundedSeen()
+        # Bounded set of tool_call_ids we have opened (to detect duplicate starts).
+        self._started_ids = BoundedSeen()
 
     def handle_frame(
         self, agui_type: str, data: Dict[str, Any], event_id: Optional[str] = None
