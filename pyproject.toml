@@ -68,6 +68,16 @@ otel = [
     "opentelemetry-exporter-otlp-proto-grpc>=1.27.0",
 ]
 
+[project.optional-dependencies]
+# Opt-in OpenTelemetry GenAI telemetry (telemetry/). The base install stays
+# lean: telemetry/otel.py no-ops when the SDK is absent, matching the
+# default-off posture of the feature itself.
+otel = [
+    "opentelemetry-api>=1.27.0",
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.27.0",
+]
+
 [project.scripts]
 "cao" = "cli_agent_orchestrator.cli.main:cli"
 "cao-server" = "cli_agent_orchestrator.api.main:main"
