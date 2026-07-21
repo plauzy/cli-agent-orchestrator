@@ -218,15 +218,18 @@ class _RaisingDelivery:
 @pytest.mark.asyncio
 async def test_handoff_resume_isolates_delivery_failure():
     from cli_agent_orchestrator.services.agui.handoff_approval import (
+        OUTCOME_DELIVERY_FAILED,
         AgentHandoffWithApproval,
         ApprovalDecision,
     )
 
     c = AgentHandoffWithApproval(emitter=RecordingUiEmitter(), answer_delivery=_RaisingDelivery())
     it = c.on_provider_waiting("t1", "kiro_cli", "Allow? (y/n)", session_name="s")
-    await c.resume(
-        interrupt_id=it.id, decision=ApprovalDecision.APPROVE
-    )  # delivery raises → swallowed
+    # Delivery failure is recorded as a terminal delivery_failed outcome, NOT as
+    # a successful resolution.
+    result = await c.resume(interrupt_id=it.id, decision=ApprovalDecision.APPROVE)
+    assert result.resolved
+    assert result.outcome == OUTCOME_DELIVERY_FAILED
 
 
 @pytest.mark.asyncio

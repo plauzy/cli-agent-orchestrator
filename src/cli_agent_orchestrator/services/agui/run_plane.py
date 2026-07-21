@@ -179,7 +179,10 @@ async def run_plane_stream(
 
     # ── 2. Process resume[] entries ─────────────────────────────────────
     if run_input.resume and approval_construct is not None:
-        from cli_agent_orchestrator.services.agui.handoff_approval import ApprovalDecision
+        from cli_agent_orchestrator.services.agui.handoff_approval import (
+            OUTCOME_DELIVERY_FAILED,
+            ApprovalDecision,
+        )
 
         for entry in run_input.resume:
             interrupt_id = entry.interrupt_id
@@ -223,7 +226,7 @@ async def run_plane_stream(
 
             try:
                 decision_enum = ApprovalDecision(decision_str)
-                await approval_construct.resume(
+                resumed = await approval_construct.resume(
                     interrupt_id=interrupt_id,
                     decision=decision_enum,
                     edited_text=edited_text,
@@ -234,6 +237,19 @@ async def run_plane_stream(
                     thread_id=thread_id,
                     run_id=run_id,
                     message=f"Resume failed for interrupt {interrupt_id}: {e}",
+                )
+                yield _emit(err)
+                finished = True
+                return
+
+            # Delivery accepted the decision but failed to reach the terminal:
+            # surface an explicit error rather than finishing as success (P1).
+            if resumed.outcome == OUTCOME_DELIVERY_FAILED:
+                err = RunErrorEvent(
+                    type="RUN_ERROR",
+                    thread_id=thread_id,
+                    run_id=run_id,
+                    message=f"Delivery failed for interrupt {interrupt_id}",
                 )
                 yield _emit(err)
                 finished = True

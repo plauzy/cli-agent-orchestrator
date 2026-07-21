@@ -1273,8 +1273,16 @@ async def agui_resume_interrupt(
             detail=str(e),
         )
 
+    from cli_agent_orchestrator.services.agui.handoff_approval import (
+        OUTCOME_DELIVERY_FAILED,
+    )
+
+    # A delivery_failed outcome means the decision was accepted but never
+    # reached the terminal — surface it as a non-success (ok=False) rather than
+    # reporting the resolution as successful (P1).
+    delivered = result.outcome != OUTCOME_DELIVERY_FAILED
     return {
-        "ok": True,
+        "ok": delivered,
         "interrupt_id": result.id,
         "resolved": result.resolved,
         "outcome": result.outcome,

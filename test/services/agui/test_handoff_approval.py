@@ -451,3 +451,74 @@ class TestTerminalServiceAnswerDelivery:
         result = TerminalServiceAnswerDelivery().send_special_key("t-9", "Enter")
         assert result is True
         assert calls == [("t-9", "Enter")]
+
+
+# ---------------------------------------------------------------------------
+# Variant B: delivery failure -> terminal delivery_failed outcome (P1) + off-loop (P2)
+# ---------------------------------------------------------------------------
+
+
+class _FailingDelivery:
+    def send_input(self, terminal_id: str, text: str, **kwargs: Any) -> None:
+        raise RuntimeError("backend down")
+
+    def send_special_key(self, terminal_id: str, key: str) -> bool:
+        raise RuntimeError("backend down")
+
+
+class TestDeliveryFailureState:
+    """A delivery failure resolves to a terminal delivery_failed outcome (P1)."""
+
+    @pytest.mark.asyncio
+    async def test_failure_records_delivery_failed(self):
+        from cli_agent_orchestrator.services.agui.handoff_approval import OUTCOME_DELIVERY_FAILED
+
+        construct = AgentHandoffWithApproval(
+            emitter=RecordingUiEmitter(), answer_delivery=_FailingDelivery()
+        )
+        interrupt = construct.on_provider_waiting("t-1", "claude_code", "\u2191/\u2193 to navigate")
+
+        result = await construct.resume(interrupt.id, ApprovalDecision.APPROVE)
+        assert result.resolved
+        assert result.outcome == OUTCOME_DELIVERY_FAILED
+        # Terminal state: a second resume returns the recorded failed outcome.
+        second = await construct.resume(interrupt.id, ApprovalDecision.APPROVE)
+        assert second.outcome == OUTCOME_DELIVERY_FAILED
+
+    @pytest.mark.asyncio
+    async def test_delivery_runs_off_loop_via_to_thread(self, monkeypatch):
+        import asyncio as _asyncio
+
+        calls = {"n": 0}
+        real_to_thread = _asyncio.to_thread
+
+        async def _spy(fn, *args, **kwargs):
+            calls["n"] += 1
+            return await real_to_thread(fn, *args, **kwargs)
+
+        monkeypatch.setattr(_asyncio, "to_thread", _spy)
+
+        delivery = MockAnswerDelivery()
+        construct = AgentHandoffWithApproval(emitter=RecordingUiEmitter(), answer_delivery=delivery)
+        interrupt = construct.on_provider_waiting("t-1", "claude_code", "\u2191/\u2193 to navigate")
+        await construct.resume(interrupt.id, ApprovalDecision.APPROVE)
+
+        assert calls["n"] == 1
+        assert len(delivery.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_concurrent_expire_during_delivery_wins(self):
+        construct = AgentHandoffWithApproval(emitter=RecordingUiEmitter(), answer_delivery=None)
+        interrupt = construct.on_provider_waiting("t-1", "claude_code", "\u2191/\u2193 to navigate")
+
+        class _ExpiringDelivery:
+            def send_input(self, terminal_id, text, **kwargs):
+                construct.expire(terminal_id)
+
+            def send_special_key(self, terminal_id, key):
+                construct.expire(terminal_id)
+
+        construct._answer_delivery = _ExpiringDelivery()
+        result = await construct.resume(interrupt.id, ApprovalDecision.APPROVE)
+        assert result.resolved
+        assert result.outcome == "expired"

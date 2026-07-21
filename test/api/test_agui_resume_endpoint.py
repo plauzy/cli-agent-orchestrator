@@ -317,3 +317,44 @@ class TestDeliveryOnResume:
         kind, tid, payload = deliveries[0]
         assert tid == "t-edit"
         assert "custom command" in payload
+
+
+# ---------------------------------------------------------------------------
+# Delivery failure (P1): failure recorded as delivery_failed, ok=False
+# ---------------------------------------------------------------------------
+
+
+class _FailingDelivery:
+    def send_input(self, terminal_id, text, **kwargs):
+        raise RuntimeError("backend down")
+
+    def send_special_key(self, terminal_id, key):
+        raise RuntimeError("backend down")
+
+
+class TestDeliveryFailureRest:
+    """REST resume reports delivery failure as ok=False / delivery_failed."""
+
+    def test_delivery_failure_reports_not_ok(self):
+        construct = AgentHandoffWithApproval(
+            emitter=RecordingUiEmitter(), answer_delivery=_FailingDelivery()
+        )
+        bridge = ApprovalBridge(construct=construct)
+        app.state.approval_bridge = bridge
+        try:
+            interrupt = construct.on_provider_waiting(
+                "t-1", "claude_code", "\u2191/\u2193 to navigate"
+            )
+            resp = client.post(
+                f"/agui/v1/interrupts/{interrupt.id}/resume",
+                json={"decision": "approve"},
+            )
+            assert resp.status_code == 200
+            body = resp.json()
+            # Not reported as success.
+            assert body["ok"] is False
+            assert body["outcome"] == "delivery_failed"
+            assert body["resolved"] is True
+        finally:
+            if hasattr(app.state, "approval_bridge"):
+                del app.state.approval_bridge

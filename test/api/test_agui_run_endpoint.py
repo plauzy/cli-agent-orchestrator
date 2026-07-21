@@ -406,3 +406,54 @@ def test_run_frames_are_camel_case():
             assert frame["threadId"] == "thread-1"
         if "runId" in frame:
             assert frame["runId"] == "run-1"
+
+
+# ---------------------------------------------------------------------------
+# Delivery failure (P1): run plane emits RUN_ERROR on delivery_failed outcome
+# ---------------------------------------------------------------------------
+
+
+class _FailingDelivery:
+    def send_input(self, terminal_id, text, **kwargs):
+        raise RuntimeError("backend down")
+
+    def send_special_key(self, terminal_id, key):
+        raise RuntimeError("backend down")
+
+
+def test_run_resume_delivery_failure_emits_run_error(monkeypatch):
+    """A delivery failure during run-plane resume ends with RUN_ERROR rather
+    than a success RUN_FINISHED."""
+    monkeypatch.setattr(main, "is_auth_enabled", lambda: False)
+    monkeypatch.setattr("cli_agent_orchestrator.security.auth.is_auth_enabled", lambda: False)
+
+    construct = AgentHandoffWithApproval(
+        emitter=RecordingUiEmitter(), answer_delivery=_FailingDelivery()
+    )
+    interrupt = construct.on_provider_waiting("t-1", "claude_code", "\u2191/\u2193 to navigate")
+    app.state.approval_bridge = _FakeBridge(construct)
+
+    body = _minimal_body(
+        resume=[
+            {
+                "interruptId": interrupt.id,
+                "status": "resolved",
+                "payload": {"approved": True},
+            }
+        ]
+    )
+    try:
+        resp = client.post("/agui/v1/run", json=body)
+        assert resp.status_code == 200
+        frames = _parse_sse_frames(resp.text)
+        types = [f["type"] for f in frames]
+        assert "RUN_ERROR" in types
+        success = [
+            f
+            for f in frames
+            if f["type"] == "RUN_FINISHED" and f.get("outcome", {}).get("type") == "success"
+        ]
+        assert not success
+    finally:
+        if hasattr(app.state, "approval_bridge"):
+            del app.state.approval_bridge

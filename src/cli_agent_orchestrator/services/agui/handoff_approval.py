@@ -140,6 +140,12 @@ class ApprovalDecision(str, Enum):
     EDIT = "edit"
 
 
+# Terminal outcome recorded when a decision was accepted but delivery to the
+# terminal failed. Distinct from a normal decision outcome and from "expired",
+# so both callers can surface the failure explicitly (P1).
+OUTCOME_DELIVERY_FAILED = "delivery_failed"
+
+
 # ---------------------------------------------------------------------------
 # Interrupt dataclass
 # ---------------------------------------------------------------------------
@@ -418,6 +424,14 @@ class AgentHandoffWithApproval(AguiConstruct):
         (with outcome set). If already resolved, returns the recorded outcome
         with no side effects (idempotent).
 
+        Delivery ordering (P1): the decision is delivered to the terminal
+        BEFORE the interrupt is committed with the decision outcome. Delivery
+        runs off the event loop via ``asyncio.to_thread`` (P2) so blocking
+        backend I/O never stalls the loop. If delivery fails, the interrupt is
+        committed with the terminal ``delivery_failed`` outcome (distinct from
+        success) so both callers can surface the failure — the decision is NOT
+        reported as a successful resolution.
+
         Raises:
             KeyError: if interrupt_id is unknown
             ValueError: if decision is invalid for this interrupt
@@ -445,32 +459,45 @@ class AgentHandoffWithApproval(AguiConstruct):
                 if len(edited_text) > 4000:
                     raise ValueError(f"edited_text too long ({len(edited_text)} chars, max 4000)")
 
-            # Resolve the interrupt
-            interrupt.resolved = True
-            interrupt.outcome = decision.value
-            self._resolved_at[interrupt_id] = time.monotonic()
-
-            # Remove from terminal map
             terminal_id = interrupt.metadata.get("terminal_id")
-            if terminal_id and self._terminal_to_interrupt.get(terminal_id) == interrupt_id:
-                del self._terminal_to_interrupt[terminal_id]
-
-            # Deliver the answer to the terminal
             provider = interrupt.metadata.get("provider", "")
             action = _translate_decision(provider, decision, edited_text)
 
+            # Deliver the answer to the terminal BEFORE committing the outcome.
+            # Off-loop via to_thread so blocking tmux/Herdr I/O never stalls the
+            # event loop. The lock is held across the await, which serializes
+            # other resume() calls (approvals are low-frequency) and keeps
+            # delivery exactly-once without a separate in-flight guard.
+            delivery_ok = True
             if self._answer_delivery and terminal_id:
                 try:
                     if action["type"] == "text":
-                        self._answer_delivery.send_input(terminal_id, action["value"])
+                        await asyncio.to_thread(
+                            self._answer_delivery.send_input, terminal_id, action["value"]
+                        )
                     elif action["type"] == "key":
-                        self._answer_delivery.send_special_key(terminal_id, action["value"])
+                        await asyncio.to_thread(
+                            self._answer_delivery.send_special_key, terminal_id, action["value"]
+                        )
                 except Exception as e:
-                    logger.warning(
-                        "Failed to deliver answer for interrupt %s: %s",
-                        interrupt_id,
-                        e,
-                    )
+                    delivery_ok = False
+                    logger.warning("Failed to deliver answer for interrupt %s: %s", interrupt_id, e)
+
+            # Re-check after the await: a concurrent expire() (unlocked sync
+            # path) may have resolved this interrupt while delivery was in
+            # flight. If so, honor that terminal state.
+            if interrupt.resolved:
+                return interrupt
+
+            # Commit resolution. On delivery failure record the terminal
+            # delivery_failed outcome (not the decision) so the failure is not
+            # reported as success.
+            outcome = decision.value if delivery_ok else OUTCOME_DELIVERY_FAILED
+            interrupt.resolved = True
+            interrupt.outcome = outcome
+            self._resolved_at[interrupt_id] = time.monotonic()
+            if terminal_id and self._terminal_to_interrupt.get(terminal_id) == interrupt_id:
+                del self._terminal_to_interrupt[terminal_id]
 
             # Emit resolution intent
             try:
@@ -479,7 +506,7 @@ class AgentHandoffWithApproval(AguiConstruct):
                     {
                         "interrupt_id": interrupt_id,
                         "resolved": True,
-                        "outcome": decision.value,
+                        "outcome": outcome,
                         "provider": provider,
                         "terminal_id": terminal_id,
                     },
