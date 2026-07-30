@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Read-only profile HTTP routes for capability search, template discovery and schema retrieval, template-config validation, and rendered previews (#523)
 - `CAO_HOME_DIR` environment variable to relocate CAO's entire data directory outside `~/.aws` (#467)
 - **Self-learning loop** (opt-in, off by default; see `docs/self-learning.md`):
   - Phase 1 — outcome capture: `memory.learning_enabled` setting (`CAO_MEMORY_LEARNING_ENABLED`), `workflow_outcomes` table, `report_outcome`/`list_outcomes`/`store_lesson` MCP tools (the latter targets a named worker profile's agent scope so retrospective lessons reach the worker), scope-gated `POST/GET /outcomes` endpoints, and a built-in `retrospector` agent profile that distills session outcomes into worker-scoped memory lessons
