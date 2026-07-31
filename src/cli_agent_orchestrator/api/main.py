@@ -76,6 +76,7 @@ from cli_agent_orchestrator.graph.providers import GraphProvider, get_provider
 from cli_agent_orchestrator.graph.sinks import get_sink
 from cli_agent_orchestrator.models.flow import Flow
 from cli_agent_orchestrator.models.inbox import MessageStatus, OrchestrationType
+from cli_agent_orchestrator.models.kiro_engine import KiroEngine
 from cli_agent_orchestrator.models.memory import (
     MemoryKey,
     MemoryScope,
@@ -84,6 +85,10 @@ from cli_agent_orchestrator.models.memory import (
 )
 from cli_agent_orchestrator.models.terminal import Terminal, TerminalId
 from cli_agent_orchestrator.plugins import PluginRegistry
+from cli_agent_orchestrator.providers.kiro_capabilities import (
+    KiroCapabilityError,
+    KiroPhase0KASError,
+)
 from cli_agent_orchestrator.security.auth import (
     SCOPE_ADMIN,
     SCOPE_READ,
@@ -375,6 +380,10 @@ class RunStepRequest(BaseModel):
                 "(env injection only applies to freshly created terminals)"
             )
         return self
+
+    engine: Optional[KiroEngine] = Field(
+        default=None, description="Explicit Kiro engine for this child step"
+    )
 
 
 class RunStepResponse(BaseModel):
@@ -1887,6 +1896,7 @@ async def create_session(
     working_directory: Optional[str] = None,
     allowed_tools: Optional[str] = None,
     memory_manager: Optional[str] = None,
+    engine: Optional[KiroEngine] = None,
     model: Optional[str] = None,
     body: Optional[CreateSessionBody] = None,
     _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
@@ -1960,6 +1970,7 @@ async def create_session(
             allowed_tools=allowed_tools_list,
             registry=get_plugin_registry(request),
             env_vars=body.env_vars if body else None,
+            engine=engine,
             initial_message=initial_message,
             initial_message_orchestration_type=initial_message_orchestration_type,
             model=model,
@@ -2068,6 +2079,7 @@ async def create_terminal_in_session(
     provider: Optional[str] = None,
     working_directory: Optional[str] = None,
     allowed_tools: Optional[str] = None,
+    engine: Optional[KiroEngine] = None,
     caller_id: Optional[TerminalId] = None,
     defer_init: bool = False,
     model: Optional[str] = None,
@@ -2160,6 +2172,7 @@ async def create_terminal_in_session(
             defer_init=defer_init,
             initial_message=initial_message,
             initial_message_orchestration_type=orch_type,
+            engine=engine,
             model=model,
         )
         return result
@@ -2167,6 +2180,11 @@ async def create_terminal_in_session(
         # Deliberate 4xx (e.g. the initial_message/defer_init guard, invalid
         # orchestration_type) — propagate as-is instead of masking as a 500.
         raise
+    except (KiroPhase0KASError, KiroCapabilityError) as e:
+        # Both subclass ValueError, so they must precede the generic arm below —
+        # a rejected engine is a bad request, not a missing resource. Matches
+        # POST /sessions, which already returns 400 for the identical failure.
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
@@ -2467,6 +2485,7 @@ async def run_step(
             working_directory=body.working_directory,
             caller_id=body.caller_id,
             allowed_tools=body.allowed_tools,
+            engine=body.engine,
             registry=get_plugin_registry(request),
             env_vars=body.env_vars,
             on_terminal_created=on_terminal_created,
@@ -2501,6 +2520,11 @@ async def run_step(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail={"message": str(e), "kind": "timeout", "terminal_id": None},
         )
+    except (KiroPhase0KASError, KiroCapabilityError) as e:
+        # Ordered before the ValueError arm they subclass: an engine rejection is
+        # a bad request, not an unknown terminal.
+        _settle_step(None, str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except ValueError as e:
         # Unknown terminal / bad input surfaced by the terminal layer.
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))

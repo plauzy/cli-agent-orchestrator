@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- add Phase 0 Kiro engine selection (`v2` default; `kas` capability-probed and rejected before terminal allocation)
 - Read-only profile HTTP routes for capability search, template discovery and schema retrieval, template-config validation, and rendered previews (#523)
 - `CAO_HOME_DIR` environment variable to relocate CAO's entire data directory outside `~/.aws` (#467)
 - **Self-learning loop** (opt-in, off by default; see `docs/self-learning.md`):
@@ -649,5 +650,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bump to v0.51.0, update method name (#31)
 
 - accept optional U+03BB (λ) after % in kiro and q CLIs (#44)
-
-
