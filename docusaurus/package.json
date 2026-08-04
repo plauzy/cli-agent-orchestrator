@@ -5,9 +5,11 @@
   "scripts": {
     "docusaurus": "docusaurus",
     "build-courses": "bash course-src/build.sh",
-    "prestart": "npm run build-courses",
+    "build-dojo": "bash dojo-src/build.sh",
+    "build-static": "npm run build-courses && npm run build-dojo",
+    "prestart": "npm run build-static",
     "start": "docusaurus start",
-    "prebuild": "npm run build-courses",
+    "prebuild": "npm run build-static",
     "build": "docusaurus build",
     "swizzle": "docusaurus swizzle",
     "deploy": "docusaurus deploy",

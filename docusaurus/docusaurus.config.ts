@@ -66,6 +66,11 @@ const config: Config = {
           position: 'left',
         },
         {
+          href: 'pathname:///dojo/index.html',
+          label: 'AG-UI Dojo',
+          position: 'left',
+        },
+        {
           href: 'https://github.com/awslabs/cli-agent-orchestrator',
           label: 'GitHub',
           position: 'right',

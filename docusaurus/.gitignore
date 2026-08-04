@@ -14,6 +14,11 @@
 /static/course-advanced/
 /static/course-assets/
 
+# AG-UI Dojo assembled from dojo-src/ by dojo-src/build.sh
+# (runs automatically via the prebuild/prestart npm scripts)
+/static/dojo/
+/static/dojo-assets/
+
 # Misc
 .DS_Store
 .env.local

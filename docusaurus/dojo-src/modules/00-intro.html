@@ -1,0 +1,28 @@
+    <section class="dojo-panel dojo-intro" data-dojo-panel="intro">
+      <h1>Multi-provider orchestration, rendered live</h1>
+      <p class="dojo-lede">
+        Every other AG-UI demo assumes <em>one</em> client and <em>one</em> provider.
+        CAO is neither — it orchestrates <strong>many providers at once</strong>. This
+        dojo shows a real <code>kiro_cli</code> supervisor delegating to a
+        <code>claude_code</code> developer and a <code>codex</code> reviewer, rendered
+        through the AG-UI stream.
+      </p>
+      <div class="dojo-themes">
+        <div class="dojo-theme">
+          <span class="dojo-theme-tag">Dog-food</span>
+          <p>The data below was produced by <strong>feeding agents</strong> a real
+          orchestration — not hand-authored. CAO builds and observes its own showcase.</p>
+        </div>
+        <div class="dojo-theme">
+          <span class="dojo-theme-tag">Shift-left</span>
+          <p>Every panel is <strong>gated by an assertion that runs before the
+          pipeline</strong>. A broken dojo can't produce a passing build.</p>
+        </div>
+      </div>
+      <p class="dojo-note">
+        This page renders from a committed capture (works offline). To watch a
+        <em>live</em> fleet, run a local <code>cao-server</code> with
+        <code>CAO_AGUI_ENABLED=true</code> and open this page with
+        <code>?server=http://localhost:9889</code>.
+      </p>
+    </section>

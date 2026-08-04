@@ -1,0 +1,15 @@
+{
+  "name": "ag-ui-dojo-recorder",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Gated shift-left recorder for the CAO AG-UI Dojo (assert-before-export).",
+  "scripts": {
+    "playwright:install": "playwright install chromium",
+    "record": "node record-dojo.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "ffmpeg-static": "^5.2.0"
+  }
+}
