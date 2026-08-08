@@ -616,7 +616,7 @@ These properties are exercised with `hypothesis`, **already a dev dependency** (
 
 ### Property 1: Validation totality (P1)
 
-**Validates: Requirement 5.1, 5.2, 5.3, 5.4**
+**Validates: Requirements 5.1, 5.2, 5.3, 5.4**
 
 For any generated directory tree (arbitrary bytes as `plugin.json`, arbitrary nesting, symlink loops, unreadable modes, zero-byte files, non-UTF-8):
 
@@ -628,13 +628,13 @@ assert report.loadable == (not any(f.severity is Severity.FATAL for f in report.
 
 ### Property 2: Fatality classification (P2)
 
-**Validates: Requirement 6.1, 6.2, 6.3, 6.4**
+**Validates: Requirements 6.1, 6.2, 6.3, 6.4**
 
 Spec: §5.2, §8.1, §11.3.2. For a manifest that is otherwise valid, injecting an unknown top-level field, or replacing `extensions` with a non-object, yields `loadable is True` with a reported finding. Any *other* schema violation yields `loadable is False` and zero discovered components.
 
 ### Property 3: Containment (P3)
 
-**Validates: Requirement 7.1, 7.2, 7.3, 7.4**
+**Validates: Requirements 7.1, 7.2, 7.3, 7.4**
 
 Spec: §4.1. For every `DiscoveredSkill.directory`, every resolved MCP `command` path, and every resolved `cwd`:
 
@@ -646,7 +646,7 @@ Generators must include `../` escapes, absolute paths, and symlinks pointing bot
 
 ### Property 4: Isolation (P4)
 
-**Validates: Requirement 9.2, 9.3, 9.4**
+**Validates: Requirements 9.2, 9.3, 9.4**
 
 Spec: §11.3.3. For any invalid plugin `P` and any pre-existing installed set `S`:
 
@@ -659,25 +659,25 @@ assert snapshot(AGENT_PLUGINS_DIR, SKILLS_DIR) == before
 
 ### Property 5: Idempotence (P5)
 
-**Validates: Requirement 10.1, 10.2, 10.3, 10.4**
+**Validates: Requirements 10.1, 10.2, 10.3, 10.4**
 
 `add(X)` then `add(X, force=True)` yields the same store state as a single `add(X)`. `add(X)` then `remove(X)` restores the pre-`add` state exactly, except `AGENT_PLUGIN_DATA_DIR/X` which persists unless `--purge-data` (§9.1 permits either; CAO's rule is explicit so the property is decidable).
 
 ### Property 6: Skills-only conformance (P6)
 
-**Validates: Requirement 11.1, 11.5**
+**Validates: Requirements 11.1, 11.5**
 
 Spec: §6.2, §11.2. For any plugin with a valid manifest, ≥1 valid skill, and **no** `mcp.json`: `loadable is True`, every skill is discovered and projected, `mcp_present is False`, and no finding has severity `FATAL`.
 
 ### Property 7: Sibling independence (P7)
 
-**Validates: Requirement 12.1, 12.2**
+**Validates: Requirements 12.1, 12.2**
 
 Spec: §7.1. For a plugin with N skill directories of which k are invalid: exactly N−k are discovered, exactly k produce `SKIPPED` findings, and the discovered set is independent of directory iteration order.
 
 ### Property 8: Projection non-shadowing and deterministic collision winner (P8)
 
-**Validates: Requirement 14.1, 14.2, 14.3, 14.4, 14.5**
+**Validates: Requirements 14.1, 14.2, 14.3, 14.4, 14.5**
 
 **Non-shadowing.** For any pre-existing `SKILLS_DIR/<name>` (builtin or user-added) and any plugin providing a skill named `<name>`: after install, `load_skill_content(<name>)` returns the **pre-existing** skill's content, and a `SKIPPED` finding names the collision.
 
@@ -718,19 +718,19 @@ if before_winner is not None and after_winner != before_winner:
 
 ### Property 9: Expansion soundness (P9) — Increment 2
 
-**Validates: Requirement 18.1, 18.2, 18.3**
+**Validates: Requirements 18.1, 18.2, 18.3**
 
 Spec: §9.2. For arbitrary strings containing `${PLUGIN_ROOT}`, `${PLUGIN_DATA}`, and arbitrary other `${...}`: expansion replaces only the two recognized placeholders, is single-pass (text introduced by a replacement is not rescanned — verified by seeding `PLUGIN_DATA` with a literal `${PLUGIN_ROOT}`), leaves unrecognized placeholders literal, and never alters `env` keys or `command`.
 
 ### Property 10: Cross-provider delivery equivalence (P10)
 
-**Validates: Requirement 13.2**
+**Validates: Requirements 13.2**
 
 For every provider, the set of skill names reachable by an agent equals `builtin ∪ extra_dirs ∪ projected(valid plugin skills)`, asserted against each provider's real artifact: the runtime catalog text, the Kiro agent JSON `resources` glob expansion, the OpenCode symlink traversal, and the Copilot `.agent.md` body.
 
 ### Property 11: Schema pin integrity and offline validation (P11)
 
-**Validates: Requirement 4.2, 4.3, 4.4**
+**Validates: Requirements 4.2, 4.3, 4.4**
 
 The vendored schema bytes hash to the values in `PIN.json`; and with all socket operations blocked at the test fixture level, `validate_plugin` still succeeds — proving §5.2's no-retrieval requirement.
 
