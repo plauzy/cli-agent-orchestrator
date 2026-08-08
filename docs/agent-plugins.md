@@ -1,0 +1,232 @@
+# Agent Plugins
+
+> **Not the same thing as [Event Plugins](plugins.md).** CAO has two unrelated
+> plugin systems. **Agent plugins** are portable packages of skills (and, from
+> Increment 2, MCP servers) that conform to the open
+> [Agent Plugins 1.0.0](https://agent-plugins.org/specification) specification
+> and work across many agent clients. **Event plugins** are Python packages that
+> run inside `cao-server` and react to CAO lifecycle events. Different formats,
+> different audiences, different code. This page is about the first kind.
+
+> [!WARNING]
+> **Installing an agent plugin runs untrusted code and content from that
+> source.** A plugin's skills become instructions injected into your agents'
+> system prompts, and (from Increment 2) its MCP servers become subprocesses.
+> CAO implements **no trust model, no signing, and no provenance verification**
+> for agent plugins — the specification defers all three to a future revision,
+> and CAO inherits that deferral rather than inventing its own. Install plugins
+> only from sources you would trust with a shell on your machine.
+
+## What an agent plugin is
+
+A directory with a `plugin.json` manifest at its root:
+
+```text
+my-plugin/
+├── plugin.json          # required manifest
+├── skills/              # optional; each immediate child is one Agent Skill
+│   └── my-skill/
+│       └── SKILL.md
+└── mcp.json             # optional; MCP servers (see "MCP servers" below)
+```
+
+Because the format is an open specification rather than a CAO invention, the
+same directory installs into Kiro, VS Code, Cursor, Copilot, and Codex — and
+CAO ships itself in that format too (see [CAO's own packages](#caos-own-packages)).
+
+## Prerequisites
+
+Installing third-party agent plugins into CAO needs nothing beyond CAO itself.
+The two prerequisites below apply to the **`cao` operator package** — the one a
+*foreign* client installs to drive CAO — and are also stated in that package's
+manifest `description`:
+
+| Prerequisite | Why |
+|---|---|
+| **`uv` on `PATH`** | The packaged MCP server is launched via `uvx`. The specification allows only a single `command` token, so the package cannot bundle a launcher. |
+| **A CAO API server at `http://127.0.0.1:9889`** (`cao-server`) | Every operator tool is an HTTP call to that server. |
+
+**The posture is localhost-only.** `SERVER_HOST` defaults to `127.0.0.1`, the
+package never reaches a remote endpoint, and nothing in it opens a listening
+socket. If you override `CAO_API_HOST` or `CAO_API_PORT` to a non-loopback
+address, you have knowingly left that posture — CAO has not silently changed it.
+
+CAO will **not** start a server for you. If `cao-server` is not running, an
+operator tool call returns a structured error naming the failed operation and
+its cause. Self-starting a long-lived daemon on a fixed local port would take
+the decision of when CAO is listening away from you, so it is rejected rather
+than merely unimplemented.
+
+## Managing plugins
+
+> [!NOTE]
+> The command verb below is **provisional**. It is recorded as maintainer
+> decision **M1** and is not settled: `docs/plugins.md` publicly promises
+> `cao plugin list / info / enable / disable` as a future surface for *event*
+> plugins, so taking the noun for agent plugins retracts a documented roadmap
+> item. This page documents the recommended option; the decision must be
+> recorded before the surface ships.
+
+```bash
+# Install from a local directory
+cao plugin add ./path/to/my-plugin
+
+# Install from a GitHub repository, optionally at a ref and/or subdirectory
+cao plugin add https://github.com/owner/repo
+cao plugin add https://github.com/owner/repo --ref v1.2.0 --subdir packages/my-plugin
+
+# Check a candidate without installing it
+cao plugin validate ./path/to/my-plugin
+cao plugin validate ./path/to/my-plugin --json
+
+# See what is installed, and which skill came from where
+cao plugin list
+cao plugin list --json
+
+# Remove one (its persistent data is kept unless you ask otherwise)
+cao plugin remove my-plugin
+cao plugin remove my-plugin --purge-data
+```
+
+`--json` on `list` and `validate` emits a machine-readable report for CI and
+scripting. `cao plugin add` and `cao plugin validate` exit non-zero when a
+plugin is not loadable.
+
+The same operations are available in the web UI's **Plugins** tab and over the
+HTTP API (`GET/POST /plugins`, `POST /plugins/validate`,
+`DELETE /plugins/{name}`).
+
+### Removing a plugin while a session is live
+
+Two providers — Kiro CLI and OpenCode — read `SKILL.md` from disk *during* a
+session rather than snapshotting it at launch. Removing a plugin can therefore
+pull a skill out from under an agent that is mid-task and about to load it.
+
+`cao plugin remove` checks running sessions and, if any profile references a
+skill this plugin provides, reports which sessions and skills are affected and
+asks for confirmation. It **warns**; it does not refuse — you may legitimately
+want the plugin gone, and blocking removal while any long session runs would
+make the store impossible to clean. `--yes` skips the prompt for scripted use.
+The web UI applies the same gate before issuing its `DELETE`.
+
+## Where things live
+
+```text
+~/.aws/cli-agent-orchestrator/
+├── agent-plugins/<name>/         # the plugin's own bytes; CAO never modifies them
+├── agent-plugin-data/<name>/     # persistent plugin data; survives updates
+└── skills/                       # the global skill store (projection target)
+```
+
+Both directories are created `0o700` (owner-only). `agent-plugin-data/` lives
+*outside* `agent-plugins/` deliberately: an update replaces a plugin's package
+bytes wholesale, and the specification requires persistent data survive that.
+`cao plugin remove` keeps it; `--purge-data` deletes it.
+
+## How plugin skills reach your agents
+
+A plugin's skills are **projected** into the global skill store as managed
+symlinks:
+
+```text
+~/.aws/cli-agent-orchestrator/skills/<skill-name>
+    -> ~/.aws/cli-agent-orchestrator/agent-plugins/<plugin>/skills/<skill-name>
+```
+
+That single mechanism reaches every provider through the pathway it already
+uses — the runtime catalog, Copilot's baked `.agent.md`, Kiro's `skill://` glob,
+and OpenCode's config symlink. See
+[Plugin-provided skills](skills.md#plugin-provided-skills) for the details and
+the collision rules.
+
+On a system where symlink creation is unavailable (Windows without Developer
+Mode or elevation), CAO falls back to copying and reports that it did. You can
+make the choice explicit with `"skills": {"projection_mode": "copy"}` in
+`settings.json`.
+
+## Validation and what gets reported
+
+Every install and every `validate` produces a report of **findings**, each
+citing the specification clause it enforces:
+
+| Severity | Meaning |
+|---|---|
+| `fatal` | The plugin is rejected. Nothing is installed. |
+| `skipped` | One skill, component type, or server entry was dropped. The rest still load. |
+| `warning` | Reported; nothing was dropped. |
+| `info` | Informational. |
+
+Failure is deliberately granular. One broken skill inside an otherwise valid
+plugin is skipped with a report while its siblings install normally; a missing
+`skills/` directory is not an error at all; and a fatal manifest problem rejects
+the plugin *before any component loads*, leaving your installed set byte-identical
+to what it was.
+
+Validation never reaches the network. CAO validates against schema bytes
+committed to its own repository, because the specification forbids retrieving a
+schema while loading a plugin — which also means a compromised schema host
+cannot change what CAO considers valid.
+
+## MCP servers
+
+**Not supported in this CAO version.** A plugin that ships an `mcp.json` still
+installs, and its skills are delivered normally; the MCP configuration is
+reported as unsupported and ignored. This is what the specification prescribes
+for a component type a client does not implement, and a skills-only client is
+explicitly conformant.
+
+## CAO's own packages
+
+CAO ships itself as two agent plugins, so any Agent-Plugins-compatible client
+can drive a CAO session without CAO-specific integration code:
+
+| Package | Install this if you are… | Contents |
+|---|---|---|
+| [`cao`](../agent-plugin/cao) | **an operator** driving CAO from another client | session management, agent routing, supervisor and worker protocols |
+| [`cao-contributor`](../agent-plugin/cao-contributor) | **a contributor** extending CAO itself | provider authoring, event-plugin authoring |
+
+```bash
+# From a clone
+cao plugin add ./agent-plugin/cao
+
+# From GitHub, without cloning
+cao plugin add https://github.com/awslabs/cli-agent-orchestrator --subdir agent-plugin/cao
+```
+
+Install `cao` if you want to *use* a fleet; install `cao-contributor` if you
+want to *change CAO*. Keeping them separate means each package's skills all
+serve one story, rather than every foreign agent carrying repo-development
+instructions it will never act on.
+
+Both packages are generated from CAO's canonical `skills/` tree by
+`scripts/build_agent_plugin.py` and committed, with `make check-agent-plugin`
+failing CI on any drift.
+
+> [!NOTE]
+> The name `cao-contributor` and the packaged name of the event-plugin authoring
+> skill are provisional, pending maintainer decision **M4**.
+
+## Security posture, stated plainly
+
+- **No trust model.** Installing a plugin is equivalent to running untrusted
+  code and content from its source. There is no signing and no provenance check.
+- **Prompt injection is the main exposure.** Plugin skill content flows into
+  agents' system prompts. This is not new — `extra_skill_dirs` already admits
+  third-party skill content — but installing a plugin is one command rather than
+  a deliberate settings edit. `cao plugin list` shows which plugin contributed
+  each skill, so provenance is always recoverable.
+- **Paths are contained.** Every path a plugin references is resolved with
+  realpath and confined to that plugin's own root. A symlink whose target
+  resolves inside the root is allowed; one that escapes is rejected, whatever
+  the literal path looks like.
+- **No secrets in package data.** The specification forbids credentials in MCP
+  `env` and `headers`. CAO warns when a value looks credential-shaped and does
+  not treat it as a supported mechanism. Use `cao env` and CAO's secret gate
+  instead.
+- **No schema fetch at load time.** Pinned bytes only.
+
+## See also
+
+- [Skills](skills.md) — the skill system agent plugins deliver into
+- [Event Plugins](plugins.md) — CAO's *other*, unrelated plugin system
+- [Agent Plugins 1.0.0 specification](https://agent-plugins.org/specification)
