@@ -48,6 +48,12 @@ jobs:
       - name: Validate Markdown links
         run: uv run python scripts/validate_markdown_links.py
 
+      # Agent Plugins 1.0.0 conformance guards. #573 requires the schemas
+      # validate on every PR; both steps are the same `make` targets a
+      # developer runs locally, so CI and pre-push execute identical code.
+      - name: Check Agent Plugins schema pin
+        run: make check-agent-plugins-schemas
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
