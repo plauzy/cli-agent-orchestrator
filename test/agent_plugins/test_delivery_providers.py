@@ -222,11 +222,18 @@ class TestEventPluginSystemUntouched:
         assert PluginRegistry.__module__ == "cli_agent_orchestrator.plugins.registry"
 
     def test_entry_point_group_is_unchanged(self):
-        import tomllib
+        """Asserted against the installed metadata, not against pyproject.toml.
 
-        pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
-        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-        assert "cao.plugins" in data["project"]["entry-points"]
+        ``tomllib`` is stdlib only from 3.11 and this project supports 3.10, but
+        the stronger reason is that reading the declaration proves only that
+        someone wrote it down. Reading the *installed* entry points proves the
+        group is really discoverable, which is what decision D7 actually
+        promises.
+        """
+        from importlib.metadata import entry_points
+
+        registered = list(entry_points(group="cao.plugins"))
+        assert registered, "the cao.plugins entry-point group resolves to nothing"
 
     def test_no_symbol_in_agent_plugins_shadows_one_in_plugins(self):
         """The two packages are siblings; a shared public name would defeat that."""

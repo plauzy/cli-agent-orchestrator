@@ -63,15 +63,23 @@ class TestPackagedServerSelection:
         assert "cao-mcp-server" not in ops_entry()["args"]
         assert ops_entry().get("command") != "cao-mcp-server"
 
-    def test_the_console_script_name_matches_pyproject(self):
-        """The invoked entry point is the script name, not FastMCP's display name."""
-        import tomllib
+    def test_the_console_script_the_manifest_invokes_really_exists(self):
+        """The invoked entry point is the script name, not FastMCP's display name.
 
-        pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        scripts = pyproject["project"]["scripts"]
+        ``uvx ... cao-ops-mcp-server`` resolves a *console script*, so the check
+        reads the installed entry points rather than parsing pyproject.toml —
+        that is the thing uvx will actually look up, and it keeps the test off
+        ``tomllib``, which is stdlib only from 3.11 while this project supports
+        3.10.
+        """
+        from importlib.metadata import entry_points
 
-        assert "cao-ops-mcp-server" in scripts
-        assert scripts["cao-ops-mcp-server"].endswith("ops_mcp_server.server:main")
+        scripts = {entry.name: entry.value for entry in entry_points(group="console_scripts")}
+
+        invoked = ops_entry()["args"][-1]
+        assert invoked == "cao-ops-mcp-server"
+        assert invoked in scripts, f"{invoked} is not an installed console script"
+        assert scripts[invoked].endswith("ops_mcp_server.server:main")
 
     def test_the_in_session_server_really_does_require_a_terminal_id(self):
         """The premise of the choice above, asserted rather than assumed."""
