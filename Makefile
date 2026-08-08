@@ -5,7 +5,8 @@
 # (modelcontextprotocol/ext-apps). See skills/vendor/ext-apps/README.md.
 
 .PHONY: refresh-ext-apps-skills check-ext-apps-skills \
-        refresh-agent-plugins-schemas check-agent-plugins-schemas
+        refresh-agent-plugins-schemas check-agent-plugins-schemas \
+        agent-plugin check-agent-plugin
 
 # Re-vendor the ext-apps builder skills from the pinned tag and rewrite NOTICE.
 # To move to a newer upstream release, bump PINNED_REF/PINNED_SHA in
@@ -30,3 +31,17 @@ refresh-agent-plugins-schemas:
 # this is the CI-on-every-PR guard. Exit 0 = in sync, 1 = drift.
 check-agent-plugins-schemas:
 	uv run python scripts/vendor_agent_plugins_schemas.py --check
+
+# --- CAO's own Agent Plugins packages ---------------------------------------
+# Two packages, `cao` (operator) and `cao-contributor`, generated from the
+# canonical skills/ tree and committed. See docs/agent-plugins.md.
+
+# Regenerate both packages from their allowlists and CAO's package version.
+agent-plugin:
+	uv run python scripts/build_agent_plugin.py
+
+# Verify both committed packages match their allowlists and load with zero fatal
+# findings. Evaluates each package independently so one failure cannot mask the
+# other. Exit 0 = in sync, 1 = drift or non-conformance.
+check-agent-plugin:
+	uv run python scripts/build_agent_plugin.py --check

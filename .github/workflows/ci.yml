@@ -54,6 +54,12 @@ jobs:
       - name: Check Agent Plugins schema pin
         run: make check-agent-plugins-schemas
 
+      # Also the on-every-PR validation of CAO's own manifests against the
+      # pinned schemas: the drift check runs the real validator over both
+      # committed packages.
+      - name: Check CAO agent plugin packages
+        run: make check-agent-plugin
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
