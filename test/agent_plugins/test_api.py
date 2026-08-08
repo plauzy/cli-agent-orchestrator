@@ -150,7 +150,13 @@ class TestValidate:
         assert any(f["code"] == "manifest.schema_missing" for f in body["findings"])
 
     def test_every_finding_cites_a_clause(self, client, tmp_path):
-        source = build_plugin(tmp_path / "src", "demo", skills=["alpha"], with_mcp=True)
+        source = build_plugin(
+            tmp_path / "src",
+            "demo",
+            skills=["alpha"],
+            extra_manifest={"hooks": {"pre": "x"}},
+            mcp_text="}{ not json",
+        )
         body = client.post("/plugins/validate", json={"source": str(source)}).json()
 
         assert body["findings"]

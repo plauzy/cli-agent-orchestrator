@@ -14,7 +14,7 @@ import termios
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any, Dict, List, Optional, Tuple, cast
+from typing import Annotated, Any, Dict, List, Literal, Optional, Tuple, cast
 
 from fastapi import (
     BackgroundTasks,
@@ -39,8 +39,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from cli_agent_orchestrator.backends import TerminalBackendError, TerminalNotFoundError
 from cli_agent_orchestrator.backends.herdr_backend import HerdrBackend
 from cli_agent_orchestrator.backends.registry import get_backend
-from cli_agent_orchestrator.cli.commands.init import seed_default_skills
 from cli_agent_orchestrator.cli.commands.agent_plugin import UNTRUSTED_CONTENT_WARNING
+from cli_agent_orchestrator.cli.commands.init import seed_default_skills
 from cli_agent_orchestrator.clients.database import (
     create_inbox_message,
     get_inbox_messages,
@@ -2030,9 +2030,10 @@ def _plugin_source(body: "PluginInstallRequest"):
     from cli_agent_orchestrator.agent_plugins.models import PluginSource
     from cli_agent_orchestrator.cli.commands.agent_plugin import _looks_like_git
 
-    kind = body.kind if body.kind in ("path", "git") else None
-    if kind is None:
-        kind = "git" if _looks_like_git(body.source) else "path"
+    if body.kind == "git" or (body.kind != "path" and _looks_like_git(body.source)):
+        kind: Literal["path", "git"] = "git"
+    else:
+        kind = "path"
     return PluginSource(kind=kind, location=body.source, ref=body.ref, subdir=body.subdir)
 
 

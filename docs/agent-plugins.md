@@ -1,8 +1,8 @@
 # Agent Plugins
 
 > **Not the same thing as [Event Plugins](plugins.md).** CAO has two unrelated
-> plugin systems. **Agent plugins** are portable packages of skills (and, from
-> Increment 2, MCP servers) that conform to the open
+> plugin systems. **Agent plugins** are portable packages of skills and MCP
+> servers that conform to the open
 > [Agent Plugins 1.0.0](https://agent-plugins.org/specification) specification
 > and work across many agent clients. **Event plugins** are Python packages that
 > run inside `cao-server` and react to CAO lifecycle events. Different formats,
@@ -11,7 +11,7 @@
 > [!WARNING]
 > **Installing an agent plugin runs untrusted code and content from that
 > source.** A plugin's skills become instructions injected into your agents'
-> system prompts, and (from Increment 2) its MCP servers become subprocesses.
+> system prompts, and its MCP servers become subprocesses on your machine.
 > CAO implements **no trust model, no signing, and no provenance verification**
 > for agent plugins — the specification defers all three to a future revision,
 > and CAO inherits that deferral rather than inventing its own. Install plugins
@@ -136,7 +136,7 @@ symlinks:
 That single mechanism reaches every provider through the pathway it already
 uses — the runtime catalog, Copilot's baked `.agent.md`, Kiro's `skill://` glob,
 and OpenCode's config symlink. See
-[Plugin-provided skills](skills.md#plugin-provided-skills) for the details and
+[Agent-plugin-provided skills](skills.md#agent-plugin-provided-skills) for the details and
 the collision rules.
 
 On a system where symlink creation is unavailable (Windows without Developer
@@ -169,11 +169,42 @@ cannot change what CAO considers valid.
 
 ## MCP servers
 
-**Not supported in this CAO version.** A plugin that ships an `mcp.json` still
-installs, and its skills are delivered normally; the MCP configuration is
-reported as unsupported and ignored. This is what the specification prescribes
-for a component type a client does not implement, and a skills-only client is
-explicitly conformant.
+A plugin may declare MCP servers in an `mcp.json` beside its `plugin.json`. CAO
+validates it against the pinned `mcp.schema.json` and maps each server into its
+internal MCP configuration, from which every provider's native form is already
+derived.
+
+**An unusable `mcp.json` disables MCP for that plugin and nothing else** — its
+skills still install and deliver. One bad server entry likewise invalidates only
+that entry; its siblings load.
+
+Two placeholders are expanded, and only these two:
+
+| Placeholder | Expands to |
+|---|---|
+| `${PLUGIN_ROOT}` | the plugin's own directory |
+| `${PLUGIN_DATA}` | the plugin's persistent data directory |
+
+They are expanded **only** in `args` elements, `env` *values*, and `cwd` — never
+in `env` keys, `command`, `url`, or header names and values. Expansion is
+single-pass: text introduced by a replacement is not re-scanned, and any other
+`${...}` is left exactly as written. CAO does not perform any further
+substitution on a mapped entry, because the specification forbids it.
+
+Some entries are rejected, always with a report and never silently:
+
+- **`command` must be one token.** It is never shell-split. A `./`-rooted
+  command must resolve inside the plugin root.
+- **`env` must not declare `PLUGIN_ROOT` or `PLUGIN_DATA`.** CAO supplies both
+  itself, after applying the plugin's own `env`; an entry that tries to override
+  them is invalidated.
+- **`cwd` must stay contained**, checked after expansion against whichever root
+  it is anchored to. Omitted, it defaults to the plugin root.
+- **A transport the target provider cannot carry is skipped**, not failed over
+  to a different one.
+- **Credential-shaped `env` and `headers` values are warned about**, never
+  blocked. The specification forbids credentials there; use `cao env` and CAO's
+  secret gate for real secrets.
 
 ## CAO's own packages
 
@@ -182,8 +213,18 @@ can drive a CAO session without CAO-specific integration code:
 
 | Package | Install this if you are… | Contents |
 |---|---|---|
-| [`cao`](../agent-plugin/cao) | **an operator** driving CAO from another client | session management, agent routing, supervisor and worker protocols |
+| [`cao`](../agent-plugin/cao) | **an operator** driving CAO from another client | session management, agent routing, supervisor and worker protocols, plus the `cao-ops` MCP server |
 | [`cao-contributor`](../agent-plugin/cao-contributor) | **a contributor** extending CAO itself | provider authoring, event-plugin authoring |
+
+The operator package's `mcp.json` declares one server, `cao-ops`, launched as
+`uvx --from cli-agent-orchestrator==<version> cao-ops-mcp-server` — the
+**outside-a-session** tool surface. The in-session `cao-mcp-server` is
+deliberately not packaged: it derives its identity from a `CAO_TERMINAL_ID` that
+a foreign client does not have, so its orchestration tools would fail on first
+call. The version is pinned exactly, and the build refuses to write a pin that
+is not already published on PyPI. `cao-contributor` ships no `mcp.json` at all:
+authoring skills work through the host agent's own tools and need no CAO
+runtime, so the `uv` and `cao-server` prerequisites do not apply to it.
 
 ```bash
 # From a clone

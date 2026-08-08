@@ -101,10 +101,12 @@ class TestOperatorPackage:
         assert "http://127.0.0.1:9889" in description
         assert "localhost-only" in description
 
-    def test_increment_one_ships_no_mcp_json(self):
-        """Requirement 11.5 — the observable test of the increment boundary."""
-        assert not (OPERATOR_DIR / "mcp.json").exists()
-        assert validate_plugin(OPERATOR_DIR).mcp_present is False
+    def test_it_ships_an_mcp_json_declaring_the_ops_server(self):
+        """Requirement 19 — Increment 2. See TestPackagedMcpServer for the details."""
+        assert (OPERATOR_DIR / "mcp.json").is_file()
+        report = validate_plugin(OPERATOR_DIR)
+        assert report.mcp_present is True
+        assert [server.name for server in report.mcp_servers] == ["cao-ops"]
 
     def test_the_session_management_skill_is_discovered(self):
         """Requirement 1.6."""

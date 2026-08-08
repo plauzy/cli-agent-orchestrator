@@ -105,14 +105,18 @@ def _refuse_retrieval(uri: str) -> Resource:
     vendored, validation must break visibly in CI instead of opening a network
     connection at plugin-load time.
     """
-    raise NoSuchResource(ref=uri)
+    # `referencing`'s exceptions and Registry are attrs-generated; mypy reads
+    # their synthesized __init__ signatures wrongly and reports phantom
+    # call-arg errors against unrelated builtins. Both kwargs are correct and
+    # are exercised by test_schema_pin.py::TestRegistryRefusesRetrieval.
+    raise NoSuchResource(ref=uri)  # type: ignore[call-arg]
 
 
 @lru_cache(maxsize=None)
 def _offline_validator(filename: str) -> Draft202012Validator:
     """Build a ``Draft202012Validator`` bound to an offline-only registry."""
     schema = load_pinned_schema(filename)
-    registry: Registry = Registry(retrieve=_refuse_retrieval).with_resources(
+    registry: Registry = Registry(retrieve=_refuse_retrieval).with_resources(  # type: ignore[call-arg]
         [
             (
                 str(load_pinned_schema(name).get("$id", name)),
@@ -220,7 +224,7 @@ def _validate_plugin_inner(root_path: Path) -> PluginValidationReport:
     skills, skill_findings = _discover_skills(root_dir)
     findings.extend(skill_findings)
 
-    mcp_present, mcp_findings = _detect_mcp(root_dir)
+    mcp_present, mcp_servers, mcp_findings = _map_mcp(root_dir, manifest)
     findings.extend(mcp_findings)
 
     return PluginValidationReport(
@@ -228,7 +232,7 @@ def _validate_plugin_inner(root_path: Path) -> PluginValidationReport:
         manifest=manifest,
         skills=tuple(skills),
         mcp_present=mcp_present,
-        mcp_servers=(),  # Increment 1 maps no MCP servers.
+        mcp_servers=mcp_servers,
         findings=tuple(findings),
     )
 
@@ -652,53 +656,34 @@ def _discover_skills(root_dir: Path) -> Tuple[List[DiscoveredSkill], List[Findin
     return discovered, findings
 
 
-def _detect_mcp(root_dir: Path) -> Tuple[bool, List[Finding]]:
-    """Detect ``mcp.json`` without reading, parsing, or acting on it.
+def _map_mcp(root_dir: Path, manifest: PluginManifest) -> Tuple[bool, tuple, List[Finding]]:
+    """Discover and map ``mcp.json`` at its fixed location (§6.1).
 
-    Increment 1 supports no MCP component type. §11.3 rule 1 and §7.2.2 rule 4
-    prescribe reporting an unsupported component type and continuing, which is
-    precisely what happens here: the plugin's skills are unaffected.
+    Increment 2. Increment 1 recorded ``mcp_present`` and reported the component
+    type as unsupported; now the file is validated against the pinned
+    ``mcp.schema.json`` and mapped into CAO's internal MCP shape.
+
+    Whatever happens here, **the plugin's skills are unaffected** (§7.2.2.2,
+    §10.1): an unusable ``mcp.json`` disables MCP for the plugin and nothing
+    else, and one bad server entry invalidates only that entry.
+
+    Imported inside the function because ``mcp_mapping`` imports the pinned
+    schema loader from this module; a module-level import would be circular.
     """
-    findings: List[Finding] = []
+    from cli_agent_orchestrator.agent_plugins.mcp_mapping import load_and_map
 
-    contained = resolve_within_root(root_dir, _MCP_FILENAME)
-    if contained is None:
-        findings.append(
-            Finding(
-                severity=Severity.SKIPPED,
-                code="mcp.escapes_root",
-                spec_ref="§4.1",
-                message="mcp.json resolves outside the plugin root; MCP configuration ignored",
-                path=_MCP_FILENAME,
-            )
-        )
-        return False, findings
+    data_dir = _plugin_data_dir_for(manifest.name)
+    result = load_and_map(root_dir, data_dir, plugin_schema_id=manifest.schema_id)
+    return result.present, result.servers, list(result.findings)
 
-    if not contained.exists():
-        return False, findings  # §6.2: missing location is not an error
 
-    if not contained.is_file():
-        findings.append(
-            Finding(
-                severity=Severity.SKIPPED,
-                code="mcp.not_a_file",
-                spec_ref="§6.2",
-                message="mcp.json exists but is not a regular file; MCP configuration ignored",
-                path=_MCP_FILENAME,
-            )
-        )
-        return False, findings
+def _plugin_data_dir_for(name: str) -> Path:
+    """Where this plugin's ``PLUGIN_DATA`` will live once installed.
 
-    findings.append(
-        Finding(
-            severity=Severity.WARNING,
-            code="mcp.unsupported",
-            spec_ref="§11.3",
-            message=(
-                "MCP servers are not supported in this CAO version; this plugin's "
-                "mcp.json was ignored and its skills were delivered normally"
-            ),
-            path=_MCP_FILENAME,
-        )
-    )
-    return True, findings
+    Resolved even when validating an arbitrary directory that will never be
+    installed, so a ``${PLUGIN_DATA}`` placeholder expands to the same path
+    ``cao plugin validate`` predicts and the eventual install actually uses.
+    """
+    from cli_agent_orchestrator.constants import AGENT_PLUGIN_DATA_DIR
+
+    return AGENT_PLUGIN_DATA_DIR / name

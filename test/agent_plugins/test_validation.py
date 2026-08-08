@@ -282,24 +282,54 @@ class TestSiblingIndependence:
         assert first == validate_plugin(other).skill_names == tuple(sorted(names))
 
 
-class TestIncrementOneMcpBoundary:
-    """Property P6's MCP half — detected, reported, skills unaffected."""
+class TestMcpComponentDiscovery:
+    """Increment 2: mcp.json is parsed, validated, and mapped.
 
-    def test_mcp_json_is_detected_and_reported_as_unsupported(self, tmp_path):
+    Whatever happens to it, **the plugin's skills are unaffected** — an unusable
+    MCP configuration disables MCP for that plugin and nothing else. That is
+    property P6's other half, and it is what keeps a skills-only consumer of a
+    dual-component plugin working.
+    """
+
+    def test_a_valid_mcp_json_is_mapped(self, tmp_path):
         root = build_plugin(tmp_path / "p", "demo", skills=["alpha"], with_mcp=True)
         report = validate_plugin(root)
+
         assert report.loadable
         assert report.mcp_present is True
-        assert report.mcp_servers == ()
-        assert severities(report, "mcp.unsupported") == [Severity.WARNING]
-        assert report.skill_names == ("alpha",)  # skills deliver unaffected
+        assert [server.name for server in report.mcp_servers] == ["demo"]
+        assert report.skill_names == ("alpha",)
 
-    def test_malformed_mcp_json_is_never_parsed_and_never_fatal(self, tmp_path):
-        """Increment 1 does not read the file, so its contents cannot matter."""
+    def test_malformed_mcp_json_disables_mcp_but_not_skills(self, tmp_path):
         root = build_plugin(tmp_path / "p", "demo", skills=["alpha"], mcp_text="}{ not json at all")
         report = validate_plugin(root)
-        assert report.loadable
+
+        assert report.loadable  # not a manifest violation
         assert report.mcp_present is True
+        assert report.mcp_servers == ()
+        assert severities(report, "mcp.invalid_json") == [Severity.SKIPPED]
+        assert report.skill_names == ("alpha",)
+
+    def test_a_version_mismatched_mcp_json_disables_mcp(self, tmp_path):
+        """§7.2.2.2 — the two documents must target the same spec version."""
+        import json as _json
+
+        root = build_plugin(
+            tmp_path / "p",
+            "demo",
+            skills=["alpha"],
+            mcp_text=_json.dumps(
+                {
+                    "$schema": "https://agent-plugins.org/schemas/9.9.9/mcp.schema.json",
+                    "mcpServers": {},
+                }
+            ),
+        )
+        report = validate_plugin(root)
+
+        assert report.loadable
+        assert report.mcp_servers == ()
+        assert "mcp.schema_unsupported" in codes(report)
         assert report.skill_names == ("alpha",)
 
     def test_mcp_json_that_is_a_directory_is_skipped(self, tmp_path):

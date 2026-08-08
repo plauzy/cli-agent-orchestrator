@@ -16,8 +16,8 @@ from click.testing import CliRunner
 from cli_agent_orchestrator.agent_plugins.store import InstalledPluginStore
 from cli_agent_orchestrator.cli.commands.agent_plugin import (
     UNTRUSTED_CONTENT_WARNING,
-    agent_plugin,
     _looks_like_git,
+    agent_plugin,
 )
 from cli_agent_orchestrator.cli.main import cli
 
