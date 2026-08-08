@@ -301,6 +301,23 @@ LOCAL_AGENT_STORE_DIR = CAO_HOME_DIR / "agent-store"
 # Local skill store for installed CAO skills
 SKILLS_DIR = CAO_HOME_DIR / "skills"
 
+# Installed Agent Plugins (agent-plugins.org 1.0.0). Each child directory is one
+# plugin's PLUGIN_ROOT, holding the exact package bytes CAO never mutates (§4.1).
+# CAO-owned install records live in the dot-prefixed ``.state/`` sibling so
+# ``list_installed()`` can skip them — the same "dot-prefix means not a plugin"
+# convention ``seed_default_skills()`` relies on for its ``.<name>.`` staging
+# dirs inside SKILLS_DIR. Created lazily (0o700) on first use by
+# ``agent_plugins/store.py``.
+AGENT_PLUGINS_DIR = CAO_HOME_DIR / "agent-plugins"
+
+# Per-plugin PLUGIN_DATA (§9.1). Deliberately OUTSIDE AGENT_PLUGINS_DIR so an
+# update that replaces a plugin's package bytes cannot destroy persistent plugin
+# state — §9.1 requires PLUGIN_DATA contents be preserved across plugin updates,
+# and publish() replaces a PLUGIN_ROOT wholesale via rename. Keeping the two
+# trees disjoint is what makes that guarantee structural rather than careful.
+# Created lazily (0o700) on first use by ``agent_plugins/store.py``.
+AGENT_PLUGIN_DATA_DIR = CAO_HOME_DIR / "agent-plugin-data"
+
 # Confinement root for graph-layer sink exports (Issue #348, B3). Every graph
 # sink writes ONLY under this directory: ``dest`` is treated as a path
 # relative to this root and joined via ``safe_join_under_base`` (realpath

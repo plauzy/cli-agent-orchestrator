@@ -48,6 +48,13 @@ jobs:
       - name: Validate Markdown links
         run: uv run python scripts/validate_markdown_links.py
 
+      # Agent Plugins 5.2 forbids fetching a schema at validation time, so the
+      # vendored bytes are the only schemas CAO ever validates against. This
+      # gate is offline (hash-manifest comparison), so it is deterministic and
+      # runs on every PR without network flakiness.
+      - name: Check Agent Plugins schema pin
+        run: make check-agent-plugins-schemas
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
