@@ -18,6 +18,7 @@ loads.
 from __future__ import annotations
 
 import json
+import subprocess
 from collections import Counter
 from pathlib import Path
 
@@ -29,9 +30,50 @@ from cli_agent_orchestrator.agent_plugins.validation import validate_plugin
 
 from .conftest import CANONICAL_EXAMPLE_DIR
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
 CORPUS_DIR = Path(__file__).parent / "fixtures" / "corpus"
 CASES = json.loads((CORPUS_DIR / "cases.json").read_text(encoding="utf-8"))
 CASE_NAMES = sorted(name for name in CASES if not name.startswith("_"))
+
+
+def test_every_corpus_directory_is_tracked_by_git():
+    """A fixture git cannot store is a test that passes locally and lies in CI.
+
+    Git stores no empty directories. The ``skill-missing-skill-md`` case needs a
+    skill folder with **no** ``SKILL.md`` in it, which is empty by construction —
+    so on a fresh clone the directory simply did not exist, the validator found
+    nothing to skip, and the case passed vacuously. It failed in CI and passed
+    on the machine that wrote it, which is the worst shape a fixture bug can
+    take.
+
+    Asserting every corpus directory has at least one tracked file underneath it
+    catches the whole class, not just the one instance.
+    """
+    tracked = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "ls-files", "--", str(CORPUS_DIR.relative_to(REPO_ROOT))],
+        check=True,
+        capture_output=True,
+        encoding="utf-8",
+    ).stdout.split()
+    tracked_paths = {Path(entry) for entry in tracked}
+    tracked_dirs = {parent for path in tracked_paths for parent in path.parents}
+
+    for entry in CORPUS_DIR.rglob("*"):
+        relative = entry.relative_to(REPO_ROOT)
+
+        # Order matters: a symlink to a directory answers True to `is_dir()`,
+        # but git stores it as a single blob, not as a directory with contents.
+        # Checking `is_dir()` first would demand tracked files *underneath* a
+        # link that legitimately has none of its own.
+        if entry.is_symlink():
+            assert relative in tracked_paths, f"{relative} is an untracked symlink"
+        elif entry.is_dir():
+            assert relative in tracked_dirs, (
+                f"{relative} exists on disk but git tracks nothing under it, so it "
+                f"will not survive a clone. Add a tracked file inside it."
+            )
+        else:
+            assert relative in tracked_paths, f"{relative} is an untracked file"
 
 
 def test_every_corpus_directory_has_an_expectation():
