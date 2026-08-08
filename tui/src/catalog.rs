@@ -86,7 +86,7 @@ use std::vec::Vec;
 /// must not offer itself — giving **33 IN-APP / 5 HANDOFF / 23 HIDE = 61**. Recorded here
 /// because a reader comparing the design's 60 against this 61 would otherwise suspect drift.
 /// (#321)
-const COMMAND_COUNT: usize = 69;
+const COMMAND_COUNT: usize = 73;
 
 /// What the TUI does with a command.
 ///
@@ -224,6 +224,10 @@ pub(crate) const DISPLAY_ORDER: [CommandId; COMMAND_COUNT] = [
     CommandId::MemoryRelationshipsReject,
     CommandId::MemoryRepair,
     CommandId::MemoryShow,
+    CommandId::PluginAdd,
+    CommandId::PluginList,
+    CommandId::PluginRemove,
+    CommandId::PluginValidate,
     CommandId::ProfileCreate,
     CommandId::ProfileFind,
     CommandId::ProfileList,
@@ -351,6 +355,16 @@ pub enum CommandId {
     MemoryRepair,
     /// `cao memory show`
     MemoryShow,
+
+    // `cao plugin *` — Agent Plugins 1.0.0, NOT the event-plugin system in plugins/
+    /// `cao plugin add`
+    PluginAdd,
+    /// `cao plugin list`
+    PluginList,
+    /// `cao plugin remove`
+    PluginRemove,
+    /// `cao plugin validate`
+    PluginValidate,
 
     // `cao profile *`
     /// `cao profile create`
@@ -847,6 +861,59 @@ fn entry(id: CommandId) -> Command {
             handoff_reason: None,
         },
 
+        // ── `cao plugin *` — Agent Plugins 1.0.0 ──────────────────────────────────────────
+        // HANDOFF for the whole group, deliberately, and for two reasons that outlive the
+        // absence of a route. First, the verb itself is unresolved maintainer decision M1, and
+        // requirements.md 16.5 forbids shipping this surface to end users before it is settled —
+        // a TUI entry is exactly such a surface. Second, `remove` must warn about live sessions
+        // and wait for confirmation before it deletes anything, which a single captured
+        // request/response cannot express. `POST /plugins` additionally runs untrusted content,
+        // and that warning belongs on real stdio.
+        CommandId::PluginAdd => Command {
+            id: CommandId::PluginAdd,
+            parent: Some("plugin"),
+            leaf_name: "add",
+            summary: "Install an agent plugin from a local path or a git URL.",
+            policy: Policy::Handoff,
+            params: &[Param { name: "source", required: true, kind: ParamKind::Text }, Param { name: "--ref", required: false, kind: ParamKind::Text }, Param { name: "--subdir", required: false, kind: ParamKind::Text }, Param { name: "--force", required: false, kind: ParamKind::Flag }, Param { name: "--dry-run", required: false, kind: ParamKind::Flag }, Param { name: "--json", required: false, kind: ParamKind::Flag }],
+            handoff_reason: Some(
+                "gated on maintainer decision M1 (the `cao plugin` verb) and on the warn-and-confirm removal flow, which a one-shot route cannot express; agent-plugins/installer.py",
+            ),
+        },
+        CommandId::PluginList => Command {
+            id: CommandId::PluginList,
+            parent: Some("plugin"),
+            leaf_name: "list",
+            summary: "List installed agent plugins.",
+            policy: Policy::Handoff,
+            params: &[Param { name: "--json", required: false, kind: ParamKind::Flag }],
+            handoff_reason: Some(
+                "gated on maintainer decision M1 (the `cao plugin` verb) and on the warn-and-confirm removal flow, which a one-shot route cannot express; agent-plugins/installer.py",
+            ),
+        },
+        CommandId::PluginRemove => Command {
+            id: CommandId::PluginRemove,
+            parent: Some("plugin"),
+            leaf_name: "remove",
+            summary: "Remove an installed agent plugin.",
+            policy: Policy::Handoff,
+            params: &[Param { name: "name", required: true, kind: ParamKind::Text }, Param { name: "--purge-data", required: false, kind: ParamKind::Flag }, Param { name: "--yes", required: false, kind: ParamKind::Flag }],
+            handoff_reason: Some(
+                "gated on maintainer decision M1 (the `cao plugin` verb) and on the warn-and-confirm removal flow, which a one-shot route cannot express; agent-plugins/installer.py",
+            ),
+        },
+        CommandId::PluginValidate => Command {
+            id: CommandId::PluginValidate,
+            parent: Some("plugin"),
+            leaf_name: "validate",
+            summary: "Validate a candidate plugin directory.",
+            policy: Policy::Handoff,
+            params: &[Param { name: "path", required: true, kind: ParamKind::Text }, Param { name: "--json", required: false, kind: ParamKind::Flag }],
+            handoff_reason: Some(
+                "gated on maintainer decision M1 (the `cao plugin` verb) and on the warn-and-confirm removal flow, which a one-shot route cannot express; agent-plugins/installer.py",
+            ),
+        },
+
         CommandId::ProfileCreate => Command {
             id: CommandId::ProfileCreate,
             parent: Some("profile"),
@@ -1298,17 +1365,23 @@ mod tests {
     /// (HANDOFF). That gives **24/18/27 = 69**. Note what the shape of this failure was: every count here was internally
     /// consistent and every test green, because nothing compared the table against the CLI. That
     /// is what `test/test_command_catalog_matches_click.py` now does. (Review on PR #547.)
+    ///
+    /// **Then `cao plugin` {add, list, remove, validate} landed** with Agent Plugins 1.0.0
+    /// support (#573). All four are HANDOFF: the verb is unresolved maintainer decision M1 and
+    /// must not reach a user-visible surface before it is settled, and `remove` needs a
+    /// warn-then-confirm exchange that a captured one-shot request cannot carry. That gives
+    /// **24/22/27 = 73**.
     #[test]
-    fn the_policy_distribution_is_twentyfour_eighteen_twentyseven() {
+    fn the_policy_distribution_is_twentyfour_twentytwo_twentyseven() {
         let (in_app, handoff, hidden) = distribution();
 
         assert_eq!(in_app, 24, "expected 24 IN-APP commands, found {in_app}");
-        assert_eq!(handoff, 18, "expected 18 HANDOFF commands, found {handoff}");
+        assert_eq!(handoff, 22, "expected 22 HANDOFF commands, found {handoff}");
         assert_eq!(hidden, 27, "expected 27 HIDE commands, found {hidden}");
         assert_eq!(
             in_app + handoff + hidden,
-            69,
-            "the three policy counts must account for all 69 leaf commands of the Click tree"
+            73,
+            "the three policy counts must account for all 73 leaf commands of the Click tree"
         );
 
         // The three counts summing to 69 does not prove 69 *distinct* commands were counted: a
@@ -1318,8 +1391,8 @@ mod tests {
         let distinct: BTreeSet<CommandId> = DISPLAY_ORDER.iter().copied().collect();
         assert_eq!(
             distinct.len(),
-            69,
-            "DISPLAY_ORDER must list 69 DISTINCT commands; a duplicate would let one command go \
+            73,
+            "DISPLAY_ORDER must list 73 DISTINCT commands; a duplicate would let one command go \
              uncounted while the totals still summed correctly"
         );
     }
@@ -1423,6 +1496,10 @@ mod tests {
                     CommandId::MemoryRelationshipsReject => CommandId::MemoryRelationshipsReject,
                     CommandId::MemoryRepair => CommandId::MemoryRepair,
                     CommandId::MemoryShow => CommandId::MemoryShow,
+                    CommandId::PluginAdd => CommandId::PluginAdd,
+                    CommandId::PluginList => CommandId::PluginList,
+                    CommandId::PluginRemove => CommandId::PluginRemove,
+                    CommandId::PluginValidate => CommandId::PluginValidate,
                     CommandId::ProfileCreate => CommandId::ProfileCreate,
                     CommandId::ProfileFind => CommandId::ProfileFind,
                     CommandId::ProfileList => CommandId::ProfileList,
@@ -1497,6 +1574,10 @@ mod tests {
                 CommandId::MemoryRelationshipsReject,
                 CommandId::MemoryRepair,
                 CommandId::MemoryShow,
+                CommandId::PluginAdd,
+                CommandId::PluginList,
+                CommandId::PluginRemove,
+                CommandId::PluginValidate,
                 CommandId::ProfileCreate,
                 CommandId::ProfileFind,
                 CommandId::ProfileList,
@@ -1586,8 +1667,8 @@ mod tests {
 
         assert_eq!(
             offered.len(),
-            42,
-            "commands() must offer the 24 IN-APP plus 18 HANDOFF commands and nothing else; an \
+            46,
+            "commands() must offer the 24 IN-APP plus 22 HANDOFF commands and nothing else; an \
              empty or short list would satisfy the Hidden check below while offering nothing"
         );
 
@@ -1646,7 +1727,7 @@ mod tests {
             }
         }
 
-        // The exact sixteen, not merely sixteen of them. A count alone cannot distinguish "the
+        // The exact list, not merely a count of it. A count alone cannot distinguish "the
         // right sixteen" from "one reclassified in and another out" — and VR-3 exists because a
         // count-only check passed while two commands were misclassified.
         //
@@ -1663,6 +1744,10 @@ mod tests {
                 "memory lint",
                 "memory promote",
                 "memory repair",
+                "plugin add",
+                "plugin list",
+                "plugin remove",
+                "plugin validate",
                 "profile create",
                 "profile remove",
                 "profile templates",
@@ -1676,7 +1761,7 @@ mod tests {
                 "workflow run",
                 "workflow wait"
             ],
-            "expected exactly these 18 HANDOFF commands; without this assertion the loop above \
+            "expected exactly these 22 HANDOFF commands; without this assertion the loop above \
              passes vacuously when zero entries are HANDOFF"
         );
     }
