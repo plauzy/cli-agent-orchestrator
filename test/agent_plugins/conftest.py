@@ -35,11 +35,21 @@ def write_skill(
 
     The frontmatter ``name`` must equal the folder name — ``_load_skill_folder``
     enforces that, and so does the Agent Skills specification.
+
+    Scalars are **quoted** deliberately. Unquoted YAML applies implicit typing,
+    so a skill legitimately named ``true``, ``no``, or ``null`` would parse as a
+    boolean or null and then compare unequal to its own folder name — the
+    fixture would be generating an *invalid* skill while claiming it was valid.
+    A property test caught exactly that. (The underlying YAML hazard is real for
+    plugin authors too, but it lives in CAO's existing skill loader rather than
+    in anything this feature introduces.)
     """
     skill_dir.mkdir(parents=True, exist_ok=True)
     skill_name = name if name is not None else skill_dir.name
+    quoted_name = json.dumps(skill_name)
+    quoted_description = json.dumps(description)
     (skill_dir / "SKILL.md").write_text(
-        f"---\nname: {skill_name}\ndescription: {description}\n---\n\n# {skill_name}\n",
+        f"---\nname: {quoted_name}\ndescription: {quoted_description}\n---\n\n# {skill_name}\n",
         encoding="utf-8",
     )
     return skill_dir
