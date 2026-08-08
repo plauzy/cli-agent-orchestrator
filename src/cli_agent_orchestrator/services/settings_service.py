@@ -642,3 +642,50 @@ def set_extra_skill_dirs(dirs: List[str]) -> List[str]:
     settings["extra_skill_dirs"] = extra_skill_dirs
     _save(settings)
     return extra_skill_dirs
+
+
+# How agent-plugin skills are materialized into SKILLS_DIR. Symlinks are the
+# default because they are free and keep PLUGIN_ROOT the single copy of a
+# plugin's bytes; copy mode exists for environments where symlink creation is
+# unsupported (notably Windows without Developer Mode or elevation).
+SKILL_PROJECTION_MODES = ("symlink", "copy")
+DEFAULT_SKILL_PROJECTION_MODE = "symlink"
+
+
+def get_skill_projection_mode() -> str:
+    """Get the agent-plugin skill projection mode (``symlink`` or ``copy``).
+
+    Reads the nested ``skills.projection_mode`` key, alongside the existing
+    ``skills.extra_dirs``. Defensive about hand-edited settings for the same
+    reason ``get_extra_skill_dirs`` is: an unrecognized or wrongly-typed value
+    must fall back to the default rather than propagate into the projection
+    engine, where it would turn a bad settings file into a failed install.
+    """
+    settings = _load()
+    nested = settings.get("skills", {})
+    if isinstance(nested, dict):
+        mode = nested.get("projection_mode")
+        if isinstance(mode, str) and mode.strip() in SKILL_PROJECTION_MODES:
+            return mode.strip()
+    return DEFAULT_SKILL_PROJECTION_MODE
+
+
+def set_skill_projection_mode(mode: str) -> str:
+    """Set the agent-plugin skill projection mode.
+
+    Returns the normalized value written, matching the convention every other
+    setter here follows.
+    """
+    normalized = mode.strip() if isinstance(mode, str) else ""
+    if normalized not in SKILL_PROJECTION_MODES:
+        raise ValueError(
+            f"projection mode must be one of {', '.join(SKILL_PROJECTION_MODES)}: {mode!r}"
+        )
+    settings = _load()
+    skills_section = settings.get("skills", {})
+    if not isinstance(skills_section, dict):
+        skills_section = {}
+    skills_section["projection_mode"] = normalized
+    settings["skills"] = skills_section
+    _save(settings)
+    return normalized

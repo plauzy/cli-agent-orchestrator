@@ -34,7 +34,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from cli_agent_orchestrator.agent_plugins.models import PluginRecord
 from cli_agent_orchestrator.constants import AGENT_PLUGIN_DATA_DIR, AGENT_PLUGINS_DIR
@@ -46,6 +46,21 @@ logger = logging.getLogger(__name__)
 # ``list_installed()``'s "skip names starting with '.'" rule excludes it
 # without needing to special-case the name.
 STATE_DIR_NAME = ".state"
+
+# Ledger of which projected skill name currently belongs to which plugin.
+#
+# This is derived state, rebuilt from the installed set, but it must be
+# *persisted* for two reasons neither of which the filesystem can answer:
+#   1. In copy mode a projected skill is an ordinary directory, indistinguishable
+#      from a user-added skill. Without a ledger, a rebuild could not tell its
+#      own copies from skills it must never touch.
+#   2. Detecting a winner reassignment (Requirement 14's transition warning)
+#      needs the *previous* winner, which exists nowhere else once the link has
+#      been replaced.
+# Named with a ``.json`` suffix inside ``.state/``; a plugin literally named
+# "projection" writes ``.state/projection.json`` too, so the ledger uses a
+# dot-prefixed name that ``§5.5`` forbids a plugin from having.
+PROJECTION_STATE_NAME = ".projection.json"
 
 # Owner-only, matching CAO_HOME_DIR / TERMINAL_LOG_DIR / FIFO_DIR.
 _DIR_MODE = 0o700
@@ -217,6 +232,57 @@ class InstalledPluginStore:
             # Leave no partial record behind on any failure, including
             # KeyboardInterrupt — a stale temp file in .state/ would be read by
             # nobody but would linger forever.
+            try:
+                os.unlink(temp_name)
+            except OSError:
+                pass
+            raise
+
+    def projection_state_path(self) -> Path:
+        """Path of the projection ledger."""
+        return self._state_dir() / PROJECTION_STATE_NAME
+
+    def read_projection(self) -> Dict[str, str]:
+        """Load the ``skill name -> owning plugin name`` ledger.
+
+        Never raises: a lost or corrupt ledger must degrade to "nothing is known
+        to be projected", which a rebuild then corrects, rather than breaking
+        install and removal entirely.
+        """
+        path = self.projection_state_path()
+        if not path.is_file():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            logger.warning("Ignoring unreadable projection ledger '%s': %s", path, exc)
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        raw = data.get("projected")
+        if not isinstance(raw, dict):
+            return {}
+        return {
+            str(skill): str(plugin)
+            for skill, plugin in raw.items()
+            if isinstance(skill, str) and isinstance(plugin, str) and skill and plugin
+        }
+
+    def write_projection(self, projected: Dict[str, str]) -> None:
+        """Persist the projection ledger atomically."""
+        self._state_dir(create=True)
+        target = self.projection_state_path()
+        payload = json.dumps(
+            {"projected": dict(sorted(projected.items()))}, indent=2, sort_keys=True
+        )
+        handle, temp_name = tempfile.mkstemp(
+            prefix=".projection.", suffix=".json", dir=str(target.parent)
+        )
+        try:
+            with os.fdopen(handle, "w", encoding="utf-8") as stream:
+                stream.write(payload)
+            os.replace(temp_name, target)
+        except BaseException:
             try:
                 os.unlink(temp_name)
             except OSError:

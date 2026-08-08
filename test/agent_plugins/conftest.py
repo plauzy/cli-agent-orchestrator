@@ -9,6 +9,7 @@ dev dependency).
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
@@ -91,6 +92,77 @@ def store(tmp_path: Path) -> InstalledPluginStore:
     return InstalledPluginStore(
         plugins_dir=tmp_path / "agent-plugins",
         data_dir=tmp_path / "agent-plugin-data",
+    )
+
+
+@dataclass
+class ProjectionEnv:
+    """An isolated store plus its projection target directory.
+
+    Bundled together because every projection assertion needs both, and because
+    keeping ``skills_dir`` out of the real ``SKILLS_DIR`` is what stops a test
+    from projecting into a developer's actual skill store.
+    """
+
+    store: InstalledPluginStore
+    skills_dir: Path
+    sources: Path
+
+    def make_plugin(self, name: str, **kwargs: Any) -> Path:
+        """Build a source package for ``name`` under this env's sources dir."""
+        return make_plugin(self.sources / name, name, **kwargs)
+
+    def install(self, name: str, *, force: bool = False, **kwargs: Any):
+        """Install a freshly built plugin named ``name``."""
+        from cli_agent_orchestrator.agent_plugins import installer
+        from cli_agent_orchestrator.agent_plugins.models import PluginSource
+
+        source_dir = kwargs.pop("source_dir", None) or self.make_plugin(name, **kwargs)
+        return installer.install(
+            PluginSource(kind="path", location=str(source_dir)),
+            force=force,
+            store=self.store,
+            skills_dir=self.skills_dir,
+            refresh_agents=False,
+        )
+
+    def uninstall(self, name: str, *, purge_data: bool = False):
+        """Remove ``name`` from this env."""
+        from cli_agent_orchestrator.agent_plugins import installer
+
+        return installer.uninstall(
+            name,
+            purge_data=purge_data,
+            store=self.store,
+            skills_dir=self.skills_dir,
+            refresh_agents=False,
+        )
+
+    def rebuild(self, **kwargs: Any):
+        """Rebuild this env's projection."""
+        from cli_agent_orchestrator.agent_plugins.projection import rebuild_projection
+
+        return rebuild_projection(self.store, skills_dir=self.skills_dir, **kwargs)
+
+    def skill_names(self) -> list:
+        """Entry names currently present in the projection target."""
+        if not self.skills_dir.is_dir():
+            return []
+        return sorted(entry.name for entry in self.skills_dir.iterdir())
+
+
+@pytest.fixture
+def env(tmp_path: Path) -> ProjectionEnv:
+    """An isolated install/projection environment."""
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    return ProjectionEnv(
+        store=InstalledPluginStore(
+            plugins_dir=tmp_path / "agent-plugins",
+            data_dir=tmp_path / "agent-plugin-data",
+        ),
+        skills_dir=skills_dir,
+        sources=tmp_path / "sources",
     )
 
 
