@@ -1970,6 +1970,249 @@ async def set_skill_dirs_endpoint(
     }
 
 
+# =============================================================================
+# Agent plugins (agent-plugins.org 1.0.0)
+#
+# Placed beside the skills and skill-dirs handlers because that is what these
+# manage: a plugin's value to CAO is the skills it projects into the skill store.
+#
+# Unrelated to the `cao.plugins` EVENT-plugin system (decision D7) -- no route
+# here touches PluginRegistry.
+#
+# Gated on decision M1 exactly as the CLI group is: the routes exist and are
+# tested, but no web tab ships to end users until the naming decision is
+# recorded (Requirement 16.5).
+#
+# install/uninstall are synchronous and do real work (copying trees, cloning
+# git repositories), so they run through `asyncio.to_thread` rather than
+# blocking the event loop -- the same treatment `get_terminal` gets for its
+# blocking tmux calls.
+# =============================================================================
+
+# Requirement 22.1: the API must state, at or before the point of install, that
+# installing a plugin runs untrusted content. Returned in the install and
+# validate responses so a client cannot render an install affordance without
+# having been handed the warning.
+PLUGIN_UNTRUSTED_CONTENT_WARNING = (
+    "Installing an agent plugin runs untrusted code and content from that "
+    "source. CAO does not verify plugin authorship or integrity: there is no "
+    "signing and no provenance check. Only install plugins from sources you "
+    "trust."
+)
+
+
+class PluginInstallRequest(BaseModel):
+    """Install an agent plugin from a local path or a git repository."""
+
+    source: str
+    ref: Optional[str] = None
+    subdir: Optional[str] = None
+    force: bool = False
+
+
+class PluginValidateRequest(BaseModel):
+    """Validate a candidate plugin directory without installing it."""
+
+    path: str
+
+
+def _plugin_affected_sessions(skill_names: List[str]) -> List[Dict]:
+    """Live terminals that can reach any of ``skill_names``.
+
+    Never raises: this drives a warning, so no server being up, no database, or
+    an unreadable profile must degrade to "nothing known to be affected".
+    """
+    from cli_agent_orchestrator.agent_plugins.installer import affected_sessions
+
+    return [
+        {
+            "terminal_id": session.terminal_id,
+            "session_name": session.session_name,
+            "provider": session.provider,
+            "agent_profile": session.agent_profile,
+            "skill_names": list(session.skill_names),
+        }
+        for session in affected_sessions(skill_names)
+    ]
+
+
+def _plugin_record_payload(record, owners: Dict[str, str]) -> Dict:
+    """Serialize one install record for the API."""
+    projected = sorted(skill for skill, owner in owners.items() if owner == record.name)
+    return {
+        "name": record.name,
+        "version": record.version,
+        "schema_id": record.schema_id,
+        "source": record.source.to_dict() if record.source else None,
+        "resolved_ref": record.resolved_ref,
+        "installed_at": record.installed_at.isoformat() if record.installed_at else None,
+        "skill_names": list(record.skill_names),
+        "projected_skill_names": projected,
+        "findings": [finding.to_dict() for finding in record.findings],
+        # Requirement 17.5: the LIST response reports impact too, so the panel
+        # can warn before the operator even clicks remove.
+        "affected_sessions": _plugin_affected_sessions(projected),
+    }
+
+
+@app.get("/plugins")
+async def list_plugins_endpoint() -> Dict:
+    """List installed agent plugins with findings and projected skills."""
+    from cli_agent_orchestrator.agent_plugins import projection, provenance
+    from cli_agent_orchestrator.agent_plugins.store import InstalledPluginStore
+
+    def _collect() -> Dict:
+        store = InstalledPluginStore()
+        # The dangling-link sweep runs on rebuild and on listing, and never
+        # raises into the caller.
+        swept = projection.sweep_dangling(store)
+        owners = provenance.projected_skills(store)
+        return {
+            "plugins": [
+                _plugin_record_payload(record, owners) for record in store.list_installed()
+            ],
+            "swept": list(swept),
+            "untrusted_content_warning": PLUGIN_UNTRUSTED_CONTENT_WARNING,
+        }
+
+    try:
+        return await asyncio.to_thread(_collect)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list agent plugins: {str(e)}",
+        )
+
+
+@app.post("/plugins", status_code=status.HTTP_201_CREATED)
+async def install_plugin_endpoint(
+    body: PluginInstallRequest,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict:
+    """Install an agent plugin from a source."""
+    from cli_agent_orchestrator.agent_plugins import installer
+    from cli_agent_orchestrator.agent_plugins.resolver import (
+        PluginResolutionError,
+        detect_source,
+    )
+
+    def _install():
+        source = detect_source(body.source, ref=body.ref, subdir=body.subdir)
+        return installer.install(source, force=body.force)
+
+    try:
+        outcome = await asyncio.to_thread(_install)
+    except PluginResolutionError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except installer.PluginInstallError as e:
+        # Name already taken and force was not set.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to install agent plugin: {str(e)}",
+        )
+
+    if not outcome.installed:
+        # Not loadable. Nothing was published, and the full report is the useful
+        # part of the failure, so it is returned rather than flattened.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": "Agent plugin is not loadable; nothing was installed",
+                "report": outcome.report.to_dict(),
+            },
+        )
+
+    return {
+        "installed": True,
+        "name": outcome.record.name if outcome.record else None,
+        "version": outcome.record.version if outcome.record else None,
+        "projected_skill_names": list(outcome.projected_skill_names),
+        "report": outcome.report.to_dict(),
+        "findings": [finding.to_dict() for finding in outcome.findings],
+        "refreshed_agents": outcome.refreshed_agents,
+        "untrusted_content_warning": PLUGIN_UNTRUSTED_CONTENT_WARNING,
+    }
+
+
+@app.post("/plugins/validate")
+async def validate_plugin_endpoint(
+    body: PluginValidateRequest,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict:
+    """Validate a candidate plugin directory without installing it."""
+    from cli_agent_orchestrator.agent_plugins.validation import validate_plugin
+
+    try:
+        report = await asyncio.to_thread(validate_plugin, Path(body.path))
+    except Exception as e:  # pragma: no cover - validate_plugin is total
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to validate agent plugin: {str(e)}",
+        )
+
+    # A non-loadable plugin is a successful validation with a negative verdict,
+    # not a request error -- the caller asked a question and got an answer.
+    return {
+        "report": report.to_dict(),
+        "untrusted_content_warning": PLUGIN_UNTRUSTED_CONTENT_WARNING,
+    }
+
+
+@app.delete("/plugins/{name}")
+async def delete_plugin_endpoint(
+    name: str,
+    purge_data: bool = False,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict:
+    """Uninstall an agent plugin.
+
+    Reports the affected live sessions (Requirement 17.5). Note this endpoint
+    *performs* the removal: warning and confirmation is the client's
+    responsibility, and the Web_Panel is required to gate on the affected-session
+    information before calling this at all.
+    """
+    from cli_agent_orchestrator.agent_plugins import installer
+    from cli_agent_orchestrator.agent_plugins.store import InstalledPluginStore
+
+    def _remove() -> Dict:
+        store = InstalledPluginStore()
+        if store.get(name) is None:
+            raise FileNotFoundError(f"Agent plugin not found: {name}")
+        owned, affected = installer.removal_impact(name, store)
+        affected_payload = [
+            {
+                "terminal_id": session.terminal_id,
+                "session_name": session.session_name,
+                "provider": session.provider,
+                "agent_profile": session.agent_profile,
+                "skill_names": list(session.skill_names),
+            }
+            for session in affected
+        ]
+        outcome = installer.uninstall(name, purge_data=purge_data)
+        return {
+            "success": True,
+            "name": name,
+            "removed": outcome.removed,
+            "purged_data": outcome.purged_data,
+            "withdrawn_skill_names": list(owned),
+            "affected_sessions": affected_payload,
+            "refreshed_agents": outcome.refreshed_agents,
+        }
+
+    try:
+        return await asyncio.to_thread(_remove)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to remove agent plugin: {str(e)}",
+        )
+
+
 @app.get("/skills/{name}", response_model=SkillContentResponse)
 async def get_skill_content(name: str) -> SkillContentResponse:
     """Return the full Markdown body for an installed skill."""

@@ -7,17 +7,22 @@ import { AgentPanel } from './components/AgentPanel'
 import { FlowsPanel } from './components/FlowsPanel'
 import { MemoryPanel } from './components/MemoryPanel'
 import { SettingsPanel } from './components/SettingsPanel'
-import { Bot, Home, Clock, Settings, Brain, CheckCircle, XCircle, Info, Wifi, WifiOff } from 'lucide-react'
+import { PluginsPanel } from './components/PluginsPanel'
+import { PLUGINS_TAB_ENABLED } from './featureFlags'
+import { Bot, Home, Clock, Settings, Brain, Package, CheckCircle, XCircle, Info, Wifi, WifiOff } from 'lucide-react'
 
-type TabKey = 'home' | 'agents' | 'flows' | 'settings' | 'memory'
+type TabKey = 'home' | 'agents' | 'flows' | 'settings' | 'memory' | 'plugins'
 
-// Memory appended last so Alt+N numbering of existing tabs never shifts
+// Memory appended last so Alt+N numbering of existing tabs never shifts.
+// Plugins is appended AFTER Memory for the same reason (Requirement 17.4) --
+// every existing tab keeps its position and its Alt+N shortcut.
 const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   { key: 'home', label: 'Home', icon: <Home size={16} /> },
   { key: 'agents', label: 'Agents', icon: <Bot size={16} /> },
   { key: 'flows', label: 'Flows', icon: <Clock size={16} /> },
   { key: 'settings', label: 'Settings', icon: <Settings size={16} /> },
   { key: 'memory', label: 'Memory', icon: <Brain size={16} /> },
+  { key: 'plugins', label: 'Plugins', icon: <Package size={16} /> },
 ]
 
 function Snackbar() {
@@ -57,7 +62,10 @@ export default function App() {
   const [memoryEnabled, setMemoryEnabled] = useState(false)
   const { sessions, connected, fetchSessions } = useStore()
 
-  const visibleTabs = TABS.filter(t => t.key !== 'memory' || memoryEnabled)
+  const visibleTabs = TABS.filter(
+    t =>
+      (t.key !== 'memory' || memoryEnabled) && (t.key !== 'plugins' || PLUGINS_TAB_ENABLED),
+  )
 
   useEffect(() => {
     fetchSessions()
@@ -146,6 +154,7 @@ export default function App() {
             {tab === 'flows' && <FlowsPanel />}
             {tab === 'settings' && <SettingsPanel />}
             {tab === 'memory' && <MemoryPanel />}
+            {tab === 'plugins' && <PluginsPanel />}
           </Suspense>
         </ErrorBoundary>
       </main>

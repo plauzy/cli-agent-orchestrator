@@ -479,8 +479,10 @@ fn route(id: CommandId) -> Option<Route> {
         // /agents/profiles`; `None` here is correct, not an omission. (OQ-6 Q2)
         CommandId::ProfileFind => None,
         // HIDE, all four: the `cao plugin` group is hidden pending decision M1, so these are
-        // unreachable through `commands()`. No HTTP route exists yet either — the `/plugins/*`
-        // endpoints are W8 of the cao-agent-plugins spec. Revisit together with M1.
+        // unreachable through `commands()` and need no route. `/plugins/*` endpoints DO now exist
+        // (GET/POST /plugins, POST /plugins/validate, DELETE /plugins/{name}), so wiring these to
+        // IN-APP is a follow-up once M1 settles the surface naming — `None` here is the HIDE
+        // policy, not a missing route.
         CommandId::PluginAdd => None,
         CommandId::PluginList => None,
         CommandId::PluginRemove => None,

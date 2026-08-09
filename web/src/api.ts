@@ -189,6 +189,78 @@ export interface GraphExportResult {
   dest: string
 }
 
+// ── Agent plugins (agent-plugins.org 1.0.0) ─────────────────────────────────
+// Unrelated to CAO's `cao.plugins` EVENT-plugin system (decision D7).
+
+export interface PluginFinding {
+  severity: string
+  code: string
+  spec_ref: string
+  message: string
+  path: string | null
+}
+
+/** A live terminal whose agent can reach a skill a plugin projects. */
+export interface PluginAffectedSession {
+  terminal_id: string
+  session_name: string
+  provider: string
+  agent_profile: string | null
+  skill_names: string[]
+}
+
+export interface InstalledPlugin {
+  name: string
+  version: string | null
+  schema_id: string | null
+  source: { kind: string; location: string; ref: string | null; subdir: string | null } | null
+  resolved_ref: string | null
+  installed_at: string | null
+  skill_names: string[]
+  /** Subset of skill_names actually materialized; the difference is explained by findings. */
+  projected_skill_names: string[]
+  findings: PluginFinding[]
+  affected_sessions: PluginAffectedSession[]
+}
+
+export interface PluginListResponse {
+  plugins: InstalledPlugin[]
+  swept: string[]
+  untrusted_content_warning: string
+}
+
+export interface PluginValidationReport {
+  root: string
+  loadable: boolean
+  name: string | null
+  version: string | null
+  schema_id: string | null
+  skills: { name: string; directory: string; projected_as: string | null }[]
+  mcp_present: boolean
+  findings: PluginFinding[]
+}
+
+export interface PluginInstallResponse {
+  installed: boolean
+  name: string | null
+  version: string | null
+  projected_skill_names: string[]
+  report: PluginValidationReport
+  findings: PluginFinding[]
+  refreshed_agents: number
+  untrusted_content_warning: string
+}
+
+export interface PluginRemoveResponse {
+  success: boolean
+  name: string
+  removed: boolean
+  purged_data: boolean
+  withdrawn_skill_names: string[]
+  affected_sessions: PluginAffectedSession[]
+  refreshed_agents: number
+}
+
 export const api = {
   // Agent Profiles & Providers
   listProfiles: () => fetchJSON<AgentProfileInfo[]>('/agents/profiles'),
@@ -296,5 +368,31 @@ export const api = {
         timeoutMs: 60000,
       },
     )
-  },
+  },,
+
+  // Agent plugins. Install may clone a git repository, so it gets a wide
+  // timeout like the graph routes rather than the 10s default.
+  listPlugins: () => fetchJSON<PluginListResponse>('/plugins'),
+  installPlugin: (body: { source: string; ref?: string; subdir?: string; force?: boolean }) =>
+    fetchJSON<PluginInstallResponse>('/plugins', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      timeoutMs: 120000,
+    }),
+  validatePlugin: (path: string) =>
+    fetchJSON<{ report: PluginValidationReport; untrusted_content_warning: string }>(
+      '/plugins/validate',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+        timeoutMs: 30000,
+      },
+    ),
+  removePlugin: (name: string, purgeData = false) =>
+    fetchJSON<PluginRemoveResponse>(
+      `/plugins/${encodeURIComponent(name)}${purgeData ? '?purge_data=true' : ''}`,
+      { method: 'DELETE', timeoutMs: 30000 },
+    ),
 }
