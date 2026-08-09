@@ -46,3 +46,24 @@ check-agent-plugins-schemas:
 # Needs network. Exit 0 = in sync, 1 = drift, 2 = network-gated.
 check-agent-plugins-schemas-upstream:
 	uv run python scripts/vendor_agent_plugins_schemas.py --check-upstream
+
+# -----------------------------------------------------------------------------
+# CAO's own Agent Plugins packages (agent-plugin/cao, agent-plugin/cao-contributor).
+#
+# The packages are committed so `cao plugin add ./agent-plugin/cao` works from a
+# clone with no build step, and so a foreign client can install straight from a
+# subdirectory of the GitHub repo. See scripts/build_agent_plugin.py.
+# -----------------------------------------------------------------------------
+
+.PHONY: agent-plugin check-agent-plugin
+
+# Regenerate both packages from their allowlists and CAO's package version.
+agent-plugin:
+	uv run python scripts/build_agent_plugin.py
+
+# Verify both packages match their allowlists, are version-synced, and load
+# cleanly under CAO's own Validator. Evaluates each package independently, so a
+# failure in one still reports failures in the other.
+# Exit 0 = in sync, 1 = drift or validation failure.
+check-agent-plugin:
+	uv run python scripts/build_agent_plugin.py --check
