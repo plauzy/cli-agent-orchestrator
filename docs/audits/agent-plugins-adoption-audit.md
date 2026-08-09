@@ -246,7 +246,7 @@ All runs performed 2026-08-09 in isolated git worktrees, Python 3.11.15, `uv syn
 | both branches `tui/tests/endpoint_contract.rs` (3 failures here) | classified **environmental**: it is a deliberate live-server contract test that fails-not-skips without a running `cao-server`; the file is untouched by both branches; PR36's CI (server available) runs it green |
 | **PR36** `pytest test/agent_plugins/` | **434 passed** — the PR body's claim verified exactly; 2 skips are root-privilege artifacts (chmod fixtures no-op as root) that run in CI |
 | **PR36** `make check-agent-plugins-schemas` / `make check-agent-plugin` | both OK |
-| **PR36** full-suite / web / Rust | not re-run locally — CI on `2d69333` verified directly via the checks API: 17 success, 1 skipped (Dependency Review), 1 failure (Security Scan, verified pre-existing: `docusaurus/package-lock.json` byte-identical to `main`; `fix/bump-nanoid-cve-2026-67213` exists) |
+| **PR36** full-suite / web / Rust | not re-run locally — CI on `2d69333` verified directly via the checks API: 17 success, 1 skipped (Dependency Review), 1 failure (Security Scan, verified pre-existing: `docusaurus/package-lock.json` byte-identical to `main`). The fix has since landed on `main` as #576 (`5464a2e`, nanoid ≥3.3.17 via npm overrides) — syncing PR #36 with `main` clears its one red check |
 
 ## 10. PR #36 description — claims audit
 
@@ -267,13 +267,13 @@ All runs performed 2026-08-09 in isolated git worktrees, Python 3.11.15, `uv syn
 | "6725 passed / 434 / 106 / 143" | ✅ 434 reproduced exactly; 143 reproduced on both branches; 6725 and 106 accepted via green CI, not re-run |
 | "62 remaining failures pre-existing, identical sets vs base" | ➖ not re-verified (author-environment claim); green CI makes it moot for merge purposes |
 | "Squashed tree byte-identical to sum of parts + listed changes" | ✅ 21 files, +348/−99, exactly |
-| Trivy failure pre-existing, wants its own PR | ✅ verified byte-identical lockfile |
+| Trivy failure pre-existing, wants its own PR | ✅ verified byte-identical lockfile; that PR happened — #576 landed on `main` after this audit's static pass |
 
 ## 11. Recommendation
 
 **Sequence:**
 
-1. **Fix-forward on PR #36 (blocking):** R1 (wire `report.mcp_servers` → install record → profile `mcpServers`, making the pre-expanded seam live and driving `test_install_service_skips_a_marked_entry` through the real path — or, if maintainers prefer the smaller diff, demote the docs claim and label mapping validation-only) and R2 (read-scope on `GET /plugins` + hoist the session walk). Ride-alongs: R3, R4, R5 comment/docs fixes. Add a sentence to the PR description naming the Increment-boundary deviation.
+1. **Fix-forward on PR #36 (blocking):** R1 (wire `report.mcp_servers` → install record → profile `mcpServers`, making the pre-expanded seam live and driving `test_install_service_skips_a_marked_entry` through the real path — or, if maintainers prefer the smaller diff, demote the docs claim and label mapping validation-only) and R2 (read-scope on `GET /plugins` + hoist the session walk). Ride-alongs: R3, R4, R5 comment/docs fixes. Add a sentence to the PR description naming the Increment-boundary deviation. Sync the branch with `main` while at it — the nanoid fix (#576) landed there, so the sync turns Security Scan green and makes the pipeline fully clean for the merge decision.
 2. **Port from `impl` after merge (fast follows, in value order):** the docs-guard suite; the resolver hardening deltas (credential-helper neutralization, `--no-tags`, commit-pin fetch); the four dedicated property modules (adapted to PR36's module API); store `_replace()` restore-on-failure; `SchemaUnavailableError`. Consider `impl`'s local-only `validate` posture for the CLI/API as the default, keeping resolution behind the WRITE-gated install path.
 3. **Retire `impl/cao-agent-plugins`** (after the port): fix or don't fix `},,` — but do not leave a branch alive whose web surface can't build; it will be mistaken for a viable alternative.
 4. **Upstream (#573):** what CAO can now demonstrate is substantial — both sides of the contract, pinned schemas gated in CI, a conformance corpus keyed to spec clauses, the canonical example as an executable fixture, and a §11.2-clean increment story. What it cannot yet claim: AC2's end-to-end half (install `agent-plugin/cao` into ≥2 foreign clients and call the tools — needs R1 on the client side and a real foreign-client run on the author side), and every naming decision M1–M4, which are maintainers' to make and are correctly left open behind enforced gates. Lead with the corpus and the two-glob finding; the latter is exactly the class of cross-client subtlety the spec's conformance section exists to surface, and is worth filing upstream against the spec repo as an implementer's note.
