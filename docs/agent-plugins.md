@@ -170,9 +170,41 @@ cannot change what CAO considers valid.
 ## MCP servers
 
 A plugin may declare MCP servers in an `mcp.json` beside its `plugin.json`. CAO
-validates it against the pinned `mcp.schema.json` and maps each server into its
-internal MCP configuration, from which every provider's native form is already
-derived.
+validates it against the pinned `mcp.schema.json`, maps each server into its
+internal MCP configuration, and merges the result into the `mcpServers` of every
+agent profile it installs — the same dict from which each provider's native MCP
+form is already derived. So a declared server reaches Kiro's agent JSON and
+OpenCode's `opencode.json` with no per-provider work.
+
+When the merge happens matters, and it is worth knowing as an operator:
+
+- **`cao install <agent>`** picks up whatever plugins are installed at that
+  moment.
+- **`cao plugin add` / `cao plugin remove`** re-materialize the provider configs
+  of agents you have already installed, so a plugin's servers appear on the
+  agents you own without reinstalling each one, and disappear when the plugin
+  does. This is not cosmetic: `mcpServers` is written into each provider's config
+  file and never re-read, so a removed plugin whose servers were left behind
+  would leave providers trying to launch a binary that is no longer on disk.
+
+Server names collide the way skill names do, and are resolved by the same kind of
+rule rather than by timing. **A server your profile already declares always
+wins** — including CAO's own `cao-mcp-server` — and a plugin's same-named entry is
+dropped with a report rather than merged, renamed, or prefixed. Between two
+plugins claiming one name, the lexicographically smallest plugin name wins.
+Renaming would be worse than dropping: the plugin's own documentation, and any
+skill it ships that names the server, would describe something that no longer
+answers.
+
+> **A plugin's MCP servers are commands the plugin chose, run on your machine
+> with your user's permissions.** CAO expands only the two placeholders below,
+> keeps every server's working directory and `./`-rooted command inside the
+> plugin's own directory, and warns about credential-shaped values — but it does
+> not sandbox the process, and it cannot: an MCP server is meant to do real work.
+> The consent gate is the untrusted-content warning printed at install time, which
+> is why installing is an explicit act and why `cao plugin validate` exists to let
+> you read `mcp.json` before you install it. CAO's own localhost-only posture is
+> unchanged by this: nothing here opens a port or accepts a remote connection.
 
 **An unusable `mcp.json` disables MCP for that plugin and nothing else** — its
 skills still install and deliver. One bad server entry likewise invalidates only

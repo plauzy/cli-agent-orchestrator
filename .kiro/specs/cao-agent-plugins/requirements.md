@@ -340,7 +340,14 @@ Where a #573 acceptance criterion spans both increments, the acceptance criteria
 7. [Increment 2] IF an MCP server entry declares a transport type unsupported by the target provider, THEN THE MCP_Mapper SHALL skip that entry with a report rather than substituting a different transport.
 8. [Increment 2] IF a value in an MCP server entry's `env` or `headers` block appears credential-shaped, THEN THE MCP_Mapper SHALL report a `WARNING`-severity finding and SHALL NOT block installation or reject the entry on that basis alone.
 
-**Traceability:** design.md §"MCP mapping — Increment 2 only"; validates Property **P9**; validates AC7 (credential-shape warning, Increment 2 portion) and the second half of AC1/AC2 as described in Requirement 11's increment-splitting note.
+9. [Increment 2] WHEN an agent profile is installed for a provider, THE MCP_Mapper's output for every installed plugin SHALL be merged into that profile's MCP server configuration, so that a declared server is actually reachable by the provider rather than only reported.
+10. [Increment 2] WHERE a mapped server's name is already declared by the agent profile, THE system SHALL keep the profile's declaration and report the plugin's entry as skipped, and SHALL NOT rename, prefix, or merge the plugin's entry.
+11. [Increment 2] WHERE two installed plugins declare the same MCP server name, THE system SHALL deliver the entry from the lexicographically smallest plugin name and report the other as skipped.
+12. [Increment 2] WHEN a plugin is installed or removed, THE system SHALL re-materialize the MCP configuration of already-installed agents, so that a plugin's servers reach existing agents and do not outlive the plugin.
+
+**Traceability:** design.md §"MCP mapping — Increment 2 only" and §"10a. MCP delivery — the consumer this section presupposed"; validates Property **P9**; validates AC7 (credential-shape warning, Increment 2 portion) and the second half of AC1/AC2 as described in Requirement 11's increment-splitting note.
+
+> **Amendment note (adoption-audit finding R1).** Criteria 1–8 specify the *mapper* and were implemented and tested, but nothing consumed the mapper's output: it reached the validation report and stopped, leaving `docs/agent-plugins.md` claiming servers were delivered when they were not, and leaving the pre-expanded marker of Criterion 4 unreachable in production. Criteria 9–12 were added to state the delivery obligation the mapper's design already presupposed — Criterion 4 is only meaningful if something puts a marked entry where CAO's interpolation pass will encounter it. Criteria 1–8 keep their numbering and meaning. Covered by `test/agent_plugins/test_mcp_delivery.py`, which drives `install_agent` and reads the emitted provider config rather than re-implementing the merge.
 
 ---
 

@@ -415,32 +415,41 @@ class TestPreExpansionMarker:
         assert PRE_EXPANDED_KEY not in stripped
         assert stripped["command"] == "x"
 
-    def test_install_service_skips_a_marked_entry(self, monkeypatch):
-        """The literal ``${FOO}`` a plugin left alone must stay literal."""
+    def test_only_the_unmarked_entry_is_re_resolved(self, monkeypatch):
+        """CAO's ``${VAR}`` pass must skip a marked entry and process the rest.
+
+        Scoped to the predicate's *effect on the pass*, deliberately. An earlier
+        version of this test re-implemented ``install_service``'s comprehension
+        over a hand-built dict, which meant it passed whether or not the real
+        module contained that branch at all — and for a while the real branch was
+        unreachable because nothing ever put a marked entry into a profile.
+
+        The end-to-end assertions now live in ``test_mcp_delivery.py``, which
+        installs a plugin, runs ``install_agent``, and reads the provider config.
+        What is left here is the unit-level fact that module owns: given a mixed
+        dict, ``resolve_mcp_server_config`` sees exactly the unmarked entries.
+        """
         from cli_agent_orchestrator.services import install_service
 
-        called = []
+        seen = []
         monkeypatch.setattr(
             install_service,
             "resolve_mcp_server_config",
-            lambda cfg, persisted=False: called.append(cfg) or cfg,
+            lambda cfg, persisted=False: seen.append(dict(cfg)) or cfg,
         )
 
-        plugin_entry = {"type": "stdio", "command": "x", "args": ["${FOO}"], PRE_EXPANDED_KEY: True}
+        marked = {"type": "stdio", "command": "x", "args": ["${FOO}"], PRE_EXPANDED_KEY: True}
         ordinary = {"type": "stdio", "command": "y"}
 
-        mapped = {
-            name: (
-                install_service.strip_plugin_mcp_marker(cfg)
-                if install_service.is_plugin_mcp_entry(cfg)
-                else install_service.resolve_mcp_server_config(dict(cfg), persisted=True)
-            )
-            for name, cfg in {"plugin": plugin_entry, "ordinary": ordinary}.items()
-        }
+        assert install_service.is_plugin_mcp_entry(marked)
+        assert not install_service.is_plugin_mcp_entry(ordinary)
 
-        assert called == [ordinary]  # only the non-plugin entry was re-resolved
-        assert mapped["plugin"]["args"] == ["${FOO}"]
-        assert PRE_EXPANDED_KEY not in mapped["plugin"]
+        install_service.resolve_mcp_server_config(dict(ordinary), persisted=True)
+        assert seen == [ordinary]
+
+        stripped = install_service.strip_plugin_mcp_marker(marked)
+        assert stripped["args"] == ["${FOO}"], "the plugin's literal must survive unexpanded"
+        assert PRE_EXPANDED_KEY not in stripped
 
 
 class TestDocumentLevelFailures:

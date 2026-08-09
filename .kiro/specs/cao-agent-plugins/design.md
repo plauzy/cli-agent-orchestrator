@@ -69,7 +69,8 @@ src/cli_agent_orchestrator/agent_plugins/
 ├── store.py             # installed-set state, install records
 ├── projection.py        # skill delivery bridge into SKILLS_DIR
 ├── provenance.py        # skill name -> owning plugin (read-only lookup)
-└── mcp_mapping.py       # Increment 2: mcp.json -> CAO mcpServers + expansion
+├── mcp_mapping.py       # Increment 2: mcp.json -> CAO mcpServers + expansion
+└── mcp_delivery.py      # Increment 2: mapped servers -> agent profile mcpServers
 ```
 
 `agent_plugins/` is **not** nested under `plugins/`. Nesting would make `from cli_agent_orchestrator.plugins import ...` ambiguous at the import site — the single highest-value disambiguation available — and would imply the new system is subordinate to the event-plugin system, which it is not.
@@ -454,6 +455,23 @@ Conformance points that must be pinned here:
 - **Transport capability matrix.** §7.2.1 requires at least one of `stdio`/`streamable-http`; CAO's providers vary. Per §7.2.2 rule 4, a server whose declared transport is unsupported by the target provider is **skipped with a report**, not failed over — §7.2.1 explicitly leaves fallback outside the format.
 - **Secrets.** §7.2.1/§9.2 forbid credentials in `env` and `headers`. The spec does not require clients to reject them, so CAO emits a **warning-level finding** when a value looks credential-shaped, and does not block. `services/secret_gate.py` remains the sanctioned path for real secrets.
 
+#### 10a. MCP delivery — the consumer this section presupposed
+
+`map_mcp_config` produces entries; something has to *deliver* them. The adoption audit (`docs/audits/agent-plugins-adoption-audit.md`, finding R1) found that this section's own architecture — "the mapping targets the agent-profile `mcpServers` dict" — had no implementation: the mapper's output reached `PluginValidationReport.mcp_servers`, was serialized into `--json` output, and stopped there. Nothing wrote it into a profile, which also made the pre-expanded marker unreachable in production, since its only purpose is to be seen by `install_service`'s interpolation pass and skipped. `agent_plugins/mcp_delivery.py` is that consumer, and it is the MCP counterpart to `projection.py`:
+
+| | Skills | MCP servers |
+|---|---|---|
+| Module | `projection.py` | `mcp_delivery.py` |
+| Delivered into | `SKILLS_DIR` (shared store) | each profile's `mcpServers` |
+| Re-read by providers later? | Yes — every launch | **No** — baked into provider configs at install |
+| Collision rule | pre-existing wins, then smallest plugin name | identical |
+
+**Decision: re-map from the installed root at profile-build time; do not persist the mapping in `PluginRecord`.** Both were viable and the record was the smaller diff. Re-mapping was chosen because a persisted mapping can go stale in ways nothing detects: `PLUGIN_DATA`/`PLUGIN_ROOT` expansions are *absolute paths* embedded in `args`/`env`/`cwd`, so a record written under one `CAO_HOME_DIR` would hand a provider paths that no longer exist if the home moved; a `--force` re-install from a newer source would keep serving the old record's servers; and an operator who edited the installed tree would see record and tree disagree with no signal. Re-mapping makes the delivered set a pure function of what is on disk now — the same property `projection.py` gets by rebuilding rather than patching. The cost is one JSON read plus one offline schema validation per installed plugin, paid on the install/refresh path only; **Requirement 13.5's prohibition is on new launch-time filesystem work, and this adds none.**
+
+**Consequence: removal needs an explicit refresh.** Because `mcpServers` is baked into provider configs and never re-read, `installer._refresh_agent_artifacts` re-materializes every CAO-managed installed agent (via `install_service.refresh_installed_agents_for_plugin_mcp`) on both install and uninstall. Without it a plugin's servers would reach only agents installed *after* the plugin, and an uninstalled plugin's servers would linger in every provider config that already had them, pointing at a `PLUGIN_ROOT` that no longer exists. The refresh replays the real `install_agent` rather than patching each provider's file, because patching would mean a second implementation of every provider's MCP shape — the exact per-provider duplication this section's "target the lingua franca" choice exists to avoid.
+
+**Merge point, and why it is exactly there.** Between provider resolution and CAO's `${VAR}` resolution pass in `install_agent`. After provider resolution because the transport matrix is provider-dependent (OpenCode carries stdio only, so a url-based server must be skipped for that provider alone — `translate_mcp_server_config` would otherwise flatten it into an empty command, which looks configured and is worse than absent). Before the resolution pass because the pre-expanded marker exists to be read by it; merging afterwards would leave the marker unread and leak it into provider config files.
+
 ## Data Models
 
 ```python
@@ -760,7 +778,7 @@ The vendored schema bytes hash to the values in `PIN.json`; and with all socket 
 
 ## Testing Strategy
 
-**Unit.** Per component, mirroring the existing layout under `test/` (`test/utils/test_skills.py`, `test/services/test_install_service.py` are the models): `test/agent_plugins/test_validation.py`, `test_containment.py`, `test_resolver.py`, `test_installer.py`, `test_projection.py`, `test_provenance.py`, and `test_mcp_mapping.py` (Increment 2).
+**Unit.** Per component, mirroring the existing layout under `test/` (`test/utils/test_skills.py`, `test/services/test_install_service.py` are the models): `test/agent_plugins/test_validation.py`, `test_containment.py`, `test_resolver.py`, `test_installer.py`, `test_projection.py`, `test_provenance.py`, `test_mcp_mapping.py` (Increment 2), and `test_mcp_delivery.py` (Increment 2 — the delivery seam, driven through `install_agent` rather than around it).
 
 **Conformance corpus.** A fixture tree of plugin directories — one per row of the [failure-isolation table](#failure-isolation-and-reporting), each asserting the exact finding codes and `spec_ref` values. This is the artifact that makes conformance reviewable rather than asserted. The upstream `agent-plugins-example` package is included as a known-good positive fixture.
 

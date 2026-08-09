@@ -20,6 +20,7 @@ keeping their numbering), and it is documented under "Known Limitations" in
 from __future__ import annotations
 
 import glob
+import json
 import re
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
@@ -288,3 +289,146 @@ def test_property_delivery_equivalence_across_providers(
         for provider in ALL_PROVIDERS:
             reachable = reachable_skill_names(provider, world["skills_dir"], world["opencode_dir"])
             assert reachable == expected, provider
+
+
+# --- MCP delivery equivalence (W11) -----------------------------------------
+#
+# The skill half above asks "does every provider reach the same set of skill
+# names". This half asks the same question of MCP servers, and it is a genuinely
+# different question rather than a copy: skills are delivered by *projection into
+# a shared store* every provider already reads, so the expected set is
+# provider-independent by construction. MCP servers are delivered by *merging
+# into each profile's `mcpServers`* with a provider-dependent transport matrix, so
+# the expected set is a function of the provider — and the union has to be
+# asserted per transport rather than once.
+
+
+def mcp_document(**servers) -> str:
+    from .conftest import MCP_SCHEMA_ID
+
+    return json.dumps({"$schema": MCP_SCHEMA_ID, "mcpServers": servers}, indent=2)
+
+
+def delivered_server_names(provider: str, store) -> Set[str]:
+    """MCP server names an agent on ``provider`` would be configured with.
+
+    Reads through ``mcp_delivery``, which is the single seam ``install_agent``
+    uses, so this cannot drift from what a provider config actually receives the
+    way a re-implemented merge would.
+    """
+    from cli_agent_orchestrator.agent_plugins.mcp_delivery import collect_plugin_mcp_servers
+
+    return set(collect_plugin_mcp_servers(provider=provider, store=store).servers)
+
+
+STDIO_SERVER = {"type": "stdio", "command": "demo-server"}
+HTTP_SERVER = {"type": "streamable-http", "url": "https://example.test/mcp"}
+
+#: The one provider whose native MCP shape cannot carry a url-based entry.
+#: `utils/opencode_config.translate_mcp_server_config` flattens an entry into
+#: `{"type": "local", "command": [...]}`, so an HTTP server would arrive with an
+#: empty command — worse than absent, because it would look configured.
+STDIO_ONLY_PROVIDERS = {ProviderType.OPENCODE_CLI.value}
+
+
+@pytest.mark.parametrize("provider", ALL_PROVIDERS)
+def test_every_provider_receives_every_stdio_plugin_server(delivery_world, provider):
+    """A stdio server is deliverable everywhere, so every provider gets it."""
+    world = delivery_world
+    source = build_plugin(
+        world["tmp_path"] / "src",
+        "delivery",
+        skills=["plugin-skill"],
+        mcp_text=mcp_document(**{"tools-one": STDIO_SERVER, "tools-two": STDIO_SERVER}),
+    )
+    install(
+        PluginSource(kind="path", location=str(source)),
+        store=world["store"],
+        skills_dir=world["skills_dir"],
+        refresh_agents=False,
+    )
+
+    assert delivered_server_names(provider, world["store"]) == {"tools-one", "tools-two"}
+
+
+@pytest.mark.parametrize("provider", ALL_PROVIDERS)
+def test_an_http_server_reaches_exactly_the_providers_that_can_carry_it(delivery_world, provider):
+    """Requirement 18.7 — skipped for the narrowed provider, delivered elsewhere.
+
+    This is the asymmetry that makes MCP delivery different from skill delivery,
+    asserted rather than described: the same installed plugin yields a different
+    delivered set depending on the provider, and that is correct.
+    """
+    world = delivery_world
+    source = build_plugin(
+        world["tmp_path"] / "src",
+        "delivery",
+        skills=["plugin-skill"],
+        mcp_text=mcp_document(local=STDIO_SERVER, remote=HTTP_SERVER),
+    )
+    install(
+        PluginSource(kind="path", location=str(source)),
+        store=world["store"],
+        skills_dir=world["skills_dir"],
+        refresh_agents=False,
+    )
+
+    expected = {"local"} if provider in STDIO_ONLY_PROVIDERS else {"local", "remote"}
+    assert delivered_server_names(provider, world["store"]) == expected
+
+
+@pytest.mark.parametrize("provider", ALL_PROVIDERS)
+def test_an_unusable_mcp_json_delivers_nothing_to_any_provider(delivery_world, provider):
+    """§7.2.2.2 — MCP off for that plugin, uniformly, and skills unaffected."""
+    from cli_agent_orchestrator.utils.opencode_config import ensure_skills_symlink
+
+    world = delivery_world
+    source = build_plugin(
+        world["tmp_path"] / "src",
+        "delivery",
+        skills=["plugin-skill"],
+        mcp_text="{ not json",
+    )
+    install(
+        PluginSource(kind="path", location=str(source)),
+        store=world["store"],
+        skills_dir=world["skills_dir"],
+        refresh_agents=False,
+    )
+    # OpenCode reaches skills through its own config symlink, which the install
+    # path does not create; the skill-side tests above call this for the same
+    # reason. Without it this test would "prove" skills were lost.
+    ensure_skills_symlink()
+
+    assert delivered_server_names(provider, world["store"]) == set()
+    # The skill half of the same plugin is untouched by the MCP failure.
+    assert "plugin-skill" in reachable_skill_names(
+        provider, world["skills_dir"], world["opencode_dir"]
+    )
+
+
+@pytest.mark.parametrize("provider", ALL_PROVIDERS)
+def test_removal_withdraws_the_server_from_every_provider(delivery_world, provider):
+    """The MCP mirror of ``test_removal_withdraws_the_skill_from_every_provider``."""
+    from cli_agent_orchestrator.agent_plugins.installer import uninstall
+
+    world = delivery_world
+    source = build_plugin(
+        world["tmp_path"] / "src",
+        "delivery",
+        skills=["plugin-skill"],
+        mcp_text=mcp_document(temporary=STDIO_SERVER),
+    )
+    install(
+        PluginSource(kind="path", location=str(source)),
+        store=world["store"],
+        skills_dir=world["skills_dir"],
+        refresh_agents=False,
+    )
+    assert "temporary" in delivered_server_names(provider, world["store"])
+
+    uninstall(
+        "delivery", store=world["store"], skills_dir=world["skills_dir"], refresh_agents=False
+    )
+
+    assert delivered_server_names(provider, world["store"]) == set()

@@ -312,13 +312,37 @@ def validate_source(
 
 
 def _refresh_agent_artifacts() -> None:
-    """Refresh baked Copilot/Q agent prompts. Best effort, never fatal."""
+    """Re-materialize what an agent-plugin change invalidates. Never fatal.
+
+    Two independent artifacts, for two different reasons:
+
+    1. **Baked skill catalogs** (Copilot's ``.agent.md`` prompt) — a plugin's
+       skills change the catalog text that was composed at install time.
+    2. **Provider MCP configs** — ``mcpServers`` is written into each provider's
+       config at install time and never re-read, so a plugin's servers reach
+       existing agents only if those configs are rewritten. This is also what
+       makes uninstall complete: without it, a removed plugin's servers stay
+       configured, pointing at a ``PLUGIN_ROOT`` that no longer exists.
+
+    Both are best effort and independently guarded: a failure to refresh prompts
+    must not prevent the MCP refresh, and neither may fail the plugin operation
+    that triggered them.
+    """
     try:
         from cli_agent_orchestrator.utils.skill_injection import refresh_all_cao_managed_agents
 
         refresh_all_cao_managed_agents()
     except Exception as exc:
         logger.warning("Could not refresh installed agent prompts after plugin change: %s", exc)
+
+    try:
+        from cli_agent_orchestrator.services.install_service import (
+            refresh_installed_agents_for_plugin_mcp,
+        )
+
+        refresh_installed_agents_for_plugin_mcp()
+    except Exception as exc:
+        logger.warning("Could not refresh provider MCP configs after plugin change: %s", exc)
 
 
 def installed_findings(record: PluginRecord) -> Tuple[Finding, ...]:
