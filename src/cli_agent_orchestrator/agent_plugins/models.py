@@ -194,6 +194,21 @@ class PluginValidationReport:
         """Names of every skill discovered as valid, in discovery order."""
         return tuple(skill.name for skill in self.skills)
 
+    @property
+    def blocked_by_cao(self) -> bool:
+        """``True`` when the plugin failed because **CAO** is broken, not the plugin.
+
+        There is exactly one such cause today: CAO could not load its own pinned
+        schema, so it has nothing to validate against. Without this distinction a
+        truncated CAO install reports every plugin as invalid, and an operator
+        reasonably concludes the plugins are at fault — the one wrong conclusion,
+        because it sends them to fix something that is fine.
+
+        A ``cao.``-namespaced code rather than a severity: this is still FATAL for
+        the plugin (nothing can be published), it just is not the plugin's doing.
+        """
+        return any(finding.code.startswith("cao.") for finding in self.findings)
+
     def findings_of(self, severity: Severity) -> Tuple[Finding, ...]:
         """Return only the findings at ``severity``."""
         return tuple(f for f in self.findings if f.severity is severity)
@@ -204,6 +219,10 @@ class PluginValidationReport:
         return {
             "root": str(self.root),
             "loadable": self.loadable,
+            # Serialized rather than left for the client to re-derive: a web panel
+            # or CI job showing "plugin invalid" when CAO's own schemas are missing
+            # sends the operator to fix the wrong thing.
+            "blocked_by_cao": self.blocked_by_cao,
             "name": manifest.name if manifest else None,
             "version": manifest.version if manifest else None,
             "description": manifest.description if manifest else None,

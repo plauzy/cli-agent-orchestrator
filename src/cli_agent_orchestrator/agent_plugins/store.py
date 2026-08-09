@@ -205,7 +205,34 @@ class InstalledPluginStore:
                 staged_copy.rename(destination)
             except OSError as exc:
                 if backup is not None and not destination.exists():
-                    backup.rename(destination)  # roll back to the previous bytes
+                    # Put the previous bytes back. `not destination.exists()` is
+                    # the concurrency guard: if something else published while we
+                    # were mid-swap, restoring would clobber *its* tree, so the
+                    # newer content is left alone and the old backup is dropped
+                    # below instead.
+                    try:
+                        backup.rename(destination)
+                    except OSError as restore_exc:
+                        # The one case where a failure can destroy a working
+                        # plugin: the aside-move succeeded, the swap failed, and
+                        # now the restore has failed too. `destination` does not
+                        # exist and this backup holds the only copy of the
+                        # operator's bytes.
+                        #
+                        # `backup` is cleared *before* raising, which is the whole
+                        # point: `finally` runs on the way out of an exception too,
+                        # so leaving the variable set would delete the very
+                        # directory this branch exists to preserve. The path is
+                        # kept in a local for the message, because manual recovery
+                        # is a single `mv` and an operator who is not told where
+                        # to look cannot perform it.
+                        preserved, backup = backup, None
+                        raise PluginStoreError(
+                            f"Agent plugin '{name}' could not be replaced, and the previous "
+                            f"version could not be restored automatically ({restore_exc}). "
+                            f"Its files are intact at {preserved} — move that directory back "
+                            f"to {destination} to recover. Nothing was deleted."
+                        ) from restore_exc
                     backup = None
                 if exc.errno in (errno.EEXIST, errno.ENOTEMPTY):
                     raise PluginStoreError(
@@ -213,6 +240,10 @@ class InstalledPluginStore:
                     ) from exc
                 raise
             finally:
+                # Reached on success (the old tree is now redundant) and on a
+                # failure that restored successfully (`backup` set to None above,
+                # so nothing is deleted). The unrecoverable path raises before
+                # here with `backup` deliberately left on disk.
                 if backup is not None:
                     _rmtree_quiet(backup)
 

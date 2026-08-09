@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import stat
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -14,9 +16,9 @@ from cli_agent_orchestrator.agent_plugins.models import (
     PluginSource,
     Severity,
 )
-from cli_agent_orchestrator.agent_plugins.store import PluginStoreError
+from cli_agent_orchestrator.agent_plugins.store import InstalledPluginStore, PluginStoreError
 
-from .conftest import build_plugin
+from .conftest import PLUGIN_SCHEMA_ID, build_plugin
 
 
 def make_record(name: str = "demo", **overrides) -> PluginRecord:
@@ -201,3 +203,164 @@ class TestNameGuard:
 
     def test_get_returns_none_rather_than_raising_for_a_bad_name(self, store):
         assert store.get("../escape") is None
+
+
+class TestAFailedReplaceNeverDestroysAWorkingPlugin:
+    """WP4.4 — the double-rename failure story, ported from impl.
+
+    ``publish(force=True)`` cannot be atomic end to end: POSIX will not rename a
+    directory over a non-empty one, so the old root is moved aside, the new one is
+    renamed in, and the old one is then deleted. Two renames means two failure
+    points, and the second one is where a working plugin can be lost.
+
+    These are injected-failure tests because the window cannot be reached any other
+    way — every one of these renames succeeds on a healthy filesystem, and the
+    scenario that matters (a full disk, a revoked permission, an unmounted volume
+    mid-operation) is precisely the one no functional test produces.
+    """
+
+    @staticmethod
+    def _record(name: str = "demo") -> PluginRecord:
+        return PluginRecord(
+            name=name,
+            version="1.0.0",
+            source=PluginSource(kind="path", location="/src"),
+            resolved_ref=None,
+            installed_at=datetime.now(timezone.utc),
+            schema_id=PLUGIN_SCHEMA_ID,
+            skill_names=(),
+        )
+
+    @pytest.fixture
+    def installed(self, tmp_path):
+        """A store with ``demo`` published and a marker file inside it."""
+        store = InstalledPluginStore(tmp_path / "plugins", tmp_path / "data")
+        source = build_plugin(tmp_path / "src", "demo", skills=["alpha"])
+        store.publish(source, self._record())
+        marker = store.plugin_root("demo") / "MARKER.txt"
+        marker.write_text("the operator's working bytes", encoding="utf-8")
+        return {"store": store, "tmp_path": tmp_path, "marker": marker}
+
+    @staticmethod
+    def _fail_renames_after(count: int, monkeypatch):
+        """Let the first ``count`` renames succeed, then fail every one after."""
+        real = Path.rename
+        seen = {"n": 0}
+
+        def flaky(self, target):
+            seen["n"] += 1
+            if seen["n"] <= count:
+                return real(self, target)
+            raise OSError(errno.EIO, "simulated I/O error")
+
+        monkeypatch.setattr(Path, "rename", flaky)
+        return seen
+
+    def test_a_failed_swap_restores_the_previous_tree(self, installed, monkeypatch):
+        """Aside-move succeeds, swap fails, restore succeeds — the ordinary case."""
+        store = installed["store"]
+        replacement = build_plugin(installed["tmp_path"] / "src2", "demo", skills=["beta"])
+
+        # 1 = the aside-move, 2 = the swap (fails), 3 = the restore.
+        real = Path.rename
+        seen = {"n": 0}
+
+        def flaky(self, target):
+            seen["n"] += 1
+            if seen["n"] == 2:
+                raise OSError(errno.EIO, "simulated I/O error")
+            return real(self, target)
+
+        monkeypatch.setattr(Path, "rename", flaky)
+
+        with pytest.raises(OSError):
+            store.publish(replacement, self._record(), force=True)
+
+        monkeypatch.undo()
+        assert installed["marker"].is_file()
+        assert installed["marker"].read_text(encoding="utf-8") == "the operator's working bytes"
+
+    def test_a_failed_restore_leaves_the_bytes_recoverable(self, installed, monkeypatch):
+        """The data-loss case: swap fails **and** the restore fails too.
+
+        Before this fix the ``finally`` clause swept the aside-moved directory on
+        the way out, so ``destination`` did not exist, the backup was deleted, and
+        the plugin was gone with no copy anywhere. The bytes must survive.
+        """
+        store = installed["store"]
+        replacement = build_plugin(installed["tmp_path"] / "src2", "demo", skills=["beta"])
+
+        self._fail_renames_after(1, monkeypatch)  # aside-move only
+
+        with pytest.raises(PluginStoreError) as excinfo:
+            store.publish(replacement, self._record(), force=True)
+
+        monkeypatch.undo()
+        preserved = [
+            path
+            for path in (installed["tmp_path"] / "plugins").iterdir()
+            if "replaced" in path.name
+        ]
+        assert preserved, "the previous version was deleted with no copy remaining"
+        assert (preserved[0] / "MARKER.txt").read_text(encoding="utf-8") == (
+            "the operator's working bytes"
+        )
+        assert "Nothing was deleted" in str(excinfo.value)
+
+    def test_the_error_names_both_paths_so_recovery_is_possible(self, installed, monkeypatch):
+        """Manual recovery is one ``mv``; an operator not told where cannot do it."""
+        store = installed["store"]
+        replacement = build_plugin(installed["tmp_path"] / "src2", "demo", skills=["beta"])
+
+        self._fail_renames_after(1, monkeypatch)
+
+        with pytest.raises(PluginStoreError) as excinfo:
+            store.publish(replacement, self._record(), force=True)
+
+        monkeypatch.undo()
+        message = str(excinfo.value)
+        preserved = next(
+            path
+            for path in (installed["tmp_path"] / "plugins").iterdir()
+            if "replaced" in path.name
+        )
+        assert str(preserved) in message
+        assert str(store.plugin_root("demo")) in message
+
+    def test_a_successful_replace_still_deletes_the_old_tree(self, installed):
+        """The cleanup must keep working — the fix must not leak a backup per install.
+
+        The failure this excludes is a "safe" implementation that never deletes:
+        every forced reinstall would leave another full copy of the plugin behind
+        and the store would grow without bound.
+        """
+        store = installed["store"]
+        replacement = build_plugin(installed["tmp_path"] / "src2", "demo", skills=["beta"])
+
+        store.publish(replacement, self._record(), force=True)
+
+        leftovers = [
+            path.name
+            for path in (installed["tmp_path"] / "plugins").iterdir()
+            if "replaced" in path.name
+        ]
+        assert leftovers == []
+        assert (store.plugin_root("demo") / "skills" / "beta").is_dir()
+
+    def test_a_failed_aside_move_leaves_everything_untouched(self, installed, monkeypatch):
+        """Failing before the window opens is the easy case; assert it anyway.
+
+        Nothing has moved yet, so there is nothing to restore — and the operator's
+        plugin must be exactly as it was, not merely recoverable.
+        """
+        store = installed["store"]
+        replacement = build_plugin(installed["tmp_path"] / "src2", "demo", skills=["beta"])
+
+        self._fail_renames_after(0, monkeypatch)  # even the aside-move fails
+
+        with pytest.raises(OSError):
+            store.publish(replacement, self._record(), force=True)
+
+        monkeypatch.undo()
+        assert installed["marker"].is_file()
+        assert (store.plugin_root("demo") / "skills" / "alpha").is_dir()

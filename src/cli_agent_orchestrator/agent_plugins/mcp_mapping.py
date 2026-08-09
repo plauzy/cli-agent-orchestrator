@@ -46,8 +46,9 @@ from cli_agent_orchestrator.agent_plugins.containment import resolve_within_root
 from cli_agent_orchestrator.agent_plugins.models import Finding, MappedServer, Severity
 from cli_agent_orchestrator.agent_plugins.validation import (
     MCP_SCHEMA_FILENAME,
-    PinnedSchemaError,
+    SchemaUnavailableError,
     _offline_validator,
+    _schema_unavailable_finding,
     supported_schema_id,
 )
 
@@ -204,17 +205,9 @@ def map_mcp_config(
     declared = cfg.get("$schema")
     try:
         expected = supported_schema_id(MCP_SCHEMA_FILENAME)
-    except PinnedSchemaError as exc:  # pragma: no cover - packaging defect
+    except SchemaUnavailableError as exc:  # pragma: no cover - packaging defect
         return MappedMcpResult(
-            findings=(
-                Finding(
-                    severity=Severity.SKIPPED,
-                    code="schema.pin_unreadable",
-                    spec_ref="§5.2",
-                    message=str(exc),
-                    path=MCP_FILENAME,
-                ),
-            ),
+            findings=(_schema_unavailable_finding(exc, path=MCP_FILENAME),),
             present=True,
             valid=False,
         )
@@ -287,16 +280,8 @@ def _schema_errors(cfg: Mapping[str, Any]) -> List[Finding]:
     """Validate the document against the pinned ``mcp.schema.json``."""
     try:
         validator = _offline_validator(MCP_SCHEMA_FILENAME)
-    except PinnedSchemaError as exc:  # pragma: no cover - packaging defect
-        return [
-            Finding(
-                severity=Severity.SKIPPED,
-                code="schema.pin_unreadable",
-                spec_ref="§5.2",
-                message=str(exc),
-                path=MCP_FILENAME,
-            )
-        ]
+    except SchemaUnavailableError as exc:  # pragma: no cover - packaging defect
+        return [_schema_unavailable_finding(exc, path=MCP_FILENAME)]
 
     errors = sorted(
         validator.iter_errors(dict(cfg)),

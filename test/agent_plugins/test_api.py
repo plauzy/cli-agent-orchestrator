@@ -393,3 +393,129 @@ class TestListDoesOneLiveStateWalk:
 
         assert {p["name"] for p in plugins} == {"alpha", "beta"}
         assert all("affected_sessions" in p for p in plugins)
+
+
+class TestEveryPluginResponseCarriesTheWarning:
+    """Requirement 22.1 on the API surface — ported from impl (WP4.6).
+
+    A warning present only on ``GET /plugins`` is satisfiable by a client that
+    never calls it. Putting it on every response describing a plugin means a
+    client cannot render an install affordance without having been handed the text
+    to show beside it.
+    """
+
+    def _warning(self, body: dict) -> str:
+        assert "untrusted_content_warning" in body, sorted(body)
+        return body["untrusted_content_warning"]
+
+    def test_the_list_response_carries_it(self, client):
+        assert "untrusted" in self._warning(client.get("/plugins").json()).lower()
+
+    def test_a_successful_install_carries_it(self, client, tmp_path):
+        source = build_plugin(tmp_path / "src", "demo", skills=["alpha"])
+
+        response = client.post("/plugins", json={"source": str(source)})
+
+        assert response.status_code == 201
+        assert "untrusted" in self._warning(response.json()).lower()
+
+    def test_a_successful_validate_carries_it(self, client, tmp_path):
+        source = build_plugin(tmp_path / "src", "demo", skills=["alpha"])
+
+        response = client.post("/plugins/validate", json={"source": str(source)})
+
+        assert response.status_code == 200
+        assert "untrusted" in self._warning(response.json()).lower()
+
+    def test_the_unloadable_install_422_carries_it_too(self, client, tmp_path):
+        """The case most worth covering, and the easiest to miss.
+
+        "This plugin is not loadable" is exactly the moment an operator decides
+        whether to try a different source — a decision about trust. The 422 body
+        goes out through ``HTTPException(detail=...)``, a different path from the
+        success return, so it needs its own assertion.
+        """
+        source = build_plugin(tmp_path / "src", "broken", skills=["alpha"], schema_id=None)
+
+        response = client.post("/plugins", json={"source": str(source)})
+
+        assert response.status_code == 422
+        assert "untrusted" in self._warning(response.json()["detail"]).lower()
+
+    def test_the_warning_is_the_same_text_the_cli_prints(self, client):
+        """One statement, not two that can drift apart.
+
+        An operator who reads the warning in the panel and then reads a different
+        one in the terminal has been given two different security stories.
+        """
+        from cli_agent_orchestrator.cli.commands.agent_plugin import UNTRUSTED_CONTENT_WARNING
+
+        assert self._warning(client.get("/plugins").json()) == UNTRUSTED_CONTENT_WARNING
+
+    def test_removal_is_deliberately_not_warned(self, client, tmp_path):
+        """Removal is the safe direction; warning there trains people to ignore it."""
+        source = build_plugin(tmp_path / "src", "demo", skills=["alpha"])
+        client.post("/plugins", json={"source": str(source)})
+
+        response = client.delete("/plugins/demo")
+
+        assert response.status_code == 200
+        assert "untrusted_content_warning" not in response.json()
+
+
+class TestPackagingFailuresAreNotBlamedOnThePlugin:
+    """WP4.5 — the ``SchemaUnavailableError`` diagnostic distinction.
+
+    When CAO cannot load its own pinned schema, *every* plugin fails validation.
+    Reporting that as a plugin defect sends the operator to fix something that is
+    fine, so the report says whose fault it is.
+    """
+
+    def test_a_broken_schema_marks_the_report_as_cao_blocked(self, client, tmp_path, monkeypatch):
+        from cli_agent_orchestrator.agent_plugins import validation
+
+        source = build_plugin(tmp_path / "src", "demo", skills=["alpha"])
+
+        def unavailable(filename):
+            raise validation.SchemaUnavailableError(f"vendored schema {filename!r} is missing")
+
+        monkeypatch.setattr(validation, "_offline_validator", unavailable)
+
+        response = client.post("/plugins/validate", json={"source": str(source)})
+        body = response.json()
+
+        assert response.status_code == 200
+        assert body["loadable"] is False
+        assert body["blocked_by_cao"] is True
+
+    def test_the_finding_says_it_is_cao_and_how_to_fix_it(self, client, tmp_path, monkeypatch):
+        from cli_agent_orchestrator.agent_plugins import validation
+
+        source = build_plugin(tmp_path / "src", "demo", skills=["alpha"])
+        monkeypatch.setattr(
+            validation,
+            "_offline_validator",
+            lambda filename: (_ for _ in ()).throw(validation.SchemaUnavailableError("gone")),
+        )
+
+        body = client.post("/plugins/validate", json={"source": str(source)}).json()
+        codes = [finding["code"] for finding in body["findings"]]
+        messages = " ".join(finding["message"] for finding in body["findings"])
+
+        assert validation.CAO_SCHEMA_UNAVAILABLE in codes
+        assert "not with the plugin" in messages
+        assert "Reinstall CAO" in messages or "refresh-agent-plugins-schemas" in messages
+
+    def test_an_ordinary_invalid_plugin_is_not_marked_cao_blocked(self, client, tmp_path):
+        """The distinction has to discriminate, not just exist.
+
+        Without this, ``blocked_by_cao`` could be hardcoded true and the test above
+        would still pass — and every real plugin defect would be excused as CAO's
+        fault, which is the same conflation in the opposite direction.
+        """
+        source = build_plugin(tmp_path / "src", "broken", skills=["alpha"], schema_id=None)
+
+        body = client.post("/plugins/validate", json={"source": str(source)}).json()
+
+        assert body["loadable"] is False
+        assert body["blocked_by_cao"] is False

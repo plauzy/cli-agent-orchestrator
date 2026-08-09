@@ -73,13 +73,55 @@ _MCP_FILENAME = "mcp.json"
 _MANIFEST_FILENAME = "plugin.json"
 
 
-class PinnedSchemaError(RuntimeError):
+class SchemaUnavailableError(RuntimeError):
     """Raised when a vendored schema cannot be read or parsed.
 
-    This is a packaging defect (a truncated wheel, a bad vendoring run), not a
-    plugin defect, so it is distinct from any finding. :func:`validate_plugin`
-    still converts it into a ``FATAL`` finding rather than propagating.
+    This is **CAO's** defect — a truncated wheel, a bad vendoring run, a file
+    deleted from an installed package — not the plugin's. It is a distinct type
+    rather than a finding because the difference is actionable in opposite
+    directions: a plugin defect means fix or distrust the plugin, while this
+    means the CAO installation is broken and *every* plugin will fail the same
+    way.
+
+    :func:`validate_plugin` still converts it into a ``FATAL`` finding rather
+    than propagating — the validator is total — but the finding it produces
+    carries :data:`CAO_SCHEMA_UNAVAILABLE` and says whose fault it is, so the
+    distinction survives into what an operator actually reads. See
+    :attr:`PluginValidationReport.blocked_by_cao`.
     """
+
+
+#: Backwards-compatible alias. The old name described *where* the schema came
+#: from; the new one describes what went wrong, which is what a caller needs.
+PinnedSchemaError = SchemaUnavailableError
+
+#: Finding code for "CAO could not load its own schema". Deliberately namespaced
+#: ``cao.`` rather than ``schema.`` or ``manifest.``: every other code in a
+#: report describes something about the *plugin*, and grouping this with them is
+#: exactly the conflation that makes a packaging failure look like a bad plugin.
+CAO_SCHEMA_UNAVAILABLE = "cao.schema_unavailable"
+
+
+def _schema_unavailable_finding(exc: Exception, *, path: Optional[str] = None) -> Finding:
+    """Build the FATAL finding for a CAO-side schema failure.
+
+    One constructor, used by every call site, so the message cannot drift between
+    the manifest path and the MCP path — an operator hitting this on two
+    different plugins must not get two different explanations of one fault.
+    """
+    return Finding(
+        severity=Severity.FATAL,
+        code=CAO_SCHEMA_UNAVAILABLE,
+        spec_ref="§5.2",
+        message=(
+            f"This is a problem with the CAO installation, not with the plugin: "
+            f"CAO could not load its own pinned Agent Plugins schema ({exc}). "
+            f"Every plugin will fail validation until it is fixed. Reinstall CAO, "
+            f"or re-vendor the schemas with `make refresh-agent-plugins-schemas` "
+            f"if you are working in a checkout."
+        ),
+        path=path,
+    )
 
 
 @lru_cache(maxsize=None)
@@ -90,18 +132,22 @@ def load_pinned_schema(filename: str) -> Dict[str, Any]:
     runs once per plugin per install, list, and CI check.
     """
     if filename not in (PLUGIN_SCHEMA_FILENAME, MCP_SCHEMA_FILENAME):
-        raise PinnedSchemaError(f"Unknown pinned schema: {filename!r}")
+        raise SchemaUnavailableError(f"Unknown pinned schema: {filename!r}")
     try:
         anchor = resources.files(_SCHEMA_PACKAGE)
         for part in _SCHEMA_SUBPATH:
             anchor = anchor.joinpath(part)
         raw = anchor.joinpath(filename).read_text(encoding="utf-8")
     except (FileNotFoundError, ModuleNotFoundError, OSError) as exc:
-        raise PinnedSchemaError(f"Vendored schema {filename!r} is not readable: {exc}") from exc
+        raise SchemaUnavailableError(
+            f"Vendored schema {filename!r} is not readable: {exc}"
+        ) from exc
     try:
         parsed: Dict[str, Any] = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise PinnedSchemaError(f"Vendored schema {filename!r} is not valid JSON: {exc}") from exc
+        raise SchemaUnavailableError(
+            f"Vendored schema {filename!r} is not valid JSON: {exc}"
+        ) from exc
     return parsed
 
 
@@ -145,7 +191,7 @@ def supported_schema_id(filename: str) -> str:
     """
     schema_id = load_pinned_schema(filename).get("$id")
     if not isinstance(schema_id, str) or not schema_id:
-        raise PinnedSchemaError(f"Vendored schema {filename!r} declares no $id")
+        raise SchemaUnavailableError(f"Vendored schema {filename!r} declares no $id")
     return schema_id
 
 
@@ -375,15 +421,8 @@ def _check_schema_declaration(manifest: Dict[str, Any]) -> List[Finding]:
 
     try:
         supported = supported_schema_id(PLUGIN_SCHEMA_FILENAME)
-    except PinnedSchemaError as exc:
-        return [
-            Finding(
-                severity=Severity.FATAL,
-                code="schema.pin_unreadable",
-                spec_ref="§5.2",
-                message=str(exc),
-            )
-        ]
+    except SchemaUnavailableError as exc:
+        return [_schema_unavailable_finding(exc)]
 
     if declared != supported:
         return [
@@ -467,15 +506,8 @@ def _schema_findings(sanitized: Dict[str, Any]) -> List[Finding]:
     """Validate the sanitized manifest against the pinned, offline schema."""
     try:
         validator = _offline_validator(PLUGIN_SCHEMA_FILENAME)
-    except PinnedSchemaError as exc:
-        return [
-            Finding(
-                severity=Severity.FATAL,
-                code="schema.pin_unreadable",
-                spec_ref="§5.2",
-                message=str(exc),
-            )
-        ]
+    except SchemaUnavailableError as exc:
+        return [_schema_unavailable_finding(exc)]
 
     errors = sorted(
         validator.iter_errors(sanitized),

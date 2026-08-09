@@ -2115,6 +2115,22 @@ def _plugin_source(body: "PluginInstallRequest"):
     return PluginSource(kind=kind, location=body.source, ref=body.ref, subdir=body.subdir)
 
 
+def _with_untrusted_warning(payload: Dict) -> Dict:
+    """Attach the untrusted-content warning to an agent-plugin response.
+
+    Every response describing a plugin carries it — list, install, validate, and
+    the 422 body for an unloadable install — so a client cannot render an install
+    affordance without having been handed the text to show beside it. Requirement
+    22.1 puts the obligation on CAO, and a warning present only on the *list*
+    response is satisfiable by a client that never calls list.
+
+    That the unloadable-install 422 carries it too is the case worth stating:
+    "this plugin is not loadable" is exactly the moment a user is deciding whether
+    to try a different source, which is a decision about trust.
+    """
+    return {**payload, "untrusted_content_warning": UNTRUSTED_CONTENT_WARNING}
+
+
 @app.get("/plugins")
 async def list_agent_plugins(
     _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
@@ -2153,7 +2169,7 @@ async def list_agent_plugins(
         ]
         plugins.append(entry)
 
-    return {"plugins": plugins, "untrusted_content_warning": UNTRUSTED_CONTENT_WARNING}
+    return _with_untrusted_warning({"plugins": plugins})
 
 
 @app.post("/plugins", status_code=status.HTTP_201_CREATED)
@@ -2180,9 +2196,9 @@ async def install_agent_plugin(
         # finding rather than a bare error string.
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=outcome.to_dict(),
+            detail=_with_untrusted_warning(outcome.to_dict()),
         )
-    return outcome.to_dict()
+    return _with_untrusted_warning(outcome.to_dict())
 
 
 @app.post("/plugins/validate")
@@ -2211,7 +2227,7 @@ async def validate_agent_plugin(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to validate agent plugin: {exc}",
         )
-    return report.to_dict()
+    return _with_untrusted_warning(report.to_dict())
 
 
 @app.delete("/plugins/{name}")
@@ -2238,6 +2254,9 @@ async def uninstall_agent_plugin(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to uninstall agent plugin: {exc}",
         )
+    # Deliberately NOT warned: removal is the safe direction, and a warning about
+    # installing untrusted content beside a successful uninstall is noise that
+    # trains operators to ignore the text where it matters.
     return outcome.to_dict()
 
 
