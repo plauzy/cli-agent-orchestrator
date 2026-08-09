@@ -13,13 +13,21 @@ while loading a plugin): the schemas are read from bytes committed under
 ``referencing`` registry handed to ``jsonschema`` **refuses every retrieval**, so
 an unexpected ``$ref`` raises instead of quietly becoming a network call.
 
-Increment boundary
-------------------
-This module detects ``mcp.json``, records ``mcp_present=True``, emits an
-"MCP not supported in this CAO version" finding, and moves on — exactly what
-§11.3 rule 1 and §7.2.2 rule 4 prescribe for an unsupported component type.
-It does not read the file, validate it against ``mcp.schema.json``, expand any
-placeholder, or launch anything.
+MCP components
+--------------
+``mcp.json`` is detected here and mapped by delegation: :func:`_map_mcp` calls
+``mcp_mapping.load_and_map``, so the report carries ``mcp_present`` and the mapped
+servers. This module owns no expansion or schema logic for MCP itself — the
+placeholder rules, the transport matrix, and the ``mcp.schema.json`` validation
+all live in ``mcp_mapping``, and delivery into agent profiles lives in
+``mcp_delivery``. Keeping all three separate is what lets this module stay a
+*total function over a directory* with no notion of where the result goes.
+
+(Increment 1 stopped at detection: it recorded ``mcp_present=True`` with an "MCP
+not supported in this CAO version" finding and read nothing, which is what §11.3
+rule 1 and §7.2.2 rule 4 prescribe for an unsupported component type. Increment 2
+replaced that finding with real mapping. Whichever increment, **an unusable
+``mcp.json`` never affects the plugin's skills** — §7.2.2.2, §10.1.)
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 //! The static run-policy table: what the TUI offers, and how (issue #321).
 //!
-//! One row per leaf command of the CAO Click tree — **69 of them** — each classified `InApp`,
+//! One row per leaf command of the CAO Click tree — **73 of them** — each classified `InApp`,
 //! `Handoff`, or `Hidden`. Three infallible lookups read that table and nothing else.
 //!
 //! # No I/O, and that is the security property (SR-1)
@@ -64,7 +64,7 @@ use std::vec::Vec;
 
 /// The number of leaf commands in the CAO Click tree.
 ///
-/// **69 as of this branch.** Two separate merges from `main` each brought four new leaf commands
+/// **73 as of this branch.** Two separate merges from `main` each brought four new leaf commands
 /// that this table did not know about, and both were caught by
 /// `test/test_command_catalog_matches_click.py` rather than by review — the second one in CI,
 /// because CI tests the PR MERGED against `main` while a local run only sees the branch. That is
@@ -183,7 +183,7 @@ pub struct Command {
 ///
 /// `pub(crate)` since Bolt 3: `server-client`'s route-table tests walk it to assert that every
 /// IN-APP command has a route and that no HANDOFF or HIDE command does. Deriving that set any
-/// other way would mean re-listing 69 commands in a second place, which is a worse trade than
+/// other way would mean re-listing 73 commands in a second place, which is a worse trade than
 /// widening the visibility of a compile-time constant. Still crate-private — no consumer outside
 /// this crate exists, and the table is not a public API. (#321)
 pub(crate) const DISPLAY_ORDER: [CommandId; COMMAND_COUNT] = [
@@ -262,7 +262,7 @@ pub(crate) const DISPLAY_ORDER: [CommandId; COMMAND_COUNT] = [
     CommandId::WorkflowValidate,
 ];
 
-/// One variant per leaf command — **all 69**.
+/// One variant per leaf command — **all 73**.
 ///
 /// Why an enum rather than a `String` key is the subject of this module's own docs: it is what
 /// makes an unclassified command a **compile error** instead of a runtime `None` (FR-4.2).
@@ -1328,7 +1328,7 @@ mod tests {
         counts
     }
 
-    /// Test 1 — **the policy distribution is 24 IN-APP / 18 HANDOFF / 27 HIDE, totalling 69.**
+    /// Test 1 — **the policy distribution is 24 IN-APP / 18 HANDOFF / 31 HIDE, totalling 73.**
     ///
     /// Every number here is a **hard-coded literal**, and that is the entire design of the test.
     /// Deriving any of them from the table — `assert_eq!(in_app, TABLE.iter().filter(..).count())`
@@ -1337,7 +1337,7 @@ mod tests {
     /// would look like if it had it.
     ///
     /// **Four assertions rather than one summed check**, also deliberately: a single
-    /// `in_app + handoff + hidden == 61` stays green when a command moves from IN-APP to HIDE,
+    /// `in_app + handoff + hidden == 73` stays green when a command moves from IN-APP to HIDE,
     /// because the total is conserved. Reclassification is exactly the change most likely to
     /// happen by accident, so each policy is pinned separately and the failure names *which* one
     /// moved.
@@ -1385,7 +1385,7 @@ mod tests {
             "the three policy counts must account for all 73 leaf commands of the Click tree"
         );
 
-        // The three counts summing to 69 does not prove 69 *distinct* commands were counted: a
+        // The three counts summing to 73 does not prove 73 *distinct* commands were counted: a
         // duplicated entry in DISPLAY_ORDER would inflate one policy while a real command went
         // uncounted, and the arithmetic above would still close. DISPLAY_ORDER is generated, so
         // this is a live hazard rather than a theoretical one.
@@ -1415,7 +1415,7 @@ mod tests {
     ///
     /// Neither existing guard catches it. [`the_policy_distribution_is_twentyfour_eighteen_thirtyone`]
     /// counts what `DISPLAY_ORDER` *contains*, so a variant missing from it is simply never
-    /// counted; and its `distinct.len() == 69` assertion detects a **duplicate**, which is the
+    /// counted; and its `distinct.len() == 73` assertion detects a **duplicate**, which is the
     /// opposite direction. [`COMMAND_COUNT`] pins the array's *length*, never its membership.
     ///
     /// # Why an exhaustive match and NOT a discriminant trick

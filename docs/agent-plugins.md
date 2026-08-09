@@ -92,9 +92,19 @@ cao plugin remove my-plugin --purge-data
 scripting. `cao plugin add` and `cao plugin validate` exit non-zero when a
 plugin is not loadable.
 
-The same operations are available in the web UI's **Plugins** tab and over the
-HTTP API (`GET/POST /plugins`, `POST /plugins/validate`,
-`DELETE /plugins/{name}`).
+The same operations are available over the HTTP API — `GET/POST /plugins`,
+`POST /plugins/validate`, `DELETE /plugins/{name}` — and in the web UI's
+**Plugins** tab.
+
+> [!NOTE]
+> The web **Plugins** tab is **built but not shipped**, for the same reason as the
+> verb above: Requirement 16.5 forbids these surfaces reaching end users before
+> **M1** is recorded, and a visible tab is such a surface. It is gated off by
+> `PLUGINS_TAB_ENABLED` in `web/src/featureFlags.ts`, the `cao plugin` command
+> group is `hidden=True`, and the four TUI rows are `Policy::Hidden`. All three
+> flip once M1 lands. The HTTP API is reachable now, scope-gated: reads need
+> `cao:read` or better, and install, validate and remove need `cao:write` or
+> `cao:admin`.
 
 ### Removing a plugin while a session is live
 

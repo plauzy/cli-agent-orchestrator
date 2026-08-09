@@ -59,6 +59,58 @@ def delivered(store, skills_dir, tmp_path, monkeypatch):
     return skills_dir
 
 
+@pytest.fixture
+def kiro_install(delivered, tmp_path, monkeypatch):
+    """Run a real Kiro agent install and hand back the JSON it wrote.
+
+    Kiro is the only provider whose skill delivery ships as a **pattern** rather
+    than resolved content, so it is the only one where the emitted artifact has to
+    be read to know what was delivered. ``test/services/test_install_service.py``
+    already asserts this array's shape for the no-plugin case; this fixture exists
+    so the plugin-delivery suite can assert it against a store that has a plugin
+    projected into it.
+    """
+    import json
+
+    local_store = tmp_path / "agent-store"
+    context_dir = tmp_path / "agent-context"
+    kiro_dir = tmp_path / "kiro-agents"
+    for directory in (local_store, context_dir, kiro_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+
+    for target, value in (
+        ("cli_agent_orchestrator.services.profile_store.LOCAL_AGENT_STORE_DIR", local_store),
+        ("cli_agent_orchestrator.utils.agent_profiles.LOCAL_AGENT_STORE_DIR", local_store),
+        ("cli_agent_orchestrator.services.install_service.AGENT_CONTEXT_DIR", context_dir),
+        ("cli_agent_orchestrator.services.install_service.KIRO_AGENTS_DIR", kiro_dir),
+        # The globs are built from `install_service`'s own SKILLS_DIR, so this is
+        # the patch that makes the emitted paths point at the projected store.
+        ("cli_agent_orchestrator.services.install_service.SKILLS_DIR", delivered),
+    ):
+        monkeypatch.setattr(target, value)
+    monkeypatch.setattr(
+        "cli_agent_orchestrator.services.settings_service.get_agent_dirs", lambda: {}
+    )
+    monkeypatch.setattr(
+        "cli_agent_orchestrator.services.settings_service.get_extra_agent_dirs", lambda: []
+    )
+
+    (local_store / "delivery-agent.md").write_text(
+        "---\nname: delivery-agent\ndescription: Delivery agent\n---\nPrompt.\n",
+        encoding="utf-8",
+    )
+
+    from cli_agent_orchestrator.services.install_service import install_agent
+
+    result = install_agent("delivery-agent", ProviderType.KIRO_CLI.value)
+    assert result.success, result.message
+
+    return {
+        "agent_json": json.loads((kiro_dir / "delivery-agent.json").read_text(encoding="utf-8")),
+        "skills_root": delivered,
+    }
+
+
 class TestRuntimeCatalogProviders:
     """Claude Code, Codex, Kimi, Antigravity — Requirement 13.2, Task 7.1."""
 
@@ -194,18 +246,37 @@ class TestKiroFilesystemGlob:
         assert any(Path(m).parent.name == PROJECTED_SKILL for m in stdlib_matches)
         assert any(p.parent.name == PROJECTED_SKILL for p in pathlib_matches)
 
-    def test_the_installed_kiro_profile_carries_both_globs(self, monkeypatch, tmp_path):
-        """The resource strings themselves are what ship; assert their exact shape."""
-        skills_root = tmp_path / "skills"
-        skills_root.mkdir()
-        monkeypatch.setattr(
-            "cli_agent_orchestrator.services.install_service.SKILLS_DIR", skills_root
-        )
-        from cli_agent_orchestrator.services import install_service
+    def test_the_installed_kiro_profile_carries_both_globs(self, kiro_install):
+        """Both globs reach the agent JSON Kiro actually loads.
 
-        source = Path(install_service.__file__).read_text(encoding="utf-8")
-        assert 'f"skill://{SKILLS_DIR}/**/SKILL.md"' in source
-        assert 'f"skill://{SKILLS_DIR}/*/SKILL.md"' in source
+        Asserts the **emitted artifact**, not `install_service`'s source text. An
+        earlier version of this test read the module with `Path(...).read_text()`
+        and asserted two f-string literals appeared in it, which would have kept
+        passing if the list were built and then dropped, and ignored the
+        `skills_root` fixture it went to the trouble of setting up.
+        """
+        resources = kiro_install["agent_json"]["resources"]
+        skill_globs = [r for r in resources if r.startswith("skill://")]
+
+        assert len(skill_globs) == 2, f"expected both skill globs, got {skill_globs}"
+        assert [glob.rsplit("/skills", 1)[-1] for glob in skill_globs] == [
+            "/**/SKILL.md",
+            "/*/SKILL.md",
+        ]
+
+    def test_both_globs_are_rooted_at_the_real_skill_store(self, kiro_install):
+        """The globs point at `SKILLS_DIR`, which is what makes them find anything.
+
+        Separated from the shape assertion above because the two fail for different
+        reasons: a wrong *pattern* is a glob-semantics mistake, while a wrong *root*
+        means Kiro is handed a path with no skills under it at all.
+        """
+        skills_root = kiro_install["skills_root"]
+        skill_globs = [
+            r for r in kiro_install["agent_json"]["resources"] if r.startswith("skill://")
+        ]
+
+        assert all(glob.startswith(f"skill://{skills_root}/") for glob in skill_globs)
 
 
 class TestOpenCodeSymlink:

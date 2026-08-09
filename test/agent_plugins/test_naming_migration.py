@@ -56,35 +56,200 @@ class TestDocsVocabulary:
         event_doc = (DOCS / "plugins.md").read_text(encoding="utf-8")
         assert "M1" in event_doc
 
-    @pytest.mark.parametrize(
-        "doc", ["agent-plugins.md", "plugins.md", "skills.md", "control-planes.md"]
-    )
-    def test_bare_plugin_is_qualified_outside_a_scoped_title(self, doc):
-        """Requirement 21.4, enforced rather than reviewed.
 
-        ``docs/plugins.md`` and ``docs/agent-plugins.md`` both carry a scoping
-        H1, so bare "plugin" is acceptable there. ``docs/skills.md`` and
-        ``docs/control-planes.md`` do not, so every occurrence in them must be
-        qualified. ``control-planes.md`` is included because it lists the event
-        plugin system as one of CAO's outbound control planes, which is exactly
-        the context where an unqualified "plugin" now reads ambiguously.
-        """
-        text = (DOCS / doc).read_text(encoding="utf-8")
-        title = text.splitlines()[0]
-        if "Plugin" in title:
-            return  # the title scopes the document
+def _prose_of(doc: str) -> str:
+    """``doc``'s prose, with code, links and paths removed.
 
-        # Strip fenced code, inline code, links, and paths — a bare `plugin`
-        # inside `cao plugin add` or `docs/plugins.md` is not prose.
-        prose = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
-        prose = re.sub(r"`[^`]*`", "", prose)
-        prose = re.sub(r"\[[^\]]*\]\([^)]*\)", "", prose)
+    A bare ``plugin`` inside ``cao plugin add``, or inside a link to
+    ``docs/plugins.md``, is not prose making a claim about the noun — it is a
+    command or a filename, and neither can be "qualified" without breaking it.
+    """
+    text = (DOCS / doc).read_text(encoding="utf-8")
+    prose = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
+    prose = re.sub(r"`[^`]*`", "", prose)
+    return re.sub(r"\[[^\]]*\]\([^)]*\)", "", prose)
 
-        unqualified = [
-            match.group(0)
-            for match in re.finditer(r"(?<![\w-])(?<!agent )(?<!event )plugins?\b", prose, re.I)
-        ]
+
+#: Matches "plugin"/"plugins" not already preceded by a qualifier.
+_UNQUALIFIED_PLUGIN = re.compile(r"(?<![\w-])(?<!agent )(?<!event )plugins?\b", re.I)
+
+#: Docs whose H1 does **not** scope the noun. Every prose occurrence must be
+#: qualified. ``control-planes.md`` earns its place by listing the event plugin
+#: system as an outbound control plane — exactly the context where a bare
+#: "plugin" now reads ambiguously.
+_UNSCOPED_DOCS = ["skills.md", "control-planes.md"]
+
+#: Docs whose H1 scopes the noun ("# Event Plugins", "# Agent Plugins"), so bare
+#: "plugin" is legitimate *after* the reader has been oriented. They are NOT
+#: exempt — see ``TestDocsVocabularyInScopedDocs``.
+_SCOPED_DOCS = ["agent-plugins.md", "plugins.md"]
+
+#: Docs that mention plugins but that Requirement 21.4's rule is **not** applied
+#: to by this change, listed rather than silently skipped.
+#:
+#: Every entry predates agent plugins and refers to the *event*-plugin system
+#: (or, for ``cursor-cli.md``, to a third-party Cursor concept that is neither of
+#: CAO's). They are a genuine, small backlog: bringing them in line means ~12
+#: prose edits across provider and subsystem docs that this feature does not
+#: otherwise touch, which is a wider blast radius than the vocabulary fix
+#: warrants and is better done as its own change.
+#:
+#: The point of the list is that it is a **list**: the coverage test below fails
+#: for any *new* plugin-mentioning doc, so this cannot quietly grow.
+_VOCABULARY_BACKLOG_DOCS = [
+    "codex-cli.md",  # "the `codex_memory` plugin", "the plugin is observer-only"
+    "cursor-cli.md",  # a Cursor plugin manifest — third-party, qualifying it would be wrong
+    "knowledge-graph-viewing.md",
+    "mcp-apps.md",
+    "memory.md",  # "built-in plugins for Claude Code, Codex, and Kiro CLI"
+    "opencode-cli.md",
+    "otel-deployment.md",  # "the outgoing plugin event"
+]
+
+
+class TestDocsVocabularyInUnscopedDocs:
+    """Requirement 21.4 — the strict rule, for docs whose title scopes nothing."""
+
+    @pytest.mark.parametrize("doc", _UNSCOPED_DOCS)
+    def test_every_prose_occurrence_is_qualified(self, doc):
+        unqualified = [match.group(0) for match in _UNQUALIFIED_PLUGIN.finditer(_prose_of(doc))]
         assert unqualified == [], f"{doc}: unqualified 'plugin' in prose: {unqualified}"
+
+    @pytest.mark.parametrize("doc", _UNSCOPED_DOCS)
+    def test_the_doc_really_has_no_scoping_title(self, doc):
+        """The strict rule must apply for the stated reason, not by accident.
+
+        If one of these docs were retitled to something containing "Plugin", the
+        strict check above would become the wrong rule for it, and this test is
+        what makes that a visible failure instead of a silent mismatch between the
+        list and the reason for the list.
+        """
+        title = (DOCS / doc).read_text(encoding="utf-8").splitlines()[0]
+        assert "Plugin" not in title, f"{doc} now has a scoping title; move it to _SCOPED_DOCS"
+
+
+class TestDocsVocabularyInScopedDocs:
+    """Requirement 21.4 — the rule that actually applies to a scoped document.
+
+    The previous version of this guard parametrized over all four docs and then
+    early-returned for any title containing "Plugin". That exempted
+    ``agent-plugins.md`` and ``plugins.md`` — the two documents where confusing the
+    two plugin systems does the most damage, and the two the commit message
+    claimed the guard covered. Only ``skills.md`` and ``control-planes.md`` were
+    ever checked.
+
+    A scoped doc cannot sensibly obey the strict rule: "# Event Plugins" exists
+    precisely so the body can say "plugin" without repeating the qualifier in every
+    sentence. The rule that *does* apply is about orientation — the noun must be
+    qualified where the reader first meets it, and the other system must be named
+    so a reader who arrived at the wrong page finds out.
+    """
+
+    @pytest.mark.parametrize("doc", _SCOPED_DOCS)
+    def test_the_doc_has_a_scoping_title(self, doc):
+        """The exemption from the strict rule is earned by the title, so assert it."""
+        title = (DOCS / doc).read_text(encoding="utf-8").splitlines()[0]
+        assert "Plugin" in title, f"{doc} has no scoping H1; move it to _UNSCOPED_DOCS"
+
+    @pytest.mark.parametrize("doc", _SCOPED_DOCS)
+    def test_the_noun_is_qualified_on_first_reference(self, doc):
+        """The first prose mention of the noun carries its qualifier.
+
+        Checked in the **banner region** — everything before the first ``## ``
+        heading — because that is what a reader sees before deciding whether they
+        are on the right page, and it is where both docs already disambiguate.
+        """
+        banner = _prose_of(doc).split("\n## ")[0]
+
+        assert _UNQUALIFIED_PLUGIN.search(banner) is None or any(
+            phrase in banner.lower() for phrase in ("agent plugin", "event plugin")
+        ), f"{doc}: the banner uses bare 'plugin' without ever qualifying it"
+
+    @pytest.mark.parametrize("doc", _SCOPED_DOCS)
+    def test_the_banner_names_the_other_system(self, doc):
+        """A reader on the wrong page must be told the other one exists.
+
+        Overlaps ``test_each_doc_banners_the_other`` deliberately: that one asserts
+        the cross-link, this one asserts the *vocabulary* — that the other system is
+        named in words, not merely hyperlinked, since a link's URL is stripped from
+        prose and a reader skimming headings would miss it.
+        """
+        banner = _prose_of(doc).split("\n## ")[0].lower()
+        other = "event plugin" if doc == "agent-plugins.md" else "agent plugin"
+        assert other in banner, f"{doc}: banner never names the other system ('{other}')"
+
+
+class TestNoPluginDocIsSilentlyExempt:
+    """The guard's coverage is itself asserted, because it silently lost half before.
+
+    The original defect was not a wrong rule, it was an **invisible** one: a
+    ``return`` inside a parametrized test meant two of four docs were never
+    checked, and nothing said so. Every doc that mentions plugins is now in
+    exactly one of three named lists, and adding a doc to none of them fails.
+    """
+
+    _ALL_LISTS = {
+        "_UNSCOPED_DOCS": _UNSCOPED_DOCS,
+        "_SCOPED_DOCS": _SCOPED_DOCS,
+        "_VOCABULARY_BACKLOG_DOCS": _VOCABULARY_BACKLOG_DOCS,
+    }
+
+    def test_the_lists_do_not_overlap(self):
+        """A doc in two lists would be checked under two rules, one of them wrong."""
+        seen: dict = {}
+        for list_name, docs in self._ALL_LISTS.items():
+            for doc in docs:
+                assert doc not in seen, f"{doc} is in both {seen[doc]} and {list_name}"
+                seen[doc] = list_name
+
+    def test_every_plugin_mentioning_doc_is_classified(self):
+        """No doc that talks about plugins may sit outside all three lists.
+
+        This is the test that would have caught the original defect. A new doc that
+        discusses either plugin system must declare which rule it lives under,
+        rather than being covered by none while looking covered.
+        """
+        classified = {doc for docs in self._ALL_LISTS.values() for doc in docs}
+
+        mentions_plugins = {
+            path.name
+            for path in sorted(DOCS.glob("*.md"))
+            if "plugin" in path.read_text(encoding="utf-8").lower()
+        }
+
+        unclassified = sorted(mentions_plugins - classified)
+        assert not unclassified, (
+            "doc(s) mention plugins but are in none of "
+            + ", ".join(self._ALL_LISTS)
+            + ": "
+            + ", ".join(unclassified)
+            + ". Add each to the list matching its situation, so the rule applied is explicit."
+        )
+
+    def test_every_listed_doc_exists(self):
+        """A renamed or deleted doc must leave the list, or its rule silently stops."""
+        missing = [
+            f"{list_name}:{doc}"
+            for list_name, docs in self._ALL_LISTS.items()
+            for doc in docs
+            if not (DOCS / doc).is_file()
+        ]
+        assert not missing, "listed doc(s) do not exist: " + ", ".join(missing)
+
+    @pytest.mark.parametrize("doc", _VOCABULARY_BACKLOG_DOCS)
+    def test_a_backlog_doc_does_not_discuss_agent_plugins(self, doc):
+        """The backlog is only defensible while these docs are about the *other* system.
+
+        A bare "plugin" in a doc that predates agent plugins is ambiguous but
+        harmless as long as the doc never discusses agent plugins. The moment one
+        does, its unqualified prose becomes actively misleading and the doc has to
+        graduate to a real rule. This test is what forces that.
+        """
+        text = (DOCS / doc).read_text(encoding="utf-8").lower()
+        assert "agent plugin" not in text and "agent-plugins.md" not in text, (
+            f"{doc} now references agent plugins, so bare 'plugin' in it is ambiguous. "
+            f"Qualify its prose and move it to _UNSCOPED_DOCS."
+        )
 
 
 class TestRenameRetirementIsPreparedNotActivated:
