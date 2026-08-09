@@ -478,6 +478,14 @@ fn route(id: CommandId) -> Option<Route> {
         // HTTP-reachable at all. Served client-side by `find_profiles` over `GET
         // /agents/profiles`; `None` here is correct, not an omission. (OQ-6 Q2)
         CommandId::ProfileFind => None,
+        // HIDE, all four: the `cao plugin` group is hidden pending decision M1, so these are
+        // unreachable through `commands()`. No HTTP route exists yet either — the `/plugins/*`
+        // endpoints are W8 of the cao-agent-plugins spec. Revisit together with M1.
+        CommandId::PluginAdd => None,
+        CommandId::PluginList => None,
+        CommandId::PluginRemove => None,
+        CommandId::PluginValidate => None,
+
         // HANDOFF, all four — OQ-6. `profile create`/`templates` call `agent_scaffold`
         // in-process, `profile validate` runs `Draft202012Validator` locally, and `profile
         // remove` is a local `unlink()` with **no DELETE on `/agents/*`** anywhere.

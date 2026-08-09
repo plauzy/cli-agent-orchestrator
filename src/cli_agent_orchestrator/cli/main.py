@@ -4,6 +4,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 import click
 
+from cli_agent_orchestrator.cli.commands.agent_plugin import plugin
 from cli_agent_orchestrator.cli.commands.config import config
 from cli_agent_orchestrator.cli.commands.env import env
 from cli_agent_orchestrator.cli.commands.info import info
@@ -48,6 +49,10 @@ cli.add_command(mcp_server)
 cli.add_command(info)
 cli.add_command(memory)
 cli.add_command(skills)
+# Agent plugins (agent-plugins.org). Registered hidden pending decision M1 on
+# the command verb -- built and tested, not yet shipped to end users
+# (Requirement 16.5). Unrelated to the `cao.plugins` event-plugin system (D7).
+cli.add_command(plugin)
 cli.add_command(session)
 cli.add_command(terminal)
 cli.add_command(workflow)

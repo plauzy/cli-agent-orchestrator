@@ -86,7 +86,7 @@ use std::vec::Vec;
 /// must not offer itself — giving **33 IN-APP / 5 HANDOFF / 23 HIDE = 61**. Recorded here
 /// because a reader comparing the design's 60 against this 61 would otherwise suspect drift.
 /// (#321)
-const COMMAND_COUNT: usize = 69;
+const COMMAND_COUNT: usize = 73;
 
 /// What the TUI does with a command.
 ///
@@ -224,6 +224,10 @@ pub(crate) const DISPLAY_ORDER: [CommandId; COMMAND_COUNT] = [
     CommandId::MemoryRelationshipsReject,
     CommandId::MemoryRepair,
     CommandId::MemoryShow,
+    CommandId::PluginAdd,
+    CommandId::PluginList,
+    CommandId::PluginRemove,
+    CommandId::PluginValidate,
     CommandId::ProfileCreate,
     CommandId::ProfileFind,
     CommandId::ProfileList,
@@ -351,6 +355,16 @@ pub enum CommandId {
     MemoryRepair,
     /// `cao memory show`
     MemoryShow,
+
+    // `cao plugin *` (agent plugins; unrelated to the `cao.plugins` event-plugin system)
+    /// `cao plugin add`
+    PluginAdd,
+    /// `cao plugin list`
+    PluginList,
+    /// `cao plugin remove`
+    PluginRemove,
+    /// `cao plugin validate`
+    PluginValidate,
 
     // `cao profile *`
     /// `cao profile create`
@@ -847,6 +861,75 @@ fn entry(id: CommandId) -> Command {
             handoff_reason: None,
         },
 
+        CommandId::PluginAdd => Command {
+            id: CommandId::PluginAdd,
+            parent: Some("plugin"),
+            leaf_name: "add",
+            summary: "Install an agent plugin from a local path or a git repository.",
+            policy: Policy::Hidden,
+            params: &[
+                Param { name: "source", required: true, kind: ParamKind::Text },
+                Param { name: "--ref", required: false, kind: ParamKind::Text },
+                Param { name: "--subdir", required: false, kind: ParamKind::Text },
+                Param { name: "--force", required: false, kind: ParamKind::Flag },
+                Param { name: "--dry-run", required: false, kind: ParamKind::Flag },
+            ],
+            handoff_reason: None,
+            // HIDE: Click marks the `plugin` group `hidden=True` at
+            // cli/commands/agent_plugin.py; the command verb is unresolved (decision M1) so this
+            // surface must not ship to end users yet (Requirement 16.5). FR-4.4 -- the TUI must
+            // not resurrect a command the CLI itself conceals. Reclassify when M1 lands.
+        },
+
+        CommandId::PluginList => Command {
+            id: CommandId::PluginList,
+            parent: Some("plugin"),
+            leaf_name: "list",
+            summary: "List installed agent plugins.",
+            policy: Policy::Hidden,
+            params: &[Param { name: "--json", required: false, kind: ParamKind::Flag }],
+            handoff_reason: None,
+            // HIDE: Click marks the `plugin` group `hidden=True` at
+            // cli/commands/agent_plugin.py; the command verb is unresolved (decision M1) so this
+            // surface must not ship to end users yet (Requirement 16.5). FR-4.4 -- the TUI must
+            // not resurrect a command the CLI itself conceals. Reclassify when M1 lands.
+        },
+
+        CommandId::PluginRemove => Command {
+            id: CommandId::PluginRemove,
+            parent: Some("plugin"),
+            leaf_name: "remove",
+            summary: "Remove an installed agent plugin.",
+            policy: Policy::Hidden,
+            params: &[
+                Param { name: "name", required: true, kind: ParamKind::Text },
+                Param { name: "--purge-data", required: false, kind: ParamKind::Flag },
+                Param { name: "--yes", required: false, kind: ParamKind::Flag },
+            ],
+            handoff_reason: None,
+            // HIDE: Click marks the `plugin` group `hidden=True` at
+            // cli/commands/agent_plugin.py; the command verb is unresolved (decision M1) so this
+            // surface must not ship to end users yet (Requirement 16.5). FR-4.4 -- the TUI must
+            // not resurrect a command the CLI itself conceals. Reclassify when M1 lands.
+        },
+
+        CommandId::PluginValidate => Command {
+            id: CommandId::PluginValidate,
+            parent: Some("plugin"),
+            leaf_name: "validate",
+            summary: "Validate a candidate plugin directory without installing it.",
+            policy: Policy::Hidden,
+            params: &[
+                Param { name: "path", required: true, kind: ParamKind::Text },
+                Param { name: "--json", required: false, kind: ParamKind::Flag },
+            ],
+            handoff_reason: None,
+            // HIDE: Click marks the `plugin` group `hidden=True` at
+            // cli/commands/agent_plugin.py; the command verb is unresolved (decision M1) so this
+            // surface must not ship to end users yet (Requirement 16.5). FR-4.4 -- the TUI must
+            // not resurrect a command the CLI itself conceals. Reclassify when M1 lands.
+        },
+
         CommandId::ProfileCreate => Command {
             id: CommandId::ProfileCreate,
             parent: Some("profile"),
@@ -1295,20 +1378,20 @@ mod tests {
     /// merge then brought `cao workflow` {`runs`, `result`, `wait`, `events`} from PR #525 — caught
     /// in CI, which tests the PR merged against `main` and so saw four commands a local run could
     /// not. `runs`/`result` are ordinary journal reads (IN-APP); `wait`/`events` are unbounded
-    /// (HANDOFF). That gives **24/18/27 = 69**. Note what the shape of this failure was: every count here was internally
+    /// (HANDOFF). That gives **24/18/31 = 73** (the four `cao plugin *` leaves are HIDE pending decision M1). Note what the shape of this failure was: every count here was internally
     /// consistent and every test green, because nothing compared the table against the CLI. That
     /// is what `test/test_command_catalog_matches_click.py` now does. (Review on PR #547.)
     #[test]
-    fn the_policy_distribution_is_twentyfour_eighteen_twentyseven() {
+    fn the_policy_distribution_is_twentyfour_eighteen_thirtyone() {
         let (in_app, handoff, hidden) = distribution();
 
         assert_eq!(in_app, 24, "expected 24 IN-APP commands, found {in_app}");
         assert_eq!(handoff, 18, "expected 18 HANDOFF commands, found {handoff}");
-        assert_eq!(hidden, 27, "expected 27 HIDE commands, found {hidden}");
+        assert_eq!(hidden, 31, "expected 31 HIDE commands, found {hidden}");
         assert_eq!(
             in_app + handoff + hidden,
-            69,
-            "the three policy counts must account for all 69 leaf commands of the Click tree"
+            73,
+            "the three policy counts must account for all 73 leaf commands of the Click tree"
         );
 
         // The three counts summing to 69 does not prove 69 *distinct* commands were counted: a
@@ -1318,8 +1401,8 @@ mod tests {
         let distinct: BTreeSet<CommandId> = DISPLAY_ORDER.iter().copied().collect();
         assert_eq!(
             distinct.len(),
-            69,
-            "DISPLAY_ORDER must list 69 DISTINCT commands; a duplicate would let one command go \
+            73,
+            "DISPLAY_ORDER must list 73 DISTINCT commands; a duplicate would let one command go \
              uncounted while the totals still summed correctly"
         );
     }
@@ -1423,6 +1506,10 @@ mod tests {
                     CommandId::MemoryRelationshipsReject => CommandId::MemoryRelationshipsReject,
                     CommandId::MemoryRepair => CommandId::MemoryRepair,
                     CommandId::MemoryShow => CommandId::MemoryShow,
+                    CommandId::PluginAdd => CommandId::PluginAdd,
+                    CommandId::PluginList => CommandId::PluginList,
+                    CommandId::PluginRemove => CommandId::PluginRemove,
+                    CommandId::PluginValidate => CommandId::PluginValidate,
                     CommandId::ProfileCreate => CommandId::ProfileCreate,
                     CommandId::ProfileFind => CommandId::ProfileFind,
                     CommandId::ProfileList => CommandId::ProfileList,
@@ -1497,6 +1584,10 @@ mod tests {
                 CommandId::MemoryRelationshipsReject,
                 CommandId::MemoryRepair,
                 CommandId::MemoryShow,
+                CommandId::PluginAdd,
+                CommandId::PluginList,
+                CommandId::PluginRemove,
+                CommandId::PluginValidate,
                 CommandId::ProfileCreate,
                 CommandId::ProfileFind,
                 CommandId::ProfileList,
