@@ -343,7 +343,7 @@ Ordering is load-bearing:
 
 #### Removal while a session is live
 
-Removal is not symmetric with install, because **two providers read `SKILL.md` from disk mid-session**: Kiro CLI resolves the `skill://{SKILLS_DIR}/**/SKILL.md` glob written by `services/install_service.py`, and OpenCode reads through the `OPENCODE_CONFIG_DIR/skills` symlink from `utils/opencode_config.py::ensure_skills_symlink`. Neither snapshots content at launch. So unpublishing a plugin root and sweeping its projection can pull a skill out from under an agent that is *currently* mid-task and about to load it — the agent sees a broken reference rather than a clean "that skill is gone."
+Removal is not symmetric with install, because **two providers read `SKILL.md` from disk mid-session**: Kiro CLI resolves the `skill://` globs rooted at `SKILLS_DIR` written by `services/install_service.py`, and OpenCode reads through the `OPENCODE_CONFIG_DIR/skills` symlink from `utils/opencode_config.py::ensure_skills_symlink`. Neither snapshots content at launch. So unpublishing a plugin root and sweeping its projection can pull a skill out from under an agent that is *currently* mid-task and about to load it — the agent sees a broken reference rather than a clean "that skill is gone."
 
 Two requirements follow:
 
@@ -362,10 +362,14 @@ CAO delivers skills through **three** independent mechanisms, and only one of th
 |---|---|---|---|
 | Runtime catalog | `utils/skills.py::build_skill_catalog`, called at `services/terminal_service.py:378` for `RUNTIME_SKILL_PROMPT_PROVIDERS` | Claude Code, Codex, Kimi, Antigravity | `list_skills()` → `_skill_search_dirs()` |
 | Baked catalog | `utils/skill_injection.py::compose_agent_prompt` at install time | Copilot | `list_skills()` |
-| Native, filesystem-direct | `services/install_service.py:357` `skill://{SKILLS_DIR}/**/SKILL.md`; `utils/opencode_config.py::ensure_skills_symlink` | Kiro CLI, OpenCode | **`SKILLS_DIR` path literally** |
+| Native, filesystem-direct | `services/install_service.py` `skill://{SKILLS_DIR}/**/SKILL.md` and `skill://{SKILLS_DIR}/*/SKILL.md`; `utils/opencode_config.py::ensure_skills_symlink` | Kiro CLI, OpenCode | **`SKILLS_DIR` path literally** |
 | On-demand fetch | `mcp_server/server.py::load_skill` → `load_skill_content` | all catalog-based providers | `_resolve_skill()` |
 
-The obvious approach — appending plugin skill roots to `_skill_search_dirs()` alongside `get_extra_skill_dirs()` — covers rows 1, 2 and 4 with a one-function change, but **cannot** cover row 3. Kiro receives exactly one `skill://` glob rooted at `SKILLS_DIR`, and OpenCode's `skills` entry is a single symlink to `SKILLS_DIR`. Plugin skills stored elsewhere are invisible to both.
+The obvious approach — appending plugin skill roots to `_skill_search_dirs()` alongside `get_extra_skill_dirs()` — covers rows 1, 2 and 4 with a one-function change, but **cannot** cover row 3. Kiro receives only `skill://` globs rooted at `SKILLS_DIR`, and OpenCode's `skills` entry is a single symlink to `SKILLS_DIR`. Plugin skills stored elsewhere are invisible to both.
+
+> **Deviation from this design, implemented deliberately: `install_service` emits a second Kiro glob.** The design otherwise treats the provider delivery paths as frozen, and this is the one place that was changed. Row 3's original single pattern was `skill://{SKILLS_DIR}/**/SKILL.md`. Kiro expands that itself, so the files it finds depend on *its* glob implementation — and `**` has no single agreed meaning for directory symlinks: Python's own `glob.glob(recursive=True)` descends into them while `pathlib.Path.glob` does not (verified: a symlinked skill directory yields a match under the former and none under the latter). Because projection materializes plugin skills precisely *as* directory symlinks, the stricter reading would make every plugin skill invisible to Kiro alone while reaching the other six providers — the exact failure Property 10 exists to exclude, undetectable by any CAO-side test because no CAO code walks that glob.
+>
+> A single-level `*/SKILL.md` is immune: it names the symlink as a directory entry and resolves through it, with no recursive descent to opt out of. It also matches exactly the layout CAO guarantees, since skills are immediate children of the store. `**/SKILL.md` is retained because Kiro supports nested skill directories natively even though CAO's catalog does not, and withdrawing it would silently narrow an existing capability. Both patterns resolve to the same paths for CAO-managed skills, and Kiro deduplicates by path. Asserted by `TestKiroFilesystemGlob` in `test/agent_plugins/test_delivery_providers.py`, which includes a test that *fails* if `pathlib` ever starts following these symlinks — so the premise is re-examined rather than assumed.
 
 **Chosen design — projection.** `projection.py` materializes each valid plugin skill as a **managed symlink inside `SKILLS_DIR`**:
 
@@ -578,7 +582,7 @@ sequenceDiagram
     alt runtime-catalog provider (Claude / Codex / Kimi / Antigravity)
         TS->>PV: create_provider(..., skill_prompt=catalog)
     else Kiro CLI
-        Note over PV: reads skill://SKILLS_DIR/**/SKILL.md written at install time —<br/>glob traverses projected links, unchanged code
+        Note over PV: reads the skill:// globs written at install time —<br/>they traverse projected links; only the glob list changed
     else OpenCode
         Note over PV: reads OPENCODE_CONFIG_DIR/skills -> SKILLS_DIR, unchanged code
     else Copilot
@@ -724,9 +728,13 @@ Spec: §9.2. For arbitrary strings containing `${PLUGIN_ROOT}`, `${PLUGIN_DATA}`
 
 ### Property 10: Cross-provider delivery equivalence (P10)
 
-**Validates: Requirements 13.2**
+**Validates: Requirements 13.2, 13.6, 13.7**
 
-For every provider, the set of skill names reachable by an agent equals `builtin ∪ extra_dirs ∪ projected(valid plugin skills)`, asserted against each provider's real artifact: the runtime catalog text, the Kiro agent JSON `resources` glob expansion, the OpenCode symlink traversal, and the Copilot `.agent.md` body.
+For every provider, the set of skill names reachable by an agent equals `builtin ∪ projected(valid plugin skills)`, plus `extra_dirs` for the providers that receive their catalog through CAO's skill-discovery scan — asserted against each provider's real artifact: the runtime catalog text, the Kiro agent JSON `resources` glob expansion, the OpenCode symlink traversal, and the Copilot `.agent.md` body.
+
+The `extra_dirs` term is provider-dependent because Kiro and OpenCode are handed a path rooted at `SKILLS_DIR` (a glob and a symlink respectively) and extra directories lie outside it. That asymmetry **predates agent plugins** — it reproduces with zero plugins installed — and Requirement 13 was amended to record it rather than have this feature adopt an unsatisfiable guarantee. See the amendment note under Requirement 13 in requirements.md.
+
+It is also the sharpest available justification for choosing projection over extra-dirs registration: the rejected alternative would have inherited exactly this blind spot, leaving plugin skills invisible to Kiro and OpenCode.
 
 ### Property 11: Schema pin integrity and offline validation (P11)
 

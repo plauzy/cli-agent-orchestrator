@@ -562,6 +562,16 @@ fn route(id: CommandId) -> Option<Route> {
             templated(Method::Get, "/terminals/{terminal_id}", &["terminal_id"])
         }
 
+        // ── `cao plugin *` — HANDOFF, all four ────────────────────────────────────────────
+        // Routeless on purpose, not for want of endpoints: `/plugins` exists. The group is
+        // HANDOFF because the verb is unresolved (M1) and because `remove` requires a
+        // warn-then-confirm exchange that a captured one-shot request cannot carry. Wiring a
+        // route here would satisfy the table while defeating the confirmation.
+        CommandId::PluginAdd => None,
+        CommandId::PluginList => None,
+        CommandId::PluginRemove => None,
+        CommandId::PluginValidate => None,
+
         // ── `cao skills *` — HANDOFF, all three (OQ-6) ───────────────────────────────────
         // The entire group is routeless. `GET/POST /settings/skill-dirs` is NOT this: it returns
         // and sets two *directory paths* (`api/main.py:1623-1629`), while `cao skills list`

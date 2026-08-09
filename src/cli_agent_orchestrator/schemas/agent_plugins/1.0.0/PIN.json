@@ -1,0 +1,20 @@
+{
+  "specification": "Agent Plugins",
+  "version": "1.0.0",
+  "specification_url": "https://agent-plugins.org/specification",
+  "specification_repository": "https://github.com/agentplugins/agent-plugins-spec",
+  "specification_commit": "b78a4f162d92c4b09ee205a11f59a6187926d947",
+  "source_base_url": "https://agent-plugins.org/schemas/1.0.0/",
+  "files": {
+    "plugin.schema.json": {
+      "url": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+      "schema_id": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+      "sha256": "0a4aad95ce337878ad38802ebf0daa3fde76abe3f65400c86bcbb1ec0b3ab883"
+    },
+    "mcp.schema.json": {
+      "url": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+      "schema_id": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+      "sha256": "6539175bfcdf43085855183e86da40ea94b166547a72b47ae9a0a390516d3acb"
+    }
+  }
+}

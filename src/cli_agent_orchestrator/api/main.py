@@ -14,7 +14,7 @@ import termios
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any, Dict, List, Optional, Tuple, cast
+from typing import Annotated, Any, Dict, List, Literal, Optional, Tuple, cast
 
 from fastapi import (
     BackgroundTasks,
@@ -39,6 +39,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from cli_agent_orchestrator.backends import TerminalBackendError, TerminalNotFoundError
 from cli_agent_orchestrator.backends.herdr_backend import HerdrBackend
 from cli_agent_orchestrator.backends.registry import get_backend
+from cli_agent_orchestrator.cli.commands.agent_plugin import UNTRUSTED_CONTENT_WARNING
 from cli_agent_orchestrator.cli.commands.init import seed_default_skills
 from cli_agent_orchestrator.clients.database import (
     create_inbox_message,
@@ -1997,6 +1998,154 @@ async def get_skill_content(name: str) -> SkillContentResponse:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to load skill: {str(e)}",
         )
+
+
+# =============================================================================
+# Agent Plugins (Agent Plugins 1.0.0) — NOT the event-plugin system
+# =============================================================================
+# Added inline next to the /skills and /settings/skill-dirs handlers because
+# api/main.py is flat (no routers package). Naming is unresolved maintainer
+# decision M1; per requirements.md 16.5 this surface must not ship to end users
+# before that is settled — the gate is on release, not on construction.
+
+
+class PluginInstallRequest(BaseModel):
+    """Body for ``POST /plugins`` and ``POST /plugins/validate``."""
+
+    source: str
+    kind: Optional[str] = None
+    """``"path"`` or ``"git"``. Inferred from the source string when omitted."""
+
+    ref: Optional[str] = None
+    subdir: Optional[str] = None
+    force: bool = False
+
+
+def _plugin_source(body: "PluginInstallRequest"):
+    """Build a PluginSource, reusing the CLI's source-kind detection.
+
+    Shared rather than reimplemented so a source string that installs from the
+    CLI installs identically from the panel.
+    """
+    from cli_agent_orchestrator.agent_plugins.models import PluginSource
+    from cli_agent_orchestrator.cli.commands.agent_plugin import _looks_like_git
+
+    if body.kind == "git" or (body.kind != "path" and _looks_like_git(body.source)):
+        kind: Literal["path", "git"] = "git"
+    else:
+        kind = "path"
+    return PluginSource(kind=kind, location=body.source, ref=body.ref, subdir=body.subdir)
+
+
+@app.get("/plugins")
+async def list_agent_plugins() -> Dict:
+    """List installed agent plugins with findings and projected skill names.
+
+    Also reports, per plugin, which live sessions reference a skill it provides,
+    so a client can render the removal warning *before* the operator commits to
+    a DELETE.
+    """
+    from cli_agent_orchestrator.agent_plugins.installer import affected_sessions
+    from cli_agent_orchestrator.agent_plugins.projection import sweep_dangling_projections
+    from cli_agent_orchestrator.agent_plugins.store import InstalledPluginStore
+
+    store = InstalledPluginStore()
+    sweep_dangling_projections(store)  # never raises
+
+    plugins = []
+    for record in store.list_installed():
+        entry = record.to_dict()
+        entry["affected_sessions"] = [
+            s.to_dict() for s in affected_sessions(record.name, store=store)
+        ]
+        plugins.append(entry)
+
+    return {"plugins": plugins, "untrusted_content_warning": UNTRUSTED_CONTENT_WARNING}
+
+
+@app.post("/plugins", status_code=status.HTTP_201_CREATED)
+async def install_agent_plugin(
+    body: PluginInstallRequest,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict:
+    """Install an agent plugin from a local path or a git URL."""
+    from cli_agent_orchestrator.agent_plugins.installer import PluginInstallError, install
+
+    try:
+        outcome = install(_plugin_source(body), force=body.force)
+    except PluginInstallError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to install agent plugin: {exc}",
+        )
+
+    if not outcome.installed:
+        # A plugin that is not loadable is the caller's input being wrong, not a
+        # server fault: return the full report so the panel can render every
+        # finding rather than a bare error string.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=outcome.to_dict(),
+        )
+    return outcome.to_dict()
+
+
+@app.post("/plugins/validate")
+async def validate_agent_plugin(
+    body: PluginInstallRequest,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict:
+    """Validate a plugin source without installing it.
+
+    Scope-gated despite installing nothing, unlike the other ``/validate``
+    endpoints, which are pure computation over a document the caller already
+    supplied. This one **resolves the source first**: a git source is cloned and
+    a path source is copied into staging. That is real outbound network and disk
+    work performed on the caller's behalf, so exempting it on the strength of the
+    shared ``/validate`` suffix would be reading the name rather than the
+    behaviour.
+    """
+    from cli_agent_orchestrator.agent_plugins.installer import PluginInstallError, validate_source
+
+    try:
+        report = validate_source(_plugin_source(body))
+    except PluginInstallError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to validate agent plugin: {exc}",
+        )
+    return report.to_dict()
+
+
+@app.delete("/plugins/{name}")
+async def uninstall_agent_plugin(
+    name: str,
+    purge_data: bool = False,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict:
+    """Uninstall an agent plugin.
+
+    The response reports which live sessions referenced a skill this plugin
+    provided. Note that reporting is all this endpoint can do — the
+    warn-and-confirm gate itself belongs to the client, which must render that
+    information and wait for the operator *before* issuing the DELETE.
+    """
+    from cli_agent_orchestrator.agent_plugins.installer import PluginInstallError, uninstall
+
+    try:
+        outcome = uninstall(name, purge_data=purge_data)
+    except PluginInstallError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to uninstall agent plugin: {exc}",
+        )
+    return outcome.to_dict()
 
 
 @app.post("/sessions", response_model=Terminal, status_code=status.HTTP_201_CREATED)

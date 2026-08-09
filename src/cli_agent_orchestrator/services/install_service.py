@@ -11,6 +11,8 @@ import frontmatter
 import requests  # type: ignore[import-untyped]
 from pydantic import BaseModel
 
+from cli_agent_orchestrator.agent_plugins.mcp_mapping import is_pre_expanded as is_plugin_mcp_entry
+from cli_agent_orchestrator.agent_plugins.mcp_mapping import strip_marker as strip_plugin_mcp_marker
 from cli_agent_orchestrator.constants import (
     AGENT_CONTEXT_DIR,
     COPILOT_AGENTS_DIR,
@@ -328,8 +330,20 @@ def install_agent(
         # over the versioned venv-internal path, so a later `uv tool upgrade`
         # does not leave the written config pointing at a relocated binary.
         if profile.mcpServers:
+            # An entry that came from an Agent Plugin's mcp.json is already
+            # fully expanded by agent_plugins/mcp_mapping.py, which resolved
+            # exactly ${PLUGIN_ROOT}/${PLUGIN_DATA} and deliberately left every
+            # other ${...} literal. Re-running CAO's own resolution over it
+            # would expand those literals too, which §9.2 forbids ("clients MUST
+            # NOT perform any other placeholder or environment-variable
+            # expansion"). The marker is stripped here so it never reaches a
+            # provider's own config file.
             profile.mcpServers = {
-                name: resolve_mcp_server_config(dict(cfg), persisted=True)
+                name: (
+                    strip_plugin_mcp_marker(cfg)
+                    if is_plugin_mcp_entry(cfg)
+                    else resolve_mcp_server_config(dict(cfg), persisted=True)
+                )
                 for name, cfg in profile.mcpServers.items()
             }
 
@@ -352,9 +366,34 @@ def install_agent(
             KIRO_AGENTS_DIR.mkdir(parents=True, exist_ok=True)
             # Kiro natively supports skill:// resources with progressive loading
             # (metadata at startup, full content on demand).
+            #
+            # TWO globs, not one, and the second is not redundant. Kiro expands
+            # these itself, so which files it finds depends on ITS glob
+            # implementation, and `**` does not have one agreed meaning for
+            # directory symlinks: Python's own stdlib `glob.glob(recursive=True)`
+            # descends into them while `pathlib.Path.glob` does not. Agent-plugin
+            # skills are projected into SKILLS_DIR as symlinks to the plugin
+            # store, so under the stricter reading every plugin skill would be
+            # invisible to Kiro alone while reaching all six other providers.
+            #
+            # `*/SKILL.md` is immune to that ambiguity: a single-level match names
+            # the symlink as a directory entry and resolves through it, with no
+            # recursive descent to opt out of. It covers exactly the layout CAO
+            # guarantees — skills are immediate children of the store (see
+            # docs/skills.md "No nested skill directories") — so it alone is
+            # sufficient for CAO-managed skills. `**/SKILL.md` is kept because
+            # Kiro supports nested skill directories natively even though CAO's
+            # own catalog does not, and dropping it would silently narrow a
+            # capability operators may already rely on.
+            #
+            # Duplicate matches are not a concern: both patterns resolve to the
+            # same absolute paths, and Kiro deduplicates the skills it loads by
+            # path. Verified by TestKiroFilesystemGlob in
+            # test/agent_plugins/test_delivery_providers.py.
             kiro_resources = [
                 f"file://{context_file.absolute()}",
                 f"skill://{SKILLS_DIR}/**/SKILL.md",
+                f"skill://{SKILLS_DIR}/*/SKILL.md",
             ]
             raw_prompt = (
                 profile.prompt.strip() if profile.prompt and profile.prompt.strip() else None
