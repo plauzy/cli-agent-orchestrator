@@ -2116,25 +2116,40 @@ def _plugin_source(body: "PluginInstallRequest"):
 
 
 @app.get("/plugins")
-async def list_agent_plugins() -> Dict:
+async def list_agent_plugins(
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict:
     """List installed agent plugins with findings and projected skill names.
 
     Also reports, per plugin, which live sessions reference a skill it provides,
     so a client can render the removal warning *before* the operator commits to
     a DELETE.
+
+    Read-scope gated when auth is enabled, following ``GET /settings/agent-dirs``
+    and for a strictly larger version of its reason. That route is gated because it
+    discloses local filesystem layout; this one discloses that **plus** live
+    operational state: every plugin's original source path or repository URL, and
+    per plugin the terminal IDs, session names, profile names, and skill names of
+    running work. The read floor rather than write/admin, because read-only
+    callers — the web panel, a status script — are exactly who this is for.
     """
-    from cli_agent_orchestrator.agent_plugins.installer import affected_sessions
+    from cli_agent_orchestrator.agent_plugins.installer import affected_sessions_by_plugin
     from cli_agent_orchestrator.agent_plugins.projection import sweep_dangling_projections
     from cli_agent_orchestrator.agent_plugins.store import InstalledPluginStore
 
     store = InstalledPluginStore()
     sweep_dangling_projections(store)  # never raises
 
+    # One live-state walk for the whole response. Calling `affected_sessions`
+    # per record re-enumerated sessions, terminals and profiles for every plugin —
+    # identical work each time, on a route a panel polls.
+    affected_by_plugin = affected_sessions_by_plugin(store=store)
+
     plugins = []
     for record in store.list_installed():
         entry = record.to_dict()
         entry["affected_sessions"] = [
-            s.to_dict() for s in affected_sessions(record.name, store=store)
+            session.to_dict() for session in affected_by_plugin.get(record.name, [])
         ]
         plugins.append(entry)
 

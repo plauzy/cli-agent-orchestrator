@@ -241,3 +241,155 @@ class TestRoutesRegistered:
         assert ("/plugins", ("POST",)) in paths
         assert ("/plugins/validate", ("POST",)) in paths
         assert ("/plugins/{name}", ("DELETE",)) in paths
+
+
+class TestScopeEnforcement:
+    """All four ``/plugins`` routes, with auth enabled.
+
+    **Validates: Requirement 17 (scope posture); adoption-audit finding R2**
+
+    Two halves, because either alone is misleading. ``test_scope_coverage.py``
+    asserts the *structural* half — the dependency exists on the route object —
+    which is the half that cannot be faked by ambient config. These assert the
+    *behavioural* half: with auth on, the right token passes and the wrong one is
+    refused. A structural test alone would pass if ``require_any_scope`` were
+    handed the wrong scope constants; a behavioural test alone would pass with no
+    dependency at all, because the dependency is a no-op when auth is off.
+
+    403 rather than 401 throughout: ``require_any_scope`` raises 403 for a token
+    that authenticated but lacks the scope, while 401 comes from
+    ``get_current_scopes`` upstream on a missing or invalid token.
+    """
+
+    @pytest.fixture
+    def auth_on(self, monkeypatch):
+        monkeypatch.setenv("CAO_AUTH_JWKS_URI", "https://idp.example/jwks")
+
+    @pytest.fixture(autouse=True)
+    def _clear_overrides(self):
+        from cli_agent_orchestrator.api.main import app
+        from cli_agent_orchestrator.security import auth
+
+        yield
+        app.dependency_overrides.pop(auth.get_current_scopes, None)
+
+    @staticmethod
+    def _as(scopes):
+        from cli_agent_orchestrator.api.main import app
+        from cli_agent_orchestrator.security import auth
+
+        async def _dep():
+            return list(scopes)
+
+        app.dependency_overrides[auth.get_current_scopes] = _dep
+
+    # `POST /plugins/validate` resolves a source and `POST /plugins` installs, so
+    # both are given a body that would fail *later* if the gate let them through —
+    # the assertions below only ever check the gate, never the outcome.
+    _BODY = {"source": "/nonexistent-plugin-source"}
+
+    ROUTES = [
+        ("get", "/plugins", None),
+        ("post", "/plugins", _BODY),
+        ("post", "/plugins/validate", _BODY),
+        ("delete", "/plugins/whatever", None),
+    ]
+
+    @pytest.mark.parametrize("method,path,body", ROUTES)
+    def test_a_scopeless_token_is_refused_on_every_plugins_route(
+        self, client, auth_on, method, path, body
+    ):
+        """No route in the group is reachable without at least one scope."""
+        self._as([])
+
+        response = getattr(client, method)(path, **({"json": body} if body else {}))
+
+        assert response.status_code == 403, f"{method.upper()} {path} admitted a scopeless token"
+
+    def test_a_read_token_can_list_but_cannot_install_or_remove(self, client, auth_on):
+        """The read floor is a floor, not a promotion.
+
+        This is the assertion that distinguishes "gated" from "gated correctly":
+        adding a scope dependency to ``GET /plugins`` would be worthless if the
+        write routes had been widened to READ at the same time.
+        """
+        from cli_agent_orchestrator.security import auth
+
+        self._as([auth.SCOPE_READ])
+
+        assert client.get("/plugins").status_code != 403
+        assert client.post("/plugins", json=self._BODY).status_code == 403
+        assert client.post("/plugins/validate", json=self._BODY).status_code == 403
+        assert client.delete("/plugins/whatever").status_code == 403
+
+    @pytest.mark.parametrize("scope_name", ["SCOPE_READ", "SCOPE_WRITE", "SCOPE_ADMIN"])
+    def test_every_scope_in_the_read_floor_can_list(self, client, auth_on, scope_name):
+        """Guards the over-restriction failure mode.
+
+        Gating the list on write/admin only would lock out the read-only callers
+        the endpoint exists for — the web panel and status scripts.
+        """
+        from cli_agent_orchestrator.security import auth
+
+        self._as([getattr(auth, scope_name)])
+
+        assert client.get("/plugins").status_code != 403
+
+    @pytest.mark.parametrize("scope_name", ["SCOPE_WRITE", "SCOPE_ADMIN"])
+    def test_write_and_admin_are_both_admitted_on_the_mutating_routes(
+        self, client, auth_on, scope_name
+    ):
+        from cli_agent_orchestrator.security import auth
+
+        self._as([getattr(auth, scope_name)])
+
+        assert client.post("/plugins", json=self._BODY).status_code != 403
+        assert client.post("/plugins/validate", json=self._BODY).status_code != 403
+        assert client.delete("/plugins/whatever").status_code != 403
+
+
+class TestListDoesOneLiveStateWalk:
+    """Adoption-audit finding R2, cost half — the walk is hoisted, not per plugin."""
+
+    def test_sessions_are_enumerated_once_regardless_of_plugin_count(self, client, tmp_path):
+        """``list_sessions`` is called once per request, not once per plugin.
+
+        Asserted by counting calls rather than by timing: a timing assertion on a
+        3-plugin store would be noise, while the call count states the actual
+        invariant and fails the moment someone reintroduces the per-record call.
+        """
+        from cli_agent_orchestrator.agent_plugins import installer
+
+        for name in ("alpha", "beta", "gamma"):
+            source = build_plugin(tmp_path / "src" / name, name, skills=[f"skill-{name}"])
+            assert client.post("/plugins", json={"source": str(source)}).status_code == 201
+
+        calls = []
+
+        def counting_snapshot():
+            calls.append(1)
+            return []
+
+        # Patched at the module attribute the handler reaches through, so the
+        # substitution is on the real call path.
+        original = installer._snapshot_live_terminals
+        installer._snapshot_live_terminals = counting_snapshot
+        try:
+            response = client.get("/plugins")
+        finally:
+            installer._snapshot_live_terminals = original
+
+        assert response.status_code == 200
+        assert len(response.json()["plugins"]) == 3
+        assert len(calls) == 1, f"live state walked {len(calls)} times for 3 plugins"
+
+    def test_every_plugin_still_reports_its_own_affected_sessions_key(self, client, tmp_path):
+        """Hoisting must not collapse the per-plugin answer into a shared one."""
+        for name in ("alpha", "beta"):
+            source = build_plugin(tmp_path / "src" / name, name, skills=[f"skill-{name}"])
+            client.post("/plugins", json={"source": str(source)})
+
+        plugins = client.get("/plugins").json()["plugins"]
+
+        assert {p["name"] for p in plugins} == {"alpha", "beta"}
+        assert all("affected_sessions" in p for p in plugins)

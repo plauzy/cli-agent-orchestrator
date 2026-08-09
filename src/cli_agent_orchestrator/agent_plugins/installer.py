@@ -29,10 +29,11 @@ from __future__ import annotations
 
 import logging
 import shutil
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import mkdtemp
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from cli_agent_orchestrator.agent_plugins.models import (
     AffectedSession,
@@ -241,11 +242,41 @@ def affected_sessions(
     if not projected:
         return []
 
-    affected: List[AffectedSession] = []
+    return _match_live_terminals(_snapshot_live_terminals(), projected)
+
+
+@dataclass(frozen=True)
+class _LiveTerminal:
+    """One live terminal's identity plus the only profile field that matters here.
+
+    A snapshot type rather than the profile object: holding profiles would keep a
+    parsed model per terminal alive for no reason, and ``skills`` is the single
+    field the match needs.
+    """
+
+    terminal_id: str
+    session_name: str
+    profile_name: str
+    skill_filter: Optional[List[str]]
+
+
+def _snapshot_live_terminals() -> List[_LiveTerminal]:
+    """Enumerate live terminals and their skill filters, once.
+
+    Never raises: a database or tmux hiccup must not block a removal, and must not
+    fail a plugin listing either. A partial snapshot is better than an error,
+    because the result is a *warning input* — under-reporting an affected session
+    degrades the warning, while raising would break the operation entirely.
+    """
+    snapshot: List[_LiveTerminal] = []
     try:
         from cli_agent_orchestrator.clients.database import list_terminals_by_session
         from cli_agent_orchestrator.services.session_service import list_sessions
         from cli_agent_orchestrator.utils.agent_profiles import load_agent_profile
+
+        # One profile load per distinct profile name, not per terminal: several
+        # terminals commonly run the same profile, and loading parses YAML.
+        filters: Dict[str, Optional[List[str]]] = {}
 
         for session in list_sessions():
             session_name = str(session.get("id", ""))
@@ -253,26 +284,85 @@ def affected_sessions(
                 profile_name = terminal.get("agent_profile")
                 if not profile_name:
                     continue
-                try:
-                    profile = load_agent_profile(profile_name)
-                except Exception:
+                profile_name = str(profile_name)
+
+                if profile_name not in filters:
+                    try:
+                        profile = load_agent_profile(profile_name)
+                    except Exception:
+                        # A terminal whose profile has since been deleted cannot
+                        # be matched, but it also cannot be reported as safe, so
+                        # it is simply absent from the snapshot.
+                        filters[profile_name] = _UNRESOLVABLE
+                    else:
+                        filters[profile_name] = getattr(profile, "skills", None)
+
+                skill_filter = filters[profile_name]
+                if skill_filter is _UNRESOLVABLE:
                     continue
 
-                matched = _referenced_skills(getattr(profile, "skills", None), projected)
-                if matched:
-                    affected.append(
-                        AffectedSession(
-                            terminal_id=str(terminal.get("id", "")),
-                            session_name=session_name,
-                            profile_name=str(profile_name),
-                            skill_names=matched,
-                        )
+                snapshot.append(
+                    _LiveTerminal(
+                        terminal_id=str(terminal.get("id", "")),
+                        session_name=session_name,
+                        profile_name=profile_name,
+                        skill_filter=skill_filter,
                     )
+                )
     except Exception as exc:
-        logger.warning("Could not determine sessions affected by removing '%s': %s", name, exc)
-        return affected
+        logger.warning("Could not enumerate live sessions for agent-plugin impact: %s", exc)
 
+    return snapshot
+
+
+#: Sentinel for "this profile could not be loaded", distinct from ``None``, which
+#: legitimately means "no skills filter, so the profile receives every skill".
+_UNRESOLVABLE: List[str] = []
+
+
+def _match_live_terminals(snapshot: List[_LiveTerminal], projected: set) -> List[AffectedSession]:
+    """Which snapshot entries reference any of ``projected``."""
+    affected: List[AffectedSession] = []
+    for entry in snapshot:
+        matched = _referenced_skills(entry.skill_filter, projected)
+        if matched:
+            affected.append(
+                AffectedSession(
+                    terminal_id=entry.terminal_id,
+                    session_name=entry.session_name,
+                    profile_name=entry.profile_name,
+                    skill_names=matched,
+                )
+            )
     return affected
+
+
+def affected_sessions_by_plugin(
+    *,
+    store: Optional[InstalledPluginStore] = None,
+) -> Dict[str, List[AffectedSession]]:
+    """``affected_sessions`` for every installed plugin, with **one** live-state walk.
+
+    ``GET /plugins`` needs this for each installed plugin at once. Calling
+    :func:`affected_sessions` in a loop re-walked ``list_sessions()`` ×
+    ``list_terminals_by_session()`` × ``load_agent_profile()`` per plugin — work
+    that is identical every iteration, on an endpoint a UI panel polls. The
+    adoption audit flagged it (finding R2) alongside the missing scope gate,
+    because the two together made an unauthenticated quadratic endpoint.
+
+    The walk is hoisted; the per-plugin part that genuinely differs (matching each
+    plugin's projected skill names) stays per-plugin.
+    """
+    store = store or InstalledPluginStore()
+    records = store.list_installed()
+    if not records:
+        return {}
+
+    snapshot = _snapshot_live_terminals()
+    return {
+        record.name: _match_live_terminals(snapshot, set(record.projected_skill_names))
+        for record in records
+    }
 
 
 def _referenced_skills(skill_filter: Optional[List[str]], projected: set) -> Tuple[str, ...]:
