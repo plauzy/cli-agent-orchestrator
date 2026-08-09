@@ -16,19 +16,21 @@ expected union is unambiguous; collision behaviour is a separate concern with it
 own dedicated assertions (Property 8, and
 ``TestCollisionsDoNotBreakEquivalence`` below).
 
-A pre-existing asymmetry, found by this property
-------------------------------------------------
-Requirement 13.2 states the reachable set equals
-``builtin ∪ extra_dirs ∪ projected`` for *every* provider. That is **not true of
-CAO today, and not because of agent plugins**: Kiro receives one glob rooted at
-``SKILLS_DIR`` and OpenCode one symlink to ``SKILLS_DIR``, so skills registered
-through ``skills.extra_dirs`` — which live *outside* the store — are invisible to
-both. Reproduced with zero plugins installed in
-``TestPreExistingExtraDirsGap``.
+A provider-dependent ``extra_dirs`` term
+----------------------------------------
+Kiro receives one glob rooted at ``SKILLS_DIR`` and OpenCode one symlink to
+``SKILLS_DIR``, so skills registered through ``skills.extra_dirs`` — which live
+*outside* the store — are invisible to both. This **predates agent plugins**; it
+reproduces with zero plugins installed (``TestPreExistingExtraDirsGap``).
 
-The ``extra_dirs`` term is therefore provider-dependent below, and the gap is
-pinned as its own regression guard rather than quietly folded into the
-expectation. What this feature *is* responsible for — that **projected plugin
+This property originally failed against Requirement 13.2's earlier wording, which
+required the reachable set to *equal* ``builtin ∪ extra_dirs ∪ projected`` for
+every provider. Requirement 13 was amended in response (Criteria 6 and 7 now
+specify the term per provider; Criteria 3–5 kept their numbering), and the
+limitation is recorded under "Known Limitations" in ``docs/skills.md``. The
+``extra_dirs`` term is therefore provider-dependent below.
+
+What this feature *is* responsible for — that **built-in and projected plugin
 skills** reach all seven providers identically — is asserted in full.
 """
 
@@ -324,10 +326,12 @@ class TestPreExistingExtraDirsGap:
 
     **This predates agent plugins and is reproduced here with zero plugins
     installed**, so it cannot be mistaken for a regression introduced by
-    projection. It is recorded because Property 10 found it and because
-    Requirement 13.2's literal wording — reachable equals
-    ``builtin ∪ extra_dirs ∪ projected`` for *every* provider — is therefore not
-    satisfiable by the current codebase.
+    projection. Property 10 found it against Requirement 13.2's original wording
+    — reachable equals ``builtin ∪ extra_dirs ∪ projected`` for *every* provider
+    — which is not satisfiable by the current codebase. Requirement 13 was
+    amended in response: Criteria 6 and 7 now specify the ``extra_dirs`` term per
+    provider, and the limitation is recorded under "Known Limitations" in
+    ``docs/skills.md``.
 
     Cause: ``install_service`` hands Kiro a single glob
     ``skill://{SKILLS_DIR}/**/SKILL.md`` and OpenCode a single symlink
@@ -336,11 +340,8 @@ class TestPreExistingExtraDirsGap:
     unaffected because they go through ``list_skills()``, which searches
     ``[SKILLS_DIR, *extra_dirs]``.
 
-    Not currently listed under "Known Limitations" in ``docs/skills.md``, whose
-    provider table implies uniform coverage.
-
     These tests are written to **document and detect**, not to bless: if a fix
-    lands, they fail loudly and should be inverted.
+    lands, they fail loudly and should be inverted along with Criteria 6 and 7.
     """
 
     @pytest.mark.parametrize("provider", CATALOG_BASED_PROVIDERS)

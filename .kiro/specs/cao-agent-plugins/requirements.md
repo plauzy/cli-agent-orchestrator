@@ -243,12 +243,20 @@ Where a #573 acceptance criterion spans both increments, the acceptance criteria
 #### Acceptance Criteria
 
 1. WHEN a plugin skill is discovered as valid and does not collide with an existing skill name, THE Projection_Engine SHALL make that skill discoverable through the same skill-discovery mechanism CAO's existing built-in and user-added skills already use, without requiring provider-specific code changes.
-2. FOR EVERY CAO-supported provider (Claude Code, Codex, Kimi, Antigravity, Copilot, Kiro CLI, OpenCode), the set of skill names reachable by an agent launched under that provider SHALL equal the union of built-in skills, user-configured extra-directory skills, and successfully projected valid plugin skills.
+2. FOR EVERY CAO-supported provider (Claude Code, Codex, Kimi, Antigravity, Copilot, Kiro CLI, OpenCode), the set of skill names reachable by an agent launched under that provider SHALL include every built-in skill and every successfully projected valid plugin skill, and SHALL NOT include any skill that is neither built-in, nor supplied by a configured extra directory, nor a successfully projected valid plugin skill. The extra-directory term is provider-dependent and is specified by Criteria 6 and 7.
 3. WHEN a plugin is installed, updated, or removed, THE Projection_Engine SHALL rebuild the skill projection as a pure function of the currently installed set, rather than incrementally patching prior projection state.
 4. IF symlink creation is unsupported in the current environment, THEN THE Projection_Engine SHALL fall back to copying skill content instead of linking it, and SHALL report this fallback.
 5. THE terminal-launch path SHALL NOT perform any additional filesystem scan beyond the scan it already performs for built-in and user-added skills, so that skill projection introduces no new launch-time cost.
+6. WHERE a provider receives its skill catalog through CAO's skill-discovery scan (Claude Code, Codex, Kimi, Antigravity, Copilot), the reachable set SHALL additionally include user-configured extra-directory skills.
+7. WHERE a provider discovers skills by traversing the skill-store path directly (Kiro CLI via its `skill://` resource glob, OpenCode via its skill-directory symlink), user-configured extra-directory skills SHALL NOT be expected in the reachable set, because such a provider receives a path rooted at the skill store and extra directories lie outside it. THIS limitation SHALL be recorded as a known limitation in the skills documentation, and SHALL NOT be treated as a defect introduced by this feature.
 
 **Traceability:** design.md §"Skill Delivery (the critical seam)", §"Performance Considerations"; validates Property **P10**; validates AC2 (skill-discovery half) and AC4 (skill delivered to a provider).
+
+> **Amendment note (W6 finding, maintainer-approved).** Criterion 2 originally required the reachable set to *equal* `built-in ∪ extra-directory ∪ projected` for **every** provider. Cross-provider verification (W6) demonstrated that this is not satisfiable by the current codebase and never was: `services/install_service.py` hands Kiro CLI a single `skill://{SKILLS_DIR}/**/SKILL.md` glob and OpenCode a single `OPENCODE_CONFIG_DIR/skills` symlink to the store, so skills registered through `skills.extra_dirs` — which live outside the store — are invisible to both. It was reproduced **with zero plugins installed**, confirming it predates agent plugins and is not a projection regression.
+>
+> Criterion 2 has therefore been narrowed to the guarantee this feature is actually responsible for — built-in and projected plugin skills reach every provider, and nothing spurious appears — and the extra-directory term is split into the new provider-dependent Criteria 6 and 7. **Criteria 3–5 keep their original numbering and meaning**, so existing `13.3` / `13.4` / `13.5` references in `design.md`, `tasks.md`, and the implementation remain correct.
+>
+> Decision recorded: amend the requirement and document the limitation, rather than expand this feature's scope to modify provider paths the design deliberately froze. Regression-guarded by `TestPreExistingExtraDirsGap` in `test/agent_plugins/test_delivery_property.py`.
 
 ---
 

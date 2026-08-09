@@ -724,9 +724,13 @@ Spec: §9.2. For arbitrary strings containing `${PLUGIN_ROOT}`, `${PLUGIN_DATA}`
 
 ### Property 10: Cross-provider delivery equivalence (P10)
 
-**Validates: Requirements 13.2**
+**Validates: Requirements 13.2, 13.6, 13.7**
 
-For every provider, the set of skill names reachable by an agent equals `builtin ∪ extra_dirs ∪ projected(valid plugin skills)`, asserted against each provider's real artifact: the runtime catalog text, the Kiro agent JSON `resources` glob expansion, the OpenCode symlink traversal, and the Copilot `.agent.md` body.
+For every provider, the set of skill names reachable by an agent equals `builtin ∪ projected(valid plugin skills)`, plus `extra_dirs` for the providers that receive their catalog through CAO's skill-discovery scan — asserted against each provider's real artifact: the runtime catalog text, the Kiro agent JSON `resources` glob expansion, the OpenCode symlink traversal, and the Copilot `.agent.md` body.
+
+The `extra_dirs` term is provider-dependent because Kiro and OpenCode are handed a path rooted at `SKILLS_DIR` (one glob, one symlink) and extra directories lie outside it. That asymmetry **predates agent plugins** — it reproduces with zero plugins installed — and Requirement 13 was amended to record it rather than have this feature adopt an unsatisfiable guarantee. See the amendment note under Requirement 13 in requirements.md.
+
+It is also the sharpest available justification for choosing projection over extra-dirs registration: the rejected alternative would have inherited exactly this blind spot, leaving plugin skills invisible to Kiro and OpenCode.
 
 ### Property 11: Schema pin integrity and offline validation (P11)
 
