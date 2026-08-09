@@ -153,6 +153,56 @@ You can also explicitly instruct the agent to load specific skills eagerly in th
 Before starting any task, load the python-testing and code-style skills.
 ```
 
+## Plugin-provided skills
+
+Skills can also arrive from an installed [agent plugin](agent-plugins.md). CAO
+does not give them a separate delivery path: each valid plugin skill is
+**projected** into this same skill store as a managed symlink,
+
+```text
+<skill store>/<skill-name>  ->  <plugin store>/<plugin-name>/skills/<skill-name>
+```
+
+so `cao skills list`, the injected catalog, `load_skill`, Kiro's `skill://` glob
+and OpenCode's skill directory all pick it up unchanged. A projected skill is
+listed under its own name — the same name its `SKILL.md` frontmatter declares,
+because a skill's folder name and its frontmatter `name` must match.
+
+Use `cao plugin list` to see which plugin provides which skill; nothing in the
+skill folder's name records that.
+
+**The projection is derived state.** It is rebuilt from the set of installed
+plugins on every plugin add, update, and remove — never patched incrementally —
+so it is a function of *which* plugins are installed rather than of the order
+they were installed in. Links whose target has gone are swept away, and a broken
+link is never fatal: skill discovery already skips a directory that has no
+readable `SKILL.md`.
+
+### Collision rules
+
+| Situation | Outcome |
+|---|---|
+| A plugin skill's name matches a built-in or user-added skill | The existing skill **always wins**. The plugin's skill is not projected and a finding says so. |
+| Two plugins provide the same skill name | The plugin whose manifest `name` sorts first wins. Every other claimant gets a finding naming the winner. |
+| A rebuild changes which plugin wins a name | A warning names both the previous and the new winner, because the content an agent receives has changed. |
+
+Install order never decides a winner. That is deliberate: keying on install time
+would mean installing A then B produced a different result than B then A from the
+same final set of plugins.
+
+### Copy mode
+
+Where symlink creation is unavailable (notably Windows without Developer Mode or
+elevation), set
+
+```json
+{ "skills": { "projection_mode": "copy" } }
+```
+
+in `settings.json` and plugin skills are copied instead. CAO also falls back to
+copying automatically if a symlink cannot be created, and reports the fallback.
+Copy mode re-copies on every rebuild, so it is correct but not free.
+
 ## How Skills Work by Provider
 
 Skills are delivered to agents differently depending on the provider. The table below summarizes the mechanism for each:

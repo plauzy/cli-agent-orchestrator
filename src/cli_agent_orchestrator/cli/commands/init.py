@@ -5,12 +5,68 @@ import shutil
 from importlib import resources
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Dict, List
 
 import click
 
 from cli_agent_orchestrator.clients.database import init_db
 from cli_agent_orchestrator.constants import SKILLS_DIR
 from cli_agent_orchestrator.services.memory_reconciliation import reconcile_memory_startup
+
+# Skill directories retired by a rename, as ``{old name: new name}``.
+#
+# PREPARED BUT DELIBERATELY INACTIVE. Decision M4 proposes renaming the
+# event-plugin authoring skill ``cao-plugin`` -> ``cao-event-plugin``. A rename is
+# not a no-op for an *existing* installation: seeding only ever adds directories,
+# so an upgraded install would end up with BOTH ``cao-plugin`` and
+# ``cao-event-plugin`` present, and the stale copy would keep appearing in every
+# agent's skill catalog forever.
+#
+# The mechanism below removes the old directory once the new one is in place.
+# The mapping is empty because M4 is unresolved and this must not act yet
+# (Requirement 21.5). Activating it is one line:
+#
+#     RETIRED_SKILL_RENAMES = {"cao-plugin": "cao-event-plugin"}
+#
+# and the matching entry in ``scripts/sync_skills.py``'s ``SHIPPED_SKILLS``.
+RETIRED_SKILL_RENAMES: Dict[str, str] = {}
+
+
+def retire_renamed_skills() -> List[str]:
+    """Remove skill directories superseded by a rename. Returns what was removed.
+
+    Only removes ``old`` when ``new`` is actually present, so an interrupted or
+    partial upgrade can never leave the user with neither. Best-effort: a
+    directory that cannot be removed is logged by the caller's echo and skipped
+    rather than failing ``cao init``, because a stale skill is a cosmetic problem
+    and a failed init is not.
+    """
+    if not RETIRED_SKILL_RENAMES:
+        return []
+
+    removed: List[str] = []
+    for old_name, new_name in sorted(RETIRED_SKILL_RENAMES.items()):
+        old_dir = SKILLS_DIR / old_name
+        new_dir = SKILLS_DIR / new_name
+
+        # The new skill must exist first; otherwise this would delete the only
+        # copy the user has.
+        if not (new_dir / "SKILL.md").is_file():
+            continue
+        if not old_dir.is_dir():
+            continue
+
+        try:
+            if old_dir.is_symlink():
+                old_dir.unlink()
+            else:
+                shutil.rmtree(old_dir)
+            removed.append(old_name)
+        except OSError:
+            # Left in place; the next `cao init` will try again.
+            continue
+
+    return removed
 
 
 def seed_default_skills() -> int:
@@ -41,6 +97,10 @@ def seed_default_skills() -> int:
                         continue
                     raise
         seeded_count += 1
+
+    # Retirement runs AFTER seeding so the replacement skill is already present
+    # when the superseded one is removed. Inert until M4 is resolved.
+    retire_renamed_skills()
 
     return seeded_count
 

@@ -43,6 +43,10 @@ SHIPPED_SKILLS: List[str] = [
     "cao-memory",
     "cao-learning",
     "cao-workflow",
+    # M4 (pending): to be renamed "cao-event-plugin". When M4 lands, change this
+    # entry, rename skills/cao-plugin/ (the folder name must equal the SKILL.md
+    # frontmatter `name`), and activate RETIRED_SKILL_RENAMES in
+    # cli/commands/init.py so upgraded installs do not keep both directories.
     "cao-plugin",
     "cao-provider",
 ]

@@ -20,6 +20,14 @@ _EXCLUDED_PREFIXES = (
     Path("skills/vendor"),
     # These are package copies generated from the top-level skills/ source.
     Path("src/cli_agent_orchestrator/skills"),
+    # Same reason, for the Agent Plugins packages: agent-plugin/<pkg>/skills/ holds
+    # generated copies of the same canonical skills. Their relative links (e.g.
+    # ../../docs/agent-profile.md) resolve correctly from skills/<name>/ and
+    # cannot resolve from the packaged depth. Rewriting them is not an option --
+    # scripts/build_agent_plugin.py --check asserts the copies stay byte-identical
+    # to the canonical source, and the specification requires the package to hold
+    # the plugin's own bytes.
+    Path("agent-plugin"),
     Path("test/fixtures"),
     Path("test/providers/fixtures"),
 )

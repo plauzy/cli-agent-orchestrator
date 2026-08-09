@@ -1,6 +1,19 @@
-# Plugins
+# Event Plugins
 
-CAO supports plugins that react to server-side events — session and terminal lifecycle changes, and message delivery between agents. Plugins run inside the `cao-server` process and are notified whenever one of those events occurs.
+<!--
+  RETITLED FROM "Plugins" — PROVISIONAL PENDING M3. The exact retitling and
+  banner treatment of this page is subject to decision M3; the file path is
+  deliberately unchanged so every inbound link keeps working.
+-->
+
+> **Not the same thing as agent plugins.** This page covers **event plugins**:
+> Python hooks that run inside `cao-server` and react to server-side events. If
+> you are looking for the [Agent Plugins](https://agent-plugins.org/specification)
+> standard — installable packages of skills, managed with `cao plugin` — see
+> [Agent Plugins](agent-plugins.md). The two systems share no code, no directory,
+> and no configuration.
+
+CAO supports event plugins that react to server-side events — session and terminal lifecycle changes, and message delivery between agents. Event plugins run inside the `cao-server` process and are notified whenever one of those events occurs.
 
 Typical uses today:
 

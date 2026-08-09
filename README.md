@@ -124,7 +124,8 @@ provider override while keeping the same sequence.
   selection, and overrides.
 - [HTTP API and PTY WebSocket](docs/api.md): route-family overview and terminal
   streaming contract.
-- [Plugins](docs/plugins.md): outbound events, installation, and authoring.
+- [Event Plugins](docs/plugins.md): outbound events, installation, and authoring.
+- [Agent Plugins](docs/agent-plugins.md): installing Agent-Plugins-standard skill packages.
 - Provider behavior:
   [Kiro CLI](docs/kiro-cli.md), [Claude Code](docs/claude-code.md),
   [Codex CLI](docs/codex-cli.md), [Antigravity CLI](docs/antigravity-cli.md),
