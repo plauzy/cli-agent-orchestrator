@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -33,6 +34,14 @@ GIT_TIMEOUT_S = 300
 
 # Directory name the staged candidate plugin root is placed under.
 _STAGE_DIRNAME = "source"
+
+#: A **full** 40-hex commit id, and nothing shorter. `git clone --branch` cannot
+#: take a commit, so a pinned commit takes the fetch path below — but an
+#: abbreviated hash is deliberately rejected rather than resolved: abbreviations
+#: are ambiguous by construction, and "install whatever object happens to match
+#: this prefix today" is not a reproducible source. An install record replaying
+#: its own `resolved_ref` always has the full id.
+_FULL_COMMIT_RE = re.compile(r"\A[0-9a-fA-F]{40}\Z")
 
 
 class ResolverError(RuntimeError):
@@ -129,13 +138,27 @@ def _resolve_git(source: PluginSource, dest: Path) -> tuple[Path, Optional[str]]
         # content into staging, which would then have to be reasoned about under
         # containment.
         "--no-recurse-submodules",
+        # Tags are never used: nothing here resolves a version from the
+        # repository, and `--depth 1` already fetches only the tip. Fetching them
+        # would download refs and objects the install cannot use, which on a
+        # release-heavy repository is most of the transfer.
+        "--no-tags",
     ]
     if source.ref:
         args += ["--branch", source.ref]
     # `--` so a location beginning with `-` is never read as an option.
     args += ["--", location, str(staged)]
 
-    _run_git(args, what=f"clone {location}")
+    try:
+        _run_git(args, what=f"clone {location}")
+    except ResolverError as exc:
+        # `--branch` takes a branch or tag name only, so a caller pinning an exact
+        # commit lands here — and that caller is not hypothetical: it is what
+        # replaying an install record's own `resolved_ref` looks like.
+        if source.ref and _FULL_COMMIT_RE.match(source.ref):
+            _clone_at_commit(location, source.ref, staged)
+        else:
+            raise
 
     resolved_ref: Optional[str] = None
     try:
@@ -145,26 +168,120 @@ def _resolve_git(source: PluginSource, dest: Path) -> tuple[Path, Optional[str]]
         # fatal to installing: record no ref rather than refusing the plugin.
         logger.warning("Could not resolve cloned commit for %s: %s", location, exc)
 
+    # Read the commit BEFORE this point — the metadata it comes from is about to
+    # be deleted.
+    _strip_vcs_metadata(staged)
+
     return staged, resolved_ref
 
 
-def _run_git(args: List[str], *, what: str, cwd: Optional[Path] = None) -> str:
-    """Run a git command with prompts disabled and a hard timeout."""
+def _clone_at_commit(location: str, commit: str, staged: Path) -> None:
+    """Fetch exactly one commit into ``staged``, for a full-hash pin.
+
+    ``init`` + ``fetch --depth 1 <sha>`` + ``checkout FETCH_HEAD`` rather than a
+    full clone followed by a checkout: fetching the single named object keeps the
+    transfer as small as the shallow-clone path it substitutes for. It requires
+    the server to allow fetching a reachable object by id — GitHub and GitLab do;
+    where a server does not, the failure surfaces like any other git failure.
+    """
+    # A failed clone may have left a partial tree behind, or removed the
+    # directory entirely. Either way, start from an empty one.
+    if staged.exists():
+        shutil.rmtree(staged, ignore_errors=True)
+    staged.mkdir(parents=True, exist_ok=True)
+
+    _run_git(["init", "--quiet"], what="init staging", cwd=staged)
+    _run_git(["remote", "add", "origin", "--", location], what="add remote", cwd=staged)
+    _run_git(
+        ["fetch", "--depth", "1", "--no-recurse-submodules", "--no-tags", "origin", commit],
+        what=f"fetch commit {commit[:12]}",
+        cwd=staged,
+    )
+    _run_git(["checkout", "--quiet", "FETCH_HEAD"], what="checkout commit", cwd=staged)
+
+
+def _strip_vcs_metadata(staged: Path) -> None:
+    """Remove ``.git`` from the staged tree.
+
+    Version-control metadata is not package bytes, and ``PLUGIN_ROOT`` is meant to
+    hold the package. Two concrete reasons beyond tidiness:
+
+    * ``git clone`` **silently ignores ``--depth`` for a local path source**, so a
+      ``file://`` or local-path git source arrives with the repository's entire
+      history attached. Publishing that into the store would grow it without
+      bound and for no purpose.
+    * A plugin's own ``.git`` in the store invites accidental operations against
+      it — a tool walking the store and finding a repository will treat it as one.
+
+    Handles all three shapes ``.git`` can take: a directory (ordinary clone), a
+    file (worktree or submodule checkout, where it points elsewhere), and a
+    symlink (which must be unlinked, never followed).
+    """
+    git_path = staged / ".git"
+    try:
+        if git_path.is_symlink() or git_path.is_file():
+            git_path.unlink(missing_ok=True)
+        elif git_path.is_dir():
+            shutil.rmtree(git_path, ignore_errors=True)
+    except OSError as exc:  # pragma: no cover - best effort
+        logger.warning("Could not remove VCS metadata from staged plugin: %s", exc)
+
+
+def _git_env() -> dict:
+    """Environment for every git subprocess, with interactivity fully disabled.
+
+    Cloning an arbitrary operator-supplied URL must never block waiting for
+    input. In the CLI a prompt looks like a hang; in the API server it would pin
+    a worker until the timeout. Four separate mechanisms can prompt, so all four
+    are closed:
+
+    * ``GIT_TERMINAL_PROMPT=0`` — git's own username/password prompt.
+    * ``GIT_ASKPASS=""`` / ``SSH_ASKPASS=""`` — the graphical/helper prompt path,
+      which ignores ``GIT_TERMINAL_PROMPT`` entirely. Empty rather than unset:
+      unsetting would let git fall back to a system default helper.
+    * ``GCM_INTERACTIVE=never`` — Git Credential Manager, which is its own
+      process with its own UI and does not honour any of the above.
+    * ``GIT_SSH_COMMAND=ssh -oBatchMode=yes`` — refuses an unknown-host-key or
+      passphrase prompt for an ``ssh://`` or ``git@`` remote.
+
+    Closing the prompts is also a small confidentiality property, not only an
+    availability one: a helper that *did* answer would hand credentials for one
+    host to whatever URL the plugin source named.
+    """
     env = dict(os.environ)
-    # Never block on an interactive credential or host-key prompt: a plugin
-    # install must fail with a message, not hang holding the operator's terminal.
     env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_ASKPASS"] = ""
+    env["SSH_ASKPASS"] = ""
+    env["GCM_INTERACTIVE"] = "never"
     env.setdefault("GIT_SSH_COMMAND", "ssh -oBatchMode=yes")
+    return env
+
+
+def _run_git(args: List[str], *, what: str, cwd: Optional[Path] = None) -> str:
+    """Run a git command with prompts disabled and a hard timeout.
+
+    The two ``-c`` overrides apply to **every** subcommand, not just ``clone``,
+    which is the point: ``fetch`` and ``checkout`` on the commit-pin path below
+    would otherwise inherit the ambient configuration this exists to neutralize.
+
+    * ``submodule.recurse=false`` — belt to ``--no-recurse-submodules``'s braces.
+      An operator with ``submodule.recurse=true`` in their global config would
+      otherwise have submodules pulled in by subcommands that take no such flag.
+    * ``credential.helper=`` — empties the helper *chain* for this invocation, so
+      no configured helper is consulted at all. ``_git_env`` stops a helper from
+      blocking; this stops one from answering.
+    """
+    command = ["git", "-c", "submodule.recurse=false", "-c", "credential.helper=", *args]
 
     try:
         result = subprocess.run(
-            ["git", *args],
+            command,
             cwd=str(cwd) if cwd else None,
             check=True,
             capture_output=True,
             text=True,
             timeout=GIT_TIMEOUT_S,
-            env=env,
+            env=_git_env(),
         )
     except FileNotFoundError as exc:
         raise ResolverError(

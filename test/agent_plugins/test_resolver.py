@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from cli_agent_orchestrator.agent_plugins import resolver
 from cli_agent_orchestrator.agent_plugins.models import PluginSource
 from cli_agent_orchestrator.agent_plugins.resolver import ResolverError, resolve
 
@@ -249,3 +250,193 @@ class TestGitSource:
 
         assert captured["env"]["GIT_TERMINAL_PROMPT"] == "0"
         assert captured["timeout"] and captured["timeout"] > 0
+
+
+class TestGitInvocationHardening:
+    """Every git subprocess runs non-interactive, helper-less and submodule-less.
+
+    **Validates: Requirement 8.2 (unreachable source fails rather than hangs)**
+
+    Asserted against the argv and environment actually handed to
+    ``subprocess.run``, not against the module's source text. That matters here
+    more than usual: these flags exist to stop a *hang* and a *credential leak*,
+    neither of which any functional test can observe, so if they are not asserted
+    structurally they are not asserted at all.
+    """
+
+    @pytest.fixture
+    def captured(self, monkeypatch, tmp_path):
+        """Capture argv and env for every git call, and fail the clone."""
+        calls = []
+
+        class _Result:
+            stdout = ""
+            stderr = ""
+
+        def fake_run(command, **kwargs):
+            calls.append({"argv": list(command), "env": dict(kwargs.get("env") or {})})
+            return _Result()
+
+        monkeypatch.setattr(resolver.subprocess, "run", fake_run)
+        resolver.resolve(
+            PluginSource(kind="git", location="https://example.test/repo.git"), tmp_path / "dest"
+        )
+        return calls
+
+    def test_submodule_recursion_is_disabled_for_every_subcommand(self, captured):
+        """`-c submodule.recurse=false` is belt to `--no-recurse-submodules`'s braces.
+
+        An operator with `submodule.recurse=true` set globally would otherwise
+        have submodules pulled in by subcommands that accept no such flag.
+        """
+        for call in captured:
+            argv = call["argv"]
+            assert argv[:3] == ["git", "-c", "submodule.recurse=false"], argv
+
+    def test_the_credential_helper_chain_is_emptied(self, captured):
+        """`_git_env` stops a helper from blocking; this stops one from answering.
+
+        A configured helper that *did* answer would hand credentials for one host
+        to whatever URL the plugin source happened to name.
+        """
+        for call in captured:
+            assert "credential.helper=" in call["argv"], call["argv"]
+
+    @pytest.mark.parametrize(
+        "key,value",
+        [
+            ("GIT_TERMINAL_PROMPT", "0"),
+            ("GIT_ASKPASS", ""),
+            ("SSH_ASKPASS", ""),
+            ("GCM_INTERACTIVE", "never"),
+        ],
+    )
+    def test_every_prompting_mechanism_is_closed(self, captured, key, value):
+        """Four separate mechanisms can prompt, and they ignore each other.
+
+        `GIT_ASKPASS` bypasses `GIT_TERMINAL_PROMPT` entirely, and Git Credential
+        Manager is its own process honouring neither — so closing one proves
+        nothing about the others.
+        """
+        for call in captured:
+            assert call["env"].get(key) == value, f"{key} not set to {value!r}"
+
+    def test_askpass_is_emptied_rather_than_unset(self, captured, monkeypatch):
+        """Unsetting would let git fall back to a system default helper."""
+        for call in captured:
+            assert "GIT_ASKPASS" in call["env"]
+            assert "SSH_ASKPASS" in call["env"]
+
+    def test_ssh_refuses_interactive_host_key_prompts(self, captured):
+        assert all("BatchMode=yes" in call["env"].get("GIT_SSH_COMMAND", "") for call in captured)
+
+    def test_tags_are_not_fetched(self, captured):
+        """Nothing resolves a version from the repository, so tags are pure cost."""
+        clone = next(call for call in captured if "clone" in call["argv"])
+        assert "--no-tags" in clone["argv"]
+
+    def test_the_location_is_still_separated_by_a_double_dash(self, captured):
+        """Pre-existing guard: a location beginning with `-` is never an option."""
+        clone = next(call for call in captured if "clone" in call["argv"])
+        assert "--" in clone["argv"]
+        assert clone["argv"].index("--") < clone["argv"].index("https://example.test/repo.git")
+
+
+@requires_git
+class TestVcsMetadataIsStripped:
+    """``.git`` is not package bytes, and `--depth` does not apply to local clones."""
+
+    def test_the_staged_tree_has_no_git_directory(self, tmp_path, git_repo):
+        resolved = resolver.resolve(
+            PluginSource(kind="git", location=str(git_repo)), tmp_path / "dest"
+        )
+
+        assert not (resolved.staging / "source" / ".git").exists()
+
+    def test_the_commit_is_still_recorded(self, tmp_path, git_repo):
+        """The ref must be read before the metadata it comes from is deleted.
+
+        This is the ordering bug the strip could easily introduce: delete `.git`
+        first and `resolved_ref` silently becomes `None`, losing the provenance
+        an install record exists to hold.
+        """
+        resolved = resolver.resolve(
+            PluginSource(kind="git", location=str(git_repo)), tmp_path / "dest"
+        )
+
+        assert resolved.resolved_ref
+        assert len(resolved.resolved_ref) == 40
+
+    def test_the_package_content_survives_the_strip(self, tmp_path, git_repo):
+        """Removing `.git` must not remove anything else."""
+        resolved = resolver.resolve(
+            PluginSource(kind="git", location=str(git_repo), subdir="agent-plugin/demo"),
+            tmp_path / "dest",
+        )
+
+        assert (resolved.root / "plugin.json").is_file()
+
+
+@requires_git
+class TestFullCommitPin:
+    """`clone --branch` cannot take a commit, so a pinned commit needs a fetch."""
+
+    def test_a_full_commit_id_resolves(self, tmp_path, git_repo):
+        """The case an install record replays: `resolved_ref` fed back as `ref`."""
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=git_repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+        resolved = resolver.resolve(
+            PluginSource(kind="git", location=str(git_repo), ref=head), tmp_path / "dest"
+        )
+
+        assert resolved.resolved_ref == head
+        assert (resolved.staging / "source" / "agent-plugin" / "demo" / "plugin.json").is_file()
+
+    def test_an_abbreviated_hash_is_rejected_rather_than_resolved(self, tmp_path, git_repo):
+        """Deliberately unsupported: an abbreviation is ambiguous by construction.
+
+        "Install whatever object matches this prefix today" is not a reproducible
+        source, so the abbreviated form is left to fail as an unknown branch name
+        rather than being silently expanded.
+        """
+        short = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=git_repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+        with pytest.raises(ResolverError):
+            resolver.resolve(
+                PluginSource(kind="git", location=str(git_repo), ref=short), tmp_path / "dest"
+            )
+
+    def test_an_unknown_branch_still_reports_a_clone_failure(self, tmp_path, git_repo):
+        """The fallback must not swallow the ordinary bad-ref error."""
+        with pytest.raises(ResolverError, match="clone"):
+            resolver.resolve(
+                PluginSource(kind="git", location=str(git_repo), ref="no-such-branch"),
+                tmp_path / "dest",
+            )
+
+    def test_the_commit_pin_path_also_strips_metadata(self, tmp_path, git_repo):
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=git_repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+        resolved = resolver.resolve(
+            PluginSource(kind="git", location=str(git_repo), ref=head), tmp_path / "dest"
+        )
+
+        assert not (resolved.staging / "source" / ".git").exists()
