@@ -253,10 +253,18 @@ Some entries are rejected, always with a report and never silently:
 CAO ships itself as two agent plugins, so any Agent-Plugins-compatible client
 can drive a CAO session without CAO-specific integration code:
 
-| Package | Install this if you are… | Contents |
-|---|---|---|
-| [`cao`](../agent-plugin/cao) | **an operator** driving CAO from another client | session management, agent routing, supervisor and worker protocols, plus the `cao-ops` MCP server |
-| [`cao-contributor`](../agent-plugin/cao-contributor) | **a contributor** extending CAO itself | provider authoring, event-plugin authoring |
+| Package | Install this if you are… | Skills | Also ships |
+|---|---|---|---|
+| [`cao`](../agent-plugin/cao) | **an operator** driving CAO from another client | `cao-session-management`, `cao-agent-routing`, `cao-supervisor-protocols`, `cao-worker-protocols` | the `cao-ops` MCP server |
+| [`cao-contributor`](../agent-plugin/cao-contributor) | **a contributor** extending CAO itself | `cao-provider`, `cao-plugin` | — |
+
+The skill names are the folder names you will see under
+`~/.aws/cli-agent-orchestrator/skills/` after installing, which is what makes a
+collision report readable when one of them clashes with a skill you already have.
+Both packages are generated from CAO's own `skills/` directory by
+`scripts/build_agent_plugin.py`, and `make check-agent-plugin` fails if the
+generated packages drift from it — so this table, the packages, and the shipped
+skills cannot disagree for long.
 
 The operator package's `mcp.json` declares one server, `cao-ops`, launched as
 `uvx --from cli-agent-orchestrator==<version> cao-ops-mcp-server` — the
