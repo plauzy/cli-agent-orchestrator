@@ -108,6 +108,10 @@ Named honestly, highest-risk first:
    sandbox had none. This is the single thing most worth exercising on a real install before
    it goes upstream. Check in particular that an agent whose source profile has since been
    deleted degrades to a logged warning and does not leave a half-written config.
+
+   **A known defect lives here — see §2a. Do not treat it as a finding to discover.** The
+   refresh closes the removal gap for Kiro and Copilot but **not for OpenCode**, and the
+   consequence collides with dog-food step 5. Read §2a before building the recorder.
 2. **The `_UNRESOLVABLE` sentinel** in `installer.py` — a module-level `List[str]` used as an
    identity sentinel, compared with `is`. Distinguishing it from `skills=None` (which
    legitimately means "no filter, receives every skill") is load-bearing: conflating them
@@ -126,6 +130,64 @@ Named honestly, highest-risk first:
 5. **Requirement 18 Criteria 9–12** are additions I made to the spec to state the delivery
    obligation the mapper's design already presupposed. Confirm the spec edit is legitimate
    rather than the implementation retrofitting its own requirements.
+
+### 2a. Known defect — OpenCode's removal path (blocks dog-food step 5 as written)
+
+Raised in review on PR #36 and **reproduced independently against the helpers on `5563801`**
+before being written down here. Two findings, one root cause.
+
+**Root cause.** Kiro's `<name>.json` and Copilot's `<name>.agent.md` are rewritten *wholesale*
+on every replay (`model_dump_json` at `install_service.py:441`, `frontmatter.dumps` at `:464`),
+so a server no longer in `profile.mcpServers` simply is not written and is gone. OpenCode's
+shared `opencode.json` is **edited in place**, and `upsert_mcp_server` is upsert-only
+(`opencode_config.py:131` — its own docstring says "Name collisions silently overwrite the
+prior `mcp` entry"). There is **no `remove_mcp_server` anywhere in the tree**, and nothing
+else deletes from the `mcp` section.
+
+**Finding 1 — a removed plugin's server survives uninstall.** The `else` branch at
+`install_service.py:507-508` calls `remove_agent_tools()`, which withdraws the per-agent
+*grant* but leaves the *server*. Reproduced:
+
+```
+after install                                  after uninstall + refresh
+  mcp: {plugin-srv: {command: [...          mcp: {plugin-srv: {command: [...
+        /agent-plugins/demo], enabled:            /agent-plugins/demo],  ← root DELETED
+        true}}                                    enabled: true}}        ← still true
+  agent: {worker: {tools:                    agent: {}                  ← grant correctly gone
+        {plugin-srv*: true}}}
+```
+
+`enabled` is server-level, so withdrawing the per-agent grant does not stop OpenCode
+launching the process — it governs which agent may *call* the tools. Net effect: a spawn
+attempt against a missing executable on every OpenCode launch, permanently, for every plugin
+ever installed and removed.
+
+**Finding 2 — a plugin server silently clobbers a user's hand-written entry.** Same upsert.
+Seeding `opencode.json` with a user's own `plugin-srv`, then installing a plugin declaring
+that name, replaces the user's command with **no finding emitted**. `merge_plugin_mcp_servers`'
+"the profile always wins" rule is real but scoped to the *agent profile's* `mcpServers`;
+OpenCode's shared config is a second namespace the profile-level rule never sees.
+
+**Why it was reported rather than fixed.** Closing it needs a decision, not just a function:
+`map_and_merge` deliberately does not namespace plugin server names
+(`mcp_delivery.py` — "Renaming would be worse than dropping", which is the right call), so
+`opencode.json` has no provenance separating a plugin's `foo` from a user's `foo`.
+
+| Option | Trade |
+|---|---|
+| 1. Record delivered server names in the install record, prune exactly those | Precise. Adds persisted state R1 avoided — though note *names* are stable identifiers and do not go stale the way the absolute-path expansions would, so this is weaker than it first appears |
+| 2. Mark CAO-managed entries (`x-cao-plugin: <name>`) and prune by marker | Self-describing, survives `CAO_HOME_DIR` moves. Writes a non-standard key into a file OpenCode owns |
+| 3. Set `enabled: false` instead of deleting | Smallest blast radius, stops the spawn, CAO never deletes a key it may not own. Leaves inert cruft |
+
+**Recommendation: 3 for this PR, then 1 or 2 as a follow-up** — it fixes the actual harm
+without CAO deleting anything it cannot prove it owns. Finding 2 additionally wants an
+install-side guard: emit a finding when an incoming plugin server name already exists in
+`opencode.json` and was not placed by CAO. **Confirm the choice with the maintainer before
+implementing** — the reviewer offered to take it, so check for in-flight work first.
+
+Until it is fixed, `design.md` §10a and `docs/agent-plugins.md` overclaim: both say removal
+withdraws the servers, which holds for two of three providers. Correct the wording in the same
+change as the fix.
 
 ### Known-imperfect, already recorded
 
@@ -251,6 +313,24 @@ drift:
 4. **Call a `cao-ops` tool from a real client.** See below — this is the valuable one.
 5. `cao plugin remove cao` → assert the `cao-ops` server **disappears** from the provider
    config. This is the refresh path, and it is the half most likely to be doubted.
+
+   > **Read §2a first — this step cannot pass as originally written.** Removal works for
+   > **Kiro** (which step 3 installs) and Copilot, and **fails for OpenCode**, whose server
+   > entry survives with `enabled: true`. A gated recorder asserting "disappears" against
+   > OpenCode will go red at recording time, and **the recorder will be right** — whoever
+   > builds it would otherwise spend the afternoon debugging correct tooling.
+   >
+   > Pick one, in preference order:
+   >
+   > - **Fix §2a first, then record both providers.** Best outcome: the step becomes real
+   >   cross-provider proof instead of a single-provider demo.
+   > - **Record Kiro only, and say so on screen** — name the provider in the caption and add
+   >   a frame stating OpenCode is tracked as a known gap. A demo that asserts removal works,
+   >   filmed against the one provider where it does, is proof-of-work that ages badly, and a
+   >   GIF is not diffable.
+   >
+   > What is **not** acceptable is asserting removal generically while filming Kiro. That
+   > reads as a cross-provider guarantee and is not one.
 
 Narrate one subtlety on screen or the viewer will be confused: **`cao plugin` is
 `hidden=True`** pending decision M1, so it does not appear in `cao --help`. It is reachable
@@ -397,6 +477,9 @@ state one.
 - [ ] Recordings scrubbed; `scripts/security-scan.sh gitleaks` clean.
 - [ ] `docs/agent-plugins.md` has a "Verified by dog-fooding" section embedding the evidence.
 - [ ] AC2 either **closed with named clients and versions**, or left explicitly unclaimed.
+- [ ] §2a (OpenCode removal) either **fixed**, with `design.md` §10a and
+      `docs/agent-plugins.md` corrected in the same change, or carried into the upstream PR
+      body as a stated known gap. Dog-food step 5 must match whichever was chosen.
 - [ ] Upstream PR open against `awslabs/cli-agent-orchestrator:main`, referencing #573,
       licensing confirmed, honest gaps stated.
 - [ ] Upstream CI green, or every failure explained against an upstream-`main` baseline.
