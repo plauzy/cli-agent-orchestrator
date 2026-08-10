@@ -282,6 +282,19 @@ All runs performed 2026-08-09 in isolated git worktrees, Python 3.11.15, `uv syn
 
 ---
 
+## 12. Addendum (2026-08-10): reconciliation outcome and client verification
+
+Everything §11 recommended has since been executed, and the landing vehicle changed shape:
+
+1. **PR #36 absorbed the full reconciliation** as reviewable commits — R1 (`4f2d523`, new `agent_plugins/mcp_delivery.py` wiring plugin MCP servers into profiles by **re-mapping from the installed root**, the stale-record-proof option), R2 (`05b74e2`, read floor + hoisted walk + today's ungated GETs pinned as data), ride-alongs (`a099309`), and all six `impl` ports (WP4.1–4.6). Two ports found real defects on arrival: the docs-guard cross-check exposed an undocumented package skill list, and the store-recovery "cosmetic" difference was a genuine data-loss path (backup swept by a `finally` clause), reproduced before fixing.
+2. **[PR #38](https://github.com/plauzy/cli-agent-orchestrator/pull/38)** collapsed the reviewed work into a single **signed** commit on current `main` and added net-new work this audit verified separately: an OpenCode shared-config defect pair (uninstall left a removed plugin's server `enabled: true` pointing at a deleted `PLUGIN_ROOT`; install could silently overwrite a user's hand-written entry — now disable-in-place and refuse-and-report, with the disable semantics verified against the shipped OpenCode 1.18.15 bundle), a CI-gated dog-food recording (CAO installs its own package through its own pipeline; the GIF cannot be produced by a failing run), and the spec docs relocated to `docs/issues/573-agent-plugins/`. Suite re-run here: 597 passed + 3 root-only skips (the claimed 600 under non-root CI), drift guards green, 20 CI checks green.
+3. **Claude Code verified as a working client** (2.1.226, live install in this audit's environment): skills discovered from the untouched Agent Plugins 1.0.0 package; identity and MCP required Claude Code's own files; the measured gap closed by a generated, drift-guarded **compatibility overlay** (`.claude-plugin/plugin.json` + byte-identical `.mcp.json`) pushed to PR #38 (`a5c10ec`) — after which strict `claude plugin validate` passes and the `cao-ops` server's 11 tools were exercised over MCP stdio against the published `cli-agent-orchestrator==2.4.1` pin: structured error naming operation + cause without `cao-server` (Requirement 20), `{"success":true,"sessions":[]}` with one running. AC2-grade tools-callable evidence, from a client outside the spec's listed set.
+4. **The vocabulary backlog is cleared** (`71c9de2`): five docs qualified and promoted into the enforced guard; `cursor-cli.md` and `opencode-cli.md` remain as permanent justified exemptions (third-party plugin concepts).
+
+Still open after all of this: maintainer decisions M1–M4 (gates remain closed and tested), and AC2's letter — the spec's *listed* clients. Next validation target: **Antigravity CLI**, using the same matrix (pure-package install → discovery → bridge deltas → `cao-ops` handshake) so evidence stays comparable across clients.
+
+---
+
 ## Appendix — suggested review comment for PR #36
 
 > Audited against the Agent Plugins 1.0.0 spec, the `.kiro` spec, and the sibling `impl/cao-agent-plugins` branch (full report: `docs/audits/agent-plugins-adoption-audit.md`). Core pipeline verified sound: containment, atomicity, collision determinism, offline validation, all three M1 gates + tests, schema bytes identical to upstream. Two blockers before this merges:
