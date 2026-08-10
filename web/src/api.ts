@@ -7,6 +7,86 @@ const BASE = ''  // Vite proxy handles routing to backend
  * only, never the memory bytes). `message` stays "<status> <statusText>" for
  * back-compat with existing callers.
  */
+// ── Agent Plugins (Agent Plugins 1.0.0) ──────────────────────────────────────
+// Distinct from CAO's event-plugin system, which has no web surface.
+
+export interface PluginFinding {
+  severity: 'fatal' | 'skipped' | 'warning' | 'info'
+  code: string
+  /** The specification clause this finding enforces, e.g. "§5.2". */
+  spec_ref: string
+  message: string
+  path: string | null
+}
+
+export interface PluginDiscoveredSkill {
+  name: string
+  directory: string
+  description: string
+}
+
+/** A live session whose profile references a skill a removal would withdraw. */
+export interface PluginAffectedSession {
+  terminal_id: string
+  session_name: string
+  profile_name: string
+  skill_names: string[]
+}
+
+export interface InstalledPlugin {
+  name: string
+  version: string | null
+  source: { kind: string; location: string; ref: string | null; subdir: string | null }
+  resolved_ref: string | null
+  installed_at: string
+  schema_id: string
+  skill_names: string[]
+  projected_skill_names: string[]
+  findings: PluginFinding[]
+  affected_sessions: PluginAffectedSession[]
+}
+
+export interface PluginListResponse {
+  plugins: InstalledPlugin[]
+  untrusted_content_warning: string
+}
+
+export interface PluginValidationReport {
+  root: string
+  loadable: boolean
+  name: string | null
+  version: string | null
+  description: string | null
+  schema_id: string | null
+  skills: PluginDiscoveredSkill[]
+  mcp_present: boolean
+  findings: PluginFinding[]
+}
+
+export interface PluginInstallOutcome {
+  installed: boolean
+  dry_run: boolean
+  report: PluginValidationReport
+  record: InstalledPlugin | null
+  projection_findings: PluginFinding[]
+}
+
+export interface PluginUninstallOutcome {
+  name: string
+  removed: boolean
+  purged_data: boolean
+  affected_sessions: PluginAffectedSession[]
+  projection_findings: PluginFinding[]
+}
+
+export interface PluginInstallBody {
+  source: string
+  kind?: 'path' | 'git'
+  ref?: string
+  subdir?: string
+  force?: boolean
+}
+
 export interface ApiError extends Error {
   status?: number
   detail?: string
@@ -297,4 +377,28 @@ export const api = {
       },
     )
   },
+
+  // Agent Plugins. Install clones or copies a whole package tree and rebuilds
+  // the skill projection, so it gets a wider timeout than the 10s default —
+  // a git source has a network fetch in the middle of it.
+  listPlugins: () => fetchJSON<PluginListResponse>('/plugins'),
+  installPlugin: (body: PluginInstallBody) =>
+    fetchJSON<PluginInstallOutcome>('/plugins', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      timeoutMs: 120000,
+    }),
+  validatePlugin: (body: PluginInstallBody) =>
+    fetchJSON<PluginValidationReport>('/plugins/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      timeoutMs: 120000,
+    }),
+  uninstallPlugin: (name: string, purgeData = false) =>
+    fetchJSON<PluginUninstallOutcome>(
+      `/plugins/${encodeURIComponent(name)}${purgeData ? '?purge_data=true' : ''}`,
+      { method: 'DELETE', timeoutMs: 60000 },
+    ),
 }
