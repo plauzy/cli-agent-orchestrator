@@ -76,34 +76,36 @@ _UNQUALIFIED_PLUGIN = re.compile(r"(?<![\w-])(?<!agent )(?<!event )plugins?\b", 
 #: Docs whose H1 does **not** scope the noun. Every prose occurrence must be
 #: qualified. ``control-planes.md`` earns its place by listing the event plugin
 #: system as an outbound control plane — exactly the context where a bare
-#: "plugin" now reads ambiguously.
-_UNSCOPED_DOCS = ["skills.md", "control-planes.md"]
+#: "plugin" now reads ambiguously. The five docs after it are the former
+#: vocabulary backlog, brought in line: every occurrence was an event-plugin
+#: reference and now says so.
+_UNSCOPED_DOCS = [
+    "skills.md",
+    "control-planes.md",
+    "codex-cli.md",
+    "knowledge-graph-viewing.md",
+    "mcp-apps.md",
+    "memory.md",
+    "otel-deployment.md",
+]
 
 #: Docs whose H1 scopes the noun ("# Event Plugins", "# Agent Plugins"), so bare
 #: "plugin" is legitimate *after* the reader has been oriented. They are NOT
 #: exempt — see ``TestDocsVocabularyInScopedDocs``.
 _SCOPED_DOCS = ["agent-plugins.md", "plugins.md"]
 
-#: Docs that mention plugins but that Requirement 21.4's rule is **not** applied
-#: to by this change, listed rather than silently skipped.
-#:
-#: Every entry predates agent plugins and refers to the *event*-plugin system
-#: (or, for ``cursor-cli.md``, to a third-party Cursor concept that is neither of
-#: CAO's). They are a genuine, small backlog: bringing them in line means ~12
-#: prose edits across provider and subsystem docs that this feature does not
-#: otherwise touch, which is a wider blast radius than the vocabulary fix
-#: warrants and is better done as its own change.
+#: Docs where the bare noun names a **third party's own** plugin concept, which
+#: Requirement 21.4's event/agent qualifiers would misdescribe. Not a backlog —
+#: a permanent, justified exemption, listed rather than silently skipped.
 #:
 #: The point of the list is that it is a **list**: the coverage test below fails
-#: for any *new* plugin-mentioning doc, so this cannot quietly grow.
+#: for any *new* plugin-mentioning doc, so this cannot quietly grow. The former
+#: backlog entries (codex-cli, knowledge-graph-viewing, mcp-apps, memory,
+#: otel-deployment) were all event-plugin references and were qualified and
+#: promoted into ``_UNSCOPED_DOCS``.
 _VOCABULARY_BACKLOG_DOCS = [
-    "codex-cli.md",  # "the `codex_memory` plugin", "the plugin is observer-only"
     "cursor-cli.md",  # a Cursor plugin manifest — third-party, qualifying it would be wrong
-    "knowledge-graph-viewing.md",
-    "mcp-apps.md",
-    "memory.md",  # "built-in plugins for Claude Code, Codex, and Kiro CLI"
-    "opencode-cli.md",
-    "otel-deployment.md",  # "the outgoing plugin event"
+    "opencode-cli.md",  # OpenCode's own plugin system (its Node.js prerequisite) — same reason
 ]
 
 
