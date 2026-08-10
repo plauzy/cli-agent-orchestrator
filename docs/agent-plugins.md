@@ -283,6 +283,15 @@ Both packages are generated from CAO's own `skills/` directory by
 generated packages drift from it — so this table, the packages, and the shipped
 skills cannot disagree for long.
 
+Each package also carries a small **Claude Code compatibility overlay**:
+`.claude-plugin/plugin.json` (identity only, mirrored from `plugin.json`) and,
+for `cao`, a `.mcp.json` byte-identical to `mcp.json`. Claude Code (verified
+against 2.1.226) discovers `skills/` from the standard layout unchanged but
+reads identity and MCP servers only from those two files; every other client
+ignores dot-prefixed entries, and the validator discovers fixed locations only,
+so the overlay changes nothing for Agent-Plugins-conformant clients. It is
+generated and drift-guarded like every other package file.
+
 The operator package's `mcp.json` declares one server, `cao-ops`, launched as
 `uvx --from cli-agent-orchestrator==<version> cao-ops-mcp-server` — the
 **outside-a-session** tool surface. The in-session `cao-mcp-server` is

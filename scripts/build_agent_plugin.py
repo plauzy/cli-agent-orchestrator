@@ -185,6 +185,26 @@ def package_version() -> str:
     return match.group(1)
 
 
+def render_claude_code_manifest(config: PackageConfig, version: str) -> str:
+    """Render the Claude Code compatibility overlay (``.claude-plugin/plugin.json``).
+
+    Claude Code (verified against 2.1.226) discovers ``skills/`` from an Agent
+    Plugins package unchanged, but reads the package's identity only from
+    ``.claude-plugin/plugin.json`` and its MCP servers only from a root
+    ``.mcp.json`` — never from the standard's ``plugin.json``/``mcp.json``. The
+    overlay closes exactly that gap; other clients ignore dot-prefixed entries,
+    and the pinned validator discovers fixed locations only, so it adds no
+    finding and no spec surface. Identity fields only, rendered from the same
+    ``PackageConfig`` as the root manifest so the two cannot disagree.
+    """
+    manifest = {
+        "name": config.name,
+        "version": version,
+        "description": config.description,
+    }
+    return json.dumps(manifest, indent=2) + "\n"
+
+
 def render_manifest(config: PackageConfig, version: str) -> str:
     """Render one package's ``plugin.json``, deterministically."""
     manifest: Dict[str, object] = {
@@ -375,6 +395,17 @@ def build_package(config: PackageConfig, version: str, dest_root: Path) -> Path:
 
     if config.ships_mcp:
         (package_dir / "mcp.json").write_text(render_mcp(version), encoding="utf-8")
+
+    # Claude Code compatibility overlay (see render_claude_code_manifest).
+    # ``.mcp.json`` must stay byte-identical to ``mcp.json`` — one server list,
+    # two filenames — which the drift guard enforces like every other file here.
+    claude_dir = package_dir / ".claude-plugin"
+    claude_dir.mkdir()
+    (claude_dir / "plugin.json").write_text(
+        render_claude_code_manifest(config, version), encoding="utf-8"
+    )
+    if config.ships_mcp:
+        shutil.copy2(package_dir / "mcp.json", package_dir / ".mcp.json")
 
     for filename in SHARED_FILES:
         source = ROOT / filename

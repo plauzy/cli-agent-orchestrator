@@ -63,6 +63,22 @@ class TestBothPackagesAreConformant:
         assert not validate_plugin(PACKAGES_DIR).loadable
 
     @pytest.mark.parametrize("package_dir", [OPERATOR_DIR, CONTRIBUTOR_DIR])
+    def test_the_claude_code_overlay_mirrors_the_root_manifest(self, package_dir):
+        """The overlay is identity-only and cannot disagree with ``plugin.json``.
+
+        Verified empirically against Claude Code 2.1.226: skills are discovered
+        from the standard layout unchanged, but identity comes only from
+        ``.claude-plugin/plugin.json``. Exactly three mirrored fields — a fourth
+        would be a second source of truth for something.
+        """
+        overlay = json.loads(
+            (package_dir / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
+        )
+        root = manifest_of(package_dir)
+        assert set(overlay) == {"name", "version", "description"}
+        assert all(overlay[key] == root[key] for key in overlay)
+
+    @pytest.mark.parametrize("package_dir", [OPERATOR_DIR, CONTRIBUTOR_DIR])
     def test_skills_are_copies_not_symlinks(self, package_dir):
         """§4.1 permits a symlink resolving inside the root; ``../../skills/`` escapes it.
 
@@ -108,6 +124,15 @@ class TestOperatorPackage:
         assert report.mcp_present is True
         assert [server.name for server in report.mcp_servers] == ["cao-ops"]
 
+    def test_the_mcp_overlay_is_byte_identical_to_the_standard_file(self):
+        """One server list, two filenames.
+
+        Claude Code reads ``.mcp.json``; the standard's file is ``mcp.json``.
+        Any divergence means two clients would launch different servers from
+        the same package, which is worse than either file alone.
+        """
+        assert (OPERATOR_DIR / ".mcp.json").read_bytes() == (OPERATOR_DIR / "mcp.json").read_bytes()
+
     def test_the_session_management_skill_is_discovered(self):
         """Requirement 1.6."""
         assert "cao-session-management" in validate_plugin(OPERATOR_DIR).skill_names
@@ -140,6 +165,7 @@ class TestContributorPackage:
         apply to this package at all.
         """
         assert not (CONTRIBUTOR_DIR / "mcp.json").exists()
+        assert not (CONTRIBUTOR_DIR / ".mcp.json").exists()
 
     def test_the_absence_of_cao_contributing_is_not_a_failure(self):
         """Requirement 2.6 — PR #448 is open and still a draft."""
