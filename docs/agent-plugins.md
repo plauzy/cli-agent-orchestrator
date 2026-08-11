@@ -292,14 +292,23 @@ Both packages are generated from CAO's own `skills/` directory by
 generated packages drift from it — so this table, the packages, and the shipped
 skills cannot disagree for long.
 
-Each package also carries a small **Claude Code compatibility overlay**:
-`.claude-plugin/plugin.json` (identity only, mirrored from `plugin.json`) and,
-for `cao`, a `.mcp.json` byte-identical to `mcp.json`. Claude Code (verified
-against 2.1.226) discovers `skills/` from the standard layout unchanged but
-reads identity and MCP servers only from those two files; every other client
-ignores dot-prefixed entries, and the validator discovers fixed locations only,
-so the overlay changes nothing for Agent-Plugins-conformant clients. It is
-generated and drift-guarded like every other package file.
+Each package also carries small **client compatibility overlays**, generated
+and drift-guarded like every other package file:
+
+- **Claude Code** (verified against 2.1.226): `.claude-plugin/plugin.json`
+  (identity only, mirrored from `plugin.json`) and, for `cao`, a `.mcp.json`
+  byte-identical to `mcp.json`. Claude Code discovers `skills/` from the
+  standard layout unchanged but reads identity and MCP servers only from those
+  two files. With the overlay, the package installs from a Claude Code
+  marketplace and mounts natively — skills registered and the `cao-ops` tools
+  live in-session, no manual configuration.
+- **Antigravity CLI** (verified against 1.1.11): `mcp_config.json`,
+  byte-identical to `mcp.json`. `agy plugin install` reads identity **and**
+  skills from the untouched standard layout — only its plugin MCP servers come
+  exclusively from this filename.
+
+Conformant clients are unaffected by any of these: the extra entries are not
+fixed component locations, and the validator emits no finding for them.
 
 The operator package's `mcp.json` declares one server, `cao-ops`, launched as
 `uvx --from cli-agent-orchestrator==<version> cao-ops-mcp-server` — the

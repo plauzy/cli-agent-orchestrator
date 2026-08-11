@@ -124,14 +124,18 @@ class TestOperatorPackage:
         assert report.mcp_present is True
         assert [server.name for server in report.mcp_servers] == ["cao-ops"]
 
-    def test_the_mcp_overlay_is_byte_identical_to_the_standard_file(self):
-        """One server list, two filenames.
+    @pytest.mark.parametrize("overlay_name", [".mcp.json", "mcp_config.json"])
+    def test_the_mcp_overlays_are_byte_identical_to_the_standard_file(self, overlay_name):
+        """One server list, three filenames.
 
-        Claude Code reads ``.mcp.json``; the standard's file is ``mcp.json``.
-        Any divergence means two clients would launch different servers from
-        the same package, which is worse than either file alone.
+        Claude Code reads ``.mcp.json`` and Antigravity CLI reads
+        ``mcp_config.json``; the standard's file is ``mcp.json``. Any
+        divergence means two clients would launch different servers from the
+        same package, which is worse than any single file alone.
         """
-        assert (OPERATOR_DIR / ".mcp.json").read_bytes() == (OPERATOR_DIR / "mcp.json").read_bytes()
+        assert (OPERATOR_DIR / overlay_name).read_bytes() == (
+            OPERATOR_DIR / "mcp.json"
+        ).read_bytes()
 
     def test_the_session_management_skill_is_discovered(self):
         """Requirement 1.6."""
@@ -166,6 +170,7 @@ class TestContributorPackage:
         """
         assert not (CONTRIBUTOR_DIR / "mcp.json").exists()
         assert not (CONTRIBUTOR_DIR / ".mcp.json").exists()
+        assert not (CONTRIBUTOR_DIR / "mcp_config.json").exists()
 
     def test_the_absence_of_cao_contributing_is_not_a_failure(self):
         """Requirement 2.6 — PR #448 is open and still a draft."""

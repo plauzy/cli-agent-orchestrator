@@ -396,9 +396,13 @@ def build_package(config: PackageConfig, version: str, dest_root: Path) -> Path:
     if config.ships_mcp:
         (package_dir / "mcp.json").write_text(render_mcp(version), encoding="utf-8")
 
-    # Claude Code compatibility overlay (see render_claude_code_manifest).
-    # ``.mcp.json`` must stay byte-identical to ``mcp.json`` — one server list,
-    # two filenames — which the drift guard enforces like every other file here.
+    # Client compatibility overlays (see render_claude_code_manifest). The MCP
+    # copies must stay byte-identical to ``mcp.json`` — one server list, three
+    # filenames — which the drift guard enforces like every other file here:
+    #   .claude-plugin/plugin.json + .mcp.json   Claude Code (verified 2.1.226)
+    #   mcp_config.json                          Antigravity CLI (verified 1.1.11;
+    #     ``agy plugin install`` reads identity and skills from the portable
+    #     layout natively, but plugin MCP servers only from this filename)
     claude_dir = package_dir / ".claude-plugin"
     claude_dir.mkdir()
     (claude_dir / "plugin.json").write_text(
@@ -406,6 +410,7 @@ def build_package(config: PackageConfig, version: str, dest_root: Path) -> Path:
     )
     if config.ships_mcp:
         shutil.copy2(package_dir / "mcp.json", package_dir / ".mcp.json")
+        shutil.copy2(package_dir / "mcp.json", package_dir / "mcp_config.json")
 
     for filename in SHARED_FILES:
         source = ROOT / filename
