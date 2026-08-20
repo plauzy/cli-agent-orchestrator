@@ -114,6 +114,33 @@ _memory_injected_lock = threading.Lock()
 _deferred_init_tasks: set = set()
 
 
+def _is_reviewer_terminal(terminal_id: str) -> bool:
+    """True when the terminal's agent profile is a reviewer seat.
+
+    Reviewer seats are identified by profile role or by the naming conventions in use
+    (``*-rev-*``, ``*reviewer*``). Conservative: any failure to resolve returns False,
+    so a lookup error preserves the previous inject-everything behaviour rather than
+    silently stripping context from a non-reviewer.
+    """
+    try:
+        metadata = get_terminal_metadata(terminal_id)
+        if not metadata:
+            return False
+        profile_name = (metadata.get("agent_profile") or "").lower()
+        if not profile_name:
+            return False
+        if "-rev-" in profile_name or "reviewer" in profile_name:
+            return True
+        try:
+            profile = load_agent_profile(profile_name)
+        except Exception:
+            return False
+        return str(getattr(profile, "role", "") or "").lower() == "reviewer"
+    except Exception:
+        logger.debug("Reviewer check failed for %s; defaulting to inject", terminal_id, exc_info=True)
+        return False
+
+
 def inject_memory_context(first_message: str, terminal_id: str) -> str:
     """Prepend <cao-memory> context block to the first user message.
 
@@ -128,6 +155,23 @@ def inject_memory_context(first_message: str, terminal_id: str) -> str:
         if terminal_id in _memory_injected_terminals:
             return first_message
         _memory_injected_terminals.add(terminal_id)
+
+    # Reviewer seats spawn CLEAN. Injecting project memory pre-loads a reviewer with
+    # the implementer's conclusions, which manufactures exactly the correlated errors a
+    # cross-family review panel exists to avoid -- the value of an independent reviewer
+    # is that it has NOT seen the reasoning under review. Evidence: panels of
+    # disjoint-family models beat a single judge (arXiv:2404.18796), while same-family
+    # panels collapse to ~2 effective votes because errors correlate (arXiv:2605.29800);
+    # and intrinsic self-correction over one's own context does not help
+    # (arXiv:2310.01798). Observed 2026-08-20: a fresh Gemini reviewer received a
+    # <cao-memory> block carrying an unrelated Claude-side debugging task and worked on
+    # that instead of its own.
+    if _is_reviewer_terminal(terminal_id):
+        logger.info(
+            "Skipping memory injection for reviewer terminal %s (clean-context review)",
+            terminal_id,
+        )
+        return first_message
 
     try:
         svc = MemoryService()
