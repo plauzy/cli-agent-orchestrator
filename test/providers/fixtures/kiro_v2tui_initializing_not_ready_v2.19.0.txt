@@ -1,0 +1,1 @@
+[7m[27m [7m[0m[38;2;158;158;158mInitializing · type to queue a message[39m[0m

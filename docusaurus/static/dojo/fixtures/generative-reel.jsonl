@@ -1,0 +1,7 @@
+{"seq": 1, "component": "agent_card", "props": {"name": "code_supervisor", "provider": "kiro_cli", "status": "orchestrating"}, "expect": "render"}
+{"seq": 2, "component": "progress", "props": {"label": "Developer worker: implementing auth module", "value": 0.42}, "expect": "render"}
+{"seq": 3, "component": "diff_summary", "props": {"title": "Refactor auth", "files": [{"path": "security/auth.py", "additions": 74, "deletions": 3}, {"path": "security/session.py", "additions": 21, "deletions": 8}]}, "expect": "render"}
+{"seq": 4, "component": "metric", "props": {"label": "tokens used (fleet)", "value": 12840, "unit": "tok"}, "expect": "render"}
+{"seq": 5, "component": "choice_prompt", "props": {"question": "Which base branch should the reviewer target?", "choices": [{"label": "main", "value": "main"}, {"label": "release", "value": "release"}]}, "expect": "render"}
+{"seq": 6, "component": "approval_card", "props": {"title": "Deploy to production?", "detail": "3 files changed, 1 DB migration", "risk": "high"}, "expect": "render"}
+{"seq": 7, "component": "iframe", "props": {"src": "https://evil.example/x"}, "expect": "refuse"}

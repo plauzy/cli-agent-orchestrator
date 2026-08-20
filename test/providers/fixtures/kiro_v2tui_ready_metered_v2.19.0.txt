@@ -1,0 +1,2 @@
+[38;2;0;175;255mkiro-developer[39m [38;2;128;128;128m·[39m claude-opus-5 [38;2;128;128;128m·[39m [38;2;0;215;135m◔[39m [38;2;0;215;135m3%[39m [38;2;128;128;128m·[39m λ [38;2;193;154;255m/Volumes/workplace/cli-agent-orchestrator[39m [38;2;128;128;128m·[39m [38;2;128;128;128m([39mmain[38;2;128;128;128m)[39m[0m
+[7m[27m [7m[0m[38;2;158;158;158mask a question or describe a task ↵[39m[0m

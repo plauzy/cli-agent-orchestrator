@@ -45,6 +45,26 @@ _STICKY_READY_STATUSES = frozenset(
     }
 )
 
+# Statuses whose ARRIVAL (a committed transition INTO them, not merely sitting
+# at them) proves the terminal consumed input and began a new turn: it rendered
+# a spinner (PROCESSING) or asked a question of its own (WAITING_USER_ANSWER).
+# Latched per terminal since the last notify_input_sent — see
+# ``saw_new_turn_since_input``.
+#
+# COMPLETED and IDLE are deliberately excluded. Both are also RESTING levels a
+# terminal sits at before any input arrives — kiro-cli's startup banner parses
+# as COMPLETED (see KiroCliProvider.initialize, which accepts IDLE *or*
+# COMPLETED as "ready") — so observing them proves nothing about the delivery
+# that just happened. A large paste can additionally flap COMPLETED → IDLE
+# before the agent has done any work at all (test_arm_survives_ready_to_ready_flap),
+# so even the *transition* into them is not proof of a started turn.
+_NEW_TURN_PROOF_STATUSES = frozenset(
+    {
+        TerminalStatus.PROCESSING,
+        TerminalStatus.WAITING_USER_ANSWER,
+    }
+)
+
 
 class StatusMonitor:
     """Accumulates terminal output into rolling buffers and detects status changes."""
@@ -74,6 +94,17 @@ class StatusMonitor:
         # IDLE/COMPLETED would freeze the terminal forever even when the
         # agent is genuinely processing new work.
         self._allow_processing_revert: Dict[str, bool] = {}
+        # Per-terminal LATCH: True once a committed transition into a
+        # _NEW_TURN_PROOF_STATUSES status has been observed since the most recent
+        # notify_input_sent() (the dispatch boundary). Cleared by
+        # notify_input_sent, set by _apply_detection.
+        #
+        # This exists because a status LEVEL cannot answer "did the input I just
+        # sent get accepted?" — a terminal parked at COMPLETED before delivery is
+        # still at COMPLETED when the Enter is swallowed. Latching the EDGE makes
+        # the answer observable to slow pollers too: a turn that starts and
+        # finishes between two 0.5s polls still leaves the latch set.
+        self._new_turn_edge: Dict[str, bool] = {}
         # --- pyte rendered-screen detection state (only used when CAO_PYTE_STATUS
         # is on AND the provider opts in via supports_screen_detection) ---
         # Per-terminal pyte Screen+Stream that composites the raw byte stream
@@ -220,6 +251,11 @@ class StatusMonitor:
                 return
 
             self._last_status[terminal_id] = detected
+            if detected in _NEW_TURN_PROOF_STATUSES:
+                # A committed transition INTO a proof status: the terminal began
+                # a new turn after the last dispatch boundary. Latch it so
+                # pollers cannot miss a short turn (see _new_turn_edge).
+                self._new_turn_edge[terminal_id] = True
             if detected == TerminalStatus.PROCESSING:
                 self._allow_processing_revert[terminal_id] = False
             elif detected in _STICKY_READY_STATUSES and last not in _STICKY_READY_STATUSES:
@@ -478,9 +514,31 @@ class StatusMonitor:
         cycle (terminal_service.send_input, provider.initialize warm-up
         and CLI-launch keystrokes). Without this, a previously-latched
         IDLE/COMPLETED would block the genuine PROCESSING transition.
+
+        This is also the dispatch boundary for the new-turn edge latch: any
+        earlier evidence of a started turn belongs to the PREVIOUS delivery and
+        must not be read as confirmation of this one.
         """
         with self._lock:
             self._allow_processing_revert[terminal_id] = True
+            self._new_turn_edge[terminal_id] = False
+
+    def saw_new_turn_since_input(self, terminal_id: str) -> bool:
+        """True once the terminal transitioned INTO PROCESSING or
+        WAITING_USER_ANSWER after the most recent ``notify_input_sent``.
+
+        An EDGE test, not a level test: this is the question a delivery
+        verifier actually needs answered ("did the keystrokes I just sent get
+        accepted?"), and a level check cannot answer it because the pre-delivery
+        resting level is itself frequently COMPLETED. Latched, so a turn that
+        starts and ends between two polls still reports True.
+
+        Always False on backends that never feed the detection pipeline
+        (event-inbox/herdr): there are no committed transitions to observe, so
+        callers must fall back to querying status directly.
+        """
+        with self._lock:
+            return self._new_turn_edge.get(terminal_id, False)
 
     def clear_rolling_buffer(self, terminal_id: str, provider=None) -> None:
         """Clear ONLY the rolling byte buffer for a terminal — preserves
@@ -525,6 +583,7 @@ class StatusMonitor:
             self._buffer_epochs.pop(terminal_id, None)
             self._last_status.pop(terminal_id, None)
             self._allow_processing_revert.pop(terminal_id, None)
+            self._new_turn_edge.pop(terminal_id, None)
             self._screens.pop(terminal_id, None)
             self._bursting.pop(terminal_id, None)
             handle = self._quiesce_handle.pop(terminal_id, None)
@@ -543,6 +602,7 @@ class StatusMonitor:
             self._buffers[terminal_id] = ""
             self._last_status.pop(terminal_id, None)
             self._allow_processing_revert.pop(terminal_id, None)
+            self._new_turn_edge.pop(terminal_id, None)
             # Drop the rendered screen too so the relaunched CLI mode is
             # detected against a fresh viewport, not the failed attempt's.
             self._screens.pop(terminal_id, None)

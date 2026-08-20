@@ -423,9 +423,9 @@ def requested_kiro_capabilities(
     if model:
         requested.add("model")
     if engine == KiroEngine.V2:
-        # Non-yolo launches may retry with --legacy-ui after a TUI startup
-        # timeout, so this flag must be verified before any allocation.
-        requested.add("ui")
+        # V2 TUI is used for both yolo and non-yolo launches.
+        # --legacy-ui conflicts with --agent-engine v2 in kiro-cli 2.19.0+, so
+        # there is no fallback path requiring "ui" flag verification.
         if yolo:
             requested.add("trust")
     return requested
