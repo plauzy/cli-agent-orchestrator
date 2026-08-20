@@ -811,42 +811,6 @@ def _message_visible_in_box(terminal_id: str, message: str) -> bool:
     return probe in re.sub(r"[^a-z0-9]", "", rendered.lower())
 
 
-def _diag_snapshot(terminal_id: str, message: str, provider, attempt: int) -> None:
-    """DIAGNOSTIC SCAFFOLD (uncommitted, 2026-08-19) — owner: kiro-sup seat.
-
-    The deferred-init resubmit loop reports "paste dropped" purely from
-    _message_visible_in_box() returning False, which conflates three very
-    different states: the paste never landed, it landed and was already
-    submitted (box legitimately empty), or it landed but the box renders in a
-    way capture-pane cannot match. Fifteen real failures on 2026-08-19 could
-    not be reproduced across single / concurrent / same-session tests, so the
-    only way to tell those apart is to record what the pane actually showed at
-    the moment CAO gave up. Remove once the root cause is identified.
-    """
-    try:
-        metadata = get_terminal_metadata(terminal_id)
-        if not metadata:
-            logger.warning("DIAG[%s] attempt=%d: no terminal metadata", terminal_id, attempt)
-            return
-        session_name = metadata.get("tmux_session")
-        window_name = metadata.get("tmux_window")
-        pane = get_backend().get_history(session_name, window_name, tail_lines=40)
-        cached = status_monitor.get_status(terminal_id)
-        try:
-            direct = provider.get_status(pane) if provider is not None else None
-        except Exception as exc:
-            direct = f"<get_status raised: {exc!r}>"
-        visible = _message_visible_in_box(terminal_id, message)
-        tail = "\n".join(pane.splitlines()[-18:])
-        logger.warning(
-            "DIAG[%s] attempt=%d cached=%s direct=%s msg_in_box=%s pane_bytes=%d\n"
-            "--- pane tail ---\n%s\n--- end pane ---",
-            terminal_id, attempt, cached, direct, visible, len(pane), tail,
-        )
-    except Exception:
-        logger.warning("DIAG[%s] attempt=%d: snapshot failed", terminal_id, attempt, exc_info=True)
-
-
 async def _confirm_worker_started_or_resubmit(
     terminal_id: str,
     message: str,
@@ -868,8 +832,6 @@ async def _confirm_worker_started_or_resubmit(
         polling_interval=0.5,
     ):
         return True
-
-    await asyncio.to_thread(_diag_snapshot, terminal_id, message, provider, 0)
 
     for attempt in range(1, _DEFERRED_SUBMIT_MAX_RESUBMITS + 1):
         # The cached status_monitor status is event-driven (pyte screener at
@@ -913,7 +875,6 @@ async def _confirm_worker_started_or_resubmit(
             polling_interval=0.5,
         ):
             return True
-        await asyncio.to_thread(_diag_snapshot, terminal_id, message, provider, attempt)
 
     return False
 

@@ -29,6 +29,19 @@ class TestKiroCliIdleCorpus:
 
     These tests use real captured terminal output to validate that idle
     detection patterns work across kiro-cli versions.
+
+    SCOPE: This test suite validates IDLE DETECTION patterns only. It does not
+    test the delivery gate or input acceptance — those are separate concerns in
+    the src/ layer (BUG #4: zero-pane-delta delivery failures, 2026-08-19).
+    The corpus here proves that:
+    1. The idle regex patterns correctly identify ready prompts
+    2. The patterns correctly reject boot/initialization lines
+    3. The patterns correctly reject agent-generated prose with similar formatting
+
+    BUG #4 (deferred input delivery) is a src/-layer issue where the TUI is
+    detected as IDLE but does not accept input (pane bytes identical across
+    4 delivery attempts spanning 9+ seconds). The idle detection is working
+    correctly; the problem is in the delivery gate logic.
     """
 
     @pytest.fixture
@@ -153,14 +166,18 @@ class TestKiroCliIdleCorpus:
         )
 
     def test_mcp_boot_screen_does_not_match_idle(self, fixtures_dir):
-        """MCP server boot line SHOULD NOT match IDLE.
+        """REGRESSION GUARD: MCP server boot line MUST NOT match IDLE.
 
         'M of N mcp servers initialized. ctrl-c to start chatting now'
-        appears before the idle prompt is interactive. A match would cause
-        the inbox to paste into a non-interactive TUI, silently dropping input.
+        appeared in older kiro-cli versions before the idle prompt was
+        interactive. This line does NOT appear in kiro-cli 2.19.0, but
+        this test guards against regression in future versions.
 
-        This is the guard that TUI_INITIALIZING_PATTERN was added for.
-        Critical: a false positive here is worse than a missed IDLE.
+        A false positive here would cause the inbox to paste into a
+        non-interactive TUI, silently dropping input — the fail-open failure
+        mode identified in BUG #4 (2026-08-19). This is the guard that
+        TUI_INITIALIZING_PATTERN was added for. Critical: a false positive
+        here is worse than a missed IDLE.
         """
         prompt = self.load_fixture(
             fixtures_dir, "kiro_mcp_boot_screen_not_ready_v2.19.0.txt"
