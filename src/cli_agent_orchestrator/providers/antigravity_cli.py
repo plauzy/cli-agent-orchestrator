@@ -304,7 +304,12 @@ class AntigravityCliProvider(BaseProvider):
                 "Install via: curl -fsSL https://antigravity.google/cli/install.sh | bash"
             )
 
-        command_parts = ["agy", "--dangerously-skip-permissions"]
+        # --mode accept-edits: agy defaults to PLAN mode, where it produces a plan and
+        # waits for approval instead of acting. CAO drives agy headlessly with no human
+        # at the terminal, so a plan-mode seat looks launched-and-idle while never doing
+        # the work -- a false green. Verified 2026-08-20: a probe seat sat in plan mode
+        # and never wrote its artifact. See `agy --help`: --mode (accept-edits, plan).
+        command_parts = ["agy", "--dangerously-skip-permissions", "--mode", "accept-edits"]
 
         profile = None
         if self._agent_profile is not None:
