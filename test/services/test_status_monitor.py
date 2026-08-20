@@ -316,6 +316,103 @@ class TestStickyLatching:
         assert m.published == ["unknown"]
 
 
+class TestNewTurnEdgeLatch:
+    """BUG #5: delivery verification needs an EDGE, not a status LEVEL.
+
+    A worker that has just initialized frequently RESTS at COMPLETED (kiro-cli's
+    startup banner parses as a completed response, and COMPLETED is sticky), so
+    "current status is in {PROCESSING, COMPLETED, WAITING_USER_ANSWER}" is
+    already true before any input is delivered. These pin the latch that makes
+    the transition observable instead.
+    """
+
+    def test_no_edge_before_any_input(self):
+        m = _SequencedMonitor()
+        m.feed(TerminalStatus.COMPLETED)  # startup banner reads as a response
+        m.sm.notify_input_sent("t1")  # send_input's dispatch boundary
+        assert m.sm.saw_new_turn_since_input("t1") is False
+
+    def test_resting_at_completed_is_not_an_edge(self):
+        """The exact BUG #5 shape: status never moves because the Enter was
+        swallowed. The level says "started"; the edge correctly says no."""
+        m = _SequencedMonitor()
+        m.feed(TerminalStatus.COMPLETED)
+        m.sm.notify_input_sent("t1")
+        m.feed(TerminalStatus.COMPLETED)  # unchanged — nothing was accepted
+        assert m.sm._last_status["t1"] in {
+            TerminalStatus.PROCESSING,
+            TerminalStatus.COMPLETED,
+            TerminalStatus.WAITING_USER_ANSWER,
+        }
+        assert m.sm.saw_new_turn_since_input("t1") is False
+
+    def test_processing_transition_sets_edge(self):
+        m = _SequencedMonitor()
+        m.feed(TerminalStatus.COMPLETED)
+        m.sm.notify_input_sent("t1")
+        m.feed(TerminalStatus.PROCESSING)
+        assert m.sm.saw_new_turn_since_input("t1") is True
+
+    def test_edge_latches_past_a_short_turn(self):
+        """A turn that starts and finishes between two polls must still be
+        confirmable — the latch is not cleared by the return to COMPLETED."""
+        m = _SequencedMonitor()
+        m.feed(TerminalStatus.IDLE)
+        m.sm.notify_input_sent("t1")
+        m.feed(TerminalStatus.PROCESSING)
+        m.feed(TerminalStatus.COMPLETED)
+        assert m.sm.saw_new_turn_since_input("t1") is True
+
+    def test_waiting_user_answer_transition_sets_edge(self):
+        """The worker consumed the input and is now asking — that is accepted."""
+        m = _SequencedMonitor()
+        m.feed(TerminalStatus.COMPLETED)
+        m.sm.notify_input_sent("t1")
+        m.feed(TerminalStatus.WAITING_USER_ANSWER)
+        assert m.sm.saw_new_turn_since_input("t1") is True
+
+    def test_paste_eviction_flap_is_not_an_edge(self):
+        """A large paste can evict the response markers BEFORE the agent starts
+        working, flapping COMPLETED → IDLE (see test_arm_survives_ready_to_ready_flap).
+        That flap is a redraw artifact of the paste, not proof the submit
+        landed, so it must not confirm delivery."""
+        m = _SequencedMonitor()
+        m.feed(TerminalStatus.COMPLETED)
+        m.sm.notify_input_sent("t1")
+        m.feed(TerminalStatus.IDLE)
+        assert m.sm.saw_new_turn_since_input("t1") is False
+
+    def test_next_input_clears_a_previous_edge(self):
+        """Each delivery gets its own verdict: evidence from the previous turn
+        must never confirm the current resubmit."""
+        m = _SequencedMonitor()
+        m.feed(TerminalStatus.IDLE)
+        m.sm.notify_input_sent("t1")
+        m.feed(TerminalStatus.PROCESSING)
+        m.feed(TerminalStatus.COMPLETED)
+        assert m.sm.saw_new_turn_since_input("t1") is True
+        m.sm.notify_input_sent("t1")  # resubmit
+        assert m.sm.saw_new_turn_since_input("t1") is False
+
+    def test_unknown_terminal_has_no_edge(self):
+        sm = StatusMonitor()
+        assert sm.saw_new_turn_since_input("never-seen") is False
+
+    def test_clear_terminal_clears_edge(self):
+        m = _SequencedMonitor()
+        m.sm.notify_input_sent("t1")
+        m.feed(TerminalStatus.PROCESSING)
+        m.sm.clear_terminal("t1")
+        assert "t1" not in m.sm._new_turn_edge
+
+    def test_reset_buffer_clears_edge(self):
+        m = _SequencedMonitor()
+        m.sm.notify_input_sent("t1")
+        m.feed(TerminalStatus.PROCESSING)
+        m.sm.reset_buffer("t1")
+        assert m.sm.saw_new_turn_since_input("t1") is False
+
+
 class TestQuiescenceTimerCancel:
     """The pyte quiescence timer is an asyncio.TimerHandle owned by the
     StatusMonitor's loop. clear_terminal/reset_buffer can run off that loop

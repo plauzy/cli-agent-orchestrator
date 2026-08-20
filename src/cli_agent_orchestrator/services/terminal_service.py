@@ -740,13 +740,79 @@ def _notify_caller_of_deferred_failure(
 # and re-submit if it did not.
 _DEFERRED_SUBMIT_CONFIRM_TIMEOUT = 8.0  # per-attempt wait for the PROCESSING edge
 _DEFERRED_SUBMIT_MAX_RESUBMITS = 3
+_DEFERRED_SUBMIT_POLL_INTERVAL = 0.5
 # Statuses proving the worker accepted the task (left the ready IDLE state).
 # WAITING_USER_ANSWER counts: the worker consumed the input and is now asking.
+#
+# LEVEL set — only sound where a pre-delivery reading is impossible or a
+# resting terminal cannot show these. Used by the opt-in direct capture-pane
+# probe (see _worker_is_started_direct) and by the event-inbox fallback in
+# _wait_for_started_edge. The main gate must NOT test this level: see
+# _wait_for_started_edge for why.
 _DEFERRED_STARTED_STATUSES = {
     TerminalStatus.PROCESSING,
     TerminalStatus.COMPLETED,
     TerminalStatus.WAITING_USER_ANSWER,
 }
+
+
+async def _wait_for_started_edge(terminal_id: str, timeout: float) -> bool:
+    """Wait for evidence that THIS delivery was accepted — an EDGE, not a LEVEL.
+
+    BUG #5. The gate used to be
+    ``wait_until_status(terminal_id, _DEFERRED_STARTED_STATUSES)``, which asks
+    "is the terminal's CURRENT status one of PROCESSING / COMPLETED /
+    WAITING_USER_ANSWER?" — a level. That question is already answered *yes* for
+    a worker that has just finished initializing and received nothing: kiro-cli's
+    startup banner parses as a completed response, which is why
+    ``KiroCliProvider.initialize`` accepts IDLE *or* COMPLETED as "ready", and
+    COMPLETED is sticky (``_STICKY_READY_STATUSES``) so it does not decay back to
+    IDLE. ``wait_until_status`` therefore returned True on its FIRST poll, before
+    the TUI could possibly have rendered anything, and the entire
+    submit-verification ladder below (box probe, resubmit, caller notification)
+    was unreachable for exactly the providers it was written for. A swallowed
+    Enter was reported as "worker started" and the supervisor waited forever.
+
+    The sound question is whether the status MOVED into a proof state after the
+    dispatch boundary. ``status_monitor`` latches that edge at
+    ``notify_input_sent`` (which every ``send_input`` / ``send_special_key``
+    calls), so a short turn that starts and ends between two polls is still
+    observable here.
+
+    Event-inbox backends (herdr) never feed the detection pipeline, so no
+    transition is ever committed and the latch would stay False forever —
+    turning a missing signal into a spurious teardown. Those fall back to the
+    level poll, which is also less exposed there: herdr reports native status
+    rather than a screen-scraped one.
+
+    Residual (accepted) risk of the edge test: a turn whose ENTIRE lifetime
+    produces no committed PROCESSING/WAITING_USER_ANSWER detection reads as
+    "not started" and gets a redundant resubmit. The raw detector runs on every
+    chunk while the terminal is ready/armed, so the first frame after the paste
+    normally commits PROCESSING; and an over-eager resubmit is a far cheaper
+    failure than the silent stall this replaces.
+    """
+    if get_backend().supports_event_inbox():
+        return await wait_until_status(
+            terminal_id,
+            _DEFERRED_STARTED_STATUSES,
+            timeout=timeout,
+            polling_interval=_DEFERRED_SUBMIT_POLL_INTERVAL,
+        )
+
+    deadline = time.monotonic() + timeout
+    while True:
+        if status_monitor.saw_new_turn_since_input(terminal_id):
+            logger.info("Deferred submit to %s confirmed: new-turn edge observed", terminal_id)
+            return True
+        if time.monotonic() >= deadline:
+            logger.warning(
+                "Deferred submit to %s unconfirmed: no new-turn edge within %ss",
+                terminal_id,
+                timeout,
+            )
+            return False
+        await asyncio.sleep(_DEFERRED_SUBMIT_POLL_INTERVAL)
 
 
 def _worker_is_started_direct(terminal_id: str, provider) -> bool:
@@ -768,6 +834,14 @@ def _worker_is_started_direct(terminal_id: str, provider) -> bool:
     providers (e.g. kiro_cli, antigravity_cli, cursor_cli) relies on
     dispatch bookkeeping and cannot distinguish IDLE from COMPLETED on a
     rendered capture-pane snapshot.
+
+    This one IS a sound level test, unlike the main gate (BUG #5): it runs only
+    on the deferred-init path, where the worker has never taken a turn, and only
+    for opt-in providers whose COMPLETED requires a real per-turn marker on
+    screen (OpenCode's ``▣ <agent> · <model> · Ns``). A resting freshly-
+    initialized OpenCode pane reports IDLE, so COMPLETED here still means a turn
+    ran. Do not extend the opt-in to a provider whose startup banner alone can
+    read as COMPLETED.
     """
     try:
         metadata = get_terminal_metadata(terminal_id)
@@ -821,16 +895,12 @@ async def _confirm_worker_started_or_resubmit(
 ) -> bool:
     """Confirm a deferred-init worker began processing; re-submit if not.
 
-    Returns True once the terminal reaches a started status, False if it is
-    still stuck at IDLE after all resubmit attempts. Blocking tmux/DB I/O runs
-    off the loop via to_thread so concurrent deferred inits aren't frozen.
+    Returns True once the terminal shows a new-turn EDGE (see
+    ``_wait_for_started_edge``), False if no such edge appears after all
+    resubmit attempts. Blocking tmux/DB I/O runs off the loop via to_thread so
+    concurrent deferred inits aren't frozen.
     """
-    if await wait_until_status(
-        terminal_id,
-        _DEFERRED_STARTED_STATUSES,
-        timeout=_DEFERRED_SUBMIT_CONFIRM_TIMEOUT,
-        polling_interval=0.5,
-    ):
+    if await _wait_for_started_edge(terminal_id, _DEFERRED_SUBMIT_CONFIRM_TIMEOUT):
         return True
 
     for attempt in range(1, _DEFERRED_SUBMIT_MAX_RESUBMITS + 1):
@@ -868,12 +938,10 @@ async def _confirm_worker_started_or_resubmit(
                 sender_id=sender_id,
                 orchestration_type=orchestration_type,
             )
-        if await wait_until_status(
-            terminal_id,
-            _DEFERRED_STARTED_STATUSES,
-            timeout=_DEFERRED_SUBMIT_CONFIRM_TIMEOUT,
-            polling_interval=0.5,
-        ):
+        # Re-check the same EDGE (a fresh notify_input_sent from the resubmit
+        # above has just cleared the latch, so this cannot be satisfied by
+        # evidence from before the retry).
+        if await _wait_for_started_edge(terminal_id, _DEFERRED_SUBMIT_CONFIRM_TIMEOUT):
             return True
 
     return False
