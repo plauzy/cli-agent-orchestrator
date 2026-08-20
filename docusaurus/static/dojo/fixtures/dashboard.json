@@ -1,0 +1,23 @@
+{
+  "active_sessions": 1,
+  "counts": {
+    "sessions": 1,
+    "terminals": 3
+  },
+  "by_provider": {
+    "kiro_cli": 1,
+    "claude_code": 1,
+    "codex": 1
+  },
+  "waiting_terminals": [
+    {
+      "terminal_id": "t-supervisor",
+      "provider": "kiro_cli",
+      "reason": "permission_request"
+    }
+  ],
+  "last_activity": {
+    "timestamp": "2026-07-20T21:55:17.011705+00:00",
+    "event_id": "a901b5bf-5d3b-4abd-9309-357185520426"
+  }
+}

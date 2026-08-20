@@ -61,19 +61,21 @@ ESCAPE_SEQUENCE_PATTERN = r"\[[?0-9;]*[a-zA-Z]"
 # Control characters to strip from final output
 CONTROL_CHAR_PATTERN = r"[\x00-\x1f\x7f-\x9f]"
 
-# Legacy-UI IDLE prompt pattern for log files (with ANSI codes)
-IDLE_PROMPT_PATTERN_LOG = r"\x1b\[38;5;\d+m\[.+?\].*\x1b\[38;5;\d+m>\s*\x1b\[\d*m"
+# Legacy-UI IDLE prompt pattern for log files (with ANSI codes).
+# Matches 256-color and truecolor ANSI sequences: \x1b[38;5;Nm or \x1b[38;2;R;G;Bm
+IDLE_PROMPT_PATTERN_LOG = r"\x1b\[38;[52][^m]*m\[.+?\].*\x1b\[38;[52][^m]*m>\s*\x1b\[[0-9;]*m"
 
 # =============================================================================
 # New TUI Patterns (Kiro CLI without --legacy-ui)
 # =============================================================================
 
-# New TUI idle prompt: "Ask a question or describe a task ↵"
-# Case-insensitive match; comma between "question" and "or" is optional
-# (older versions used lowercase with comma, v1.29+ uses capitalized without)
+# New TUI idle prompt: "ask a question or describe a task ↵"
+# Kiro-cli 2.19.0 uses lowercase; older versions may have used uppercase.
+# Comma between "question" and "or" is optional (version-dependent formatting).
 NEW_TUI_IDLE_PATTERN = r"[Aa]sk a question,? or describe a task"
 
-# New TUI IDLE prompt pattern for log files (with ANSI codes)
+# New TUI IDLE prompt pattern for log files (with ANSI codes).
+# Kiro-cli 2.19.0+ always renders lowercase "ask".
 NEW_TUI_IDLE_PATTERN_LOG = r"[Aa]sk a question,? or describe a task"
 
 # TUI separator line: horizontal bar (────) used to delimit sections.
@@ -329,16 +331,16 @@ class KiroCliProvider(BaseProvider):
         # tools can be called. Without this, a supervisor invoking assign()
         # hangs indefinitely on the approval dialog.
         if yolo:
-            logger.info(
-                "kiro_cli yolo mode: forcing --legacy-ui (kiro-cli 2.0.1 TUI "
-                "shows a non-bypassable trust-all-tools consent dialog)"
-            )
+            # Yolo mode: launch on the V2 TUI (kiro-cli 2.0.1's trust dialog
+            # has been superseded; kiro-cli 2.19.0+ rejects --agent-engine v2
+            # --legacy-ui as a conflict). The trust-all-tools dialog at startup
+            # is auto-answered by _wait_ready_accepting_trust_dialog() below.
             base_args = build_kiro_command(
                 self._engine,
                 self._agent_profile,
                 model=model,
                 yolo=True,
-                legacy_ui=True,
+                legacy_ui=False,
             )
         else:
             # Current CAO policy always bypasses Kiro's interactive approval
@@ -360,37 +362,20 @@ class KiroCliProvider(BaseProvider):
         # message that get_status() interprets as a completed response.
         # _wait_ready_accepting_trust_dialog also auto-answers the
         # --trust-all-tools startup consent dialog (see its docstring), which
-        # kiro-cli >= 2.1 shows in the default TUI *and* under --legacy-ui.
+        # kiro-cli >= 2.1 shows in the default TUI.
         if not await self._wait_ready_accepting_trust_dialog():
             if yolo:
-                # Yolo already launched with --legacy-ui; no further fallback.
-                raise TimeoutError("Kiro CLI initialization timed out with --legacy-ui (yolo mode)")
-            # Non-yolo TUI mode failed — fall back to --legacy-ui
-            logger.warning("Kiro CLI TUI initialization timed out, retrying with --legacy-ui")
-            # Exit the current session and start fresh with --legacy-ui
-            status_monitor.notify_input_sent(self.terminal_id)
-            get_backend().send_keys(self.session_name, self.window_name, "/exit")
-            init_timeout = get_server_settings()["provider_init_timeout"]
-            if not await wait_for_shell(self.terminal_id, timeout=init_timeout):
-                raise TimeoutError(
-                    f"Shell recovery timed out after {init_timeout}s (--legacy-ui fallback)"
-                )
-            # Clear the StatusMonitor buffer so the --legacy-ui attempt is detected
-            # against a clean buffer, not one still full of stale TUI marker bytes
-            # from the failed first attempt (which would otherwise time out too).
-            status_monitor.reset_buffer(self.terminal_id)
-            legacy_args = build_kiro_command(
-                self._engine,
-                self._agent_profile,
-                model=model,
-                yolo=True,
-                legacy_ui=True,
+                # Yolo launched on V2 TUI with --trust-all-tools; no fallback available.
+                raise TimeoutError("Kiro CLI initialization timed out (yolo mode, V2 TUI)")
+            # Non-yolo TUI mode failed.
+            # V2 engine: --legacy-ui conflicts with --agent-engine v2 (kiro-cli 2.19.0+),
+            # so no fallback is available. V1 engine would fall back to --legacy-ui
+            # but V1 support was removed in Phase 0 probing.
+            # Fail closed: let the caller decide whether to retry or allocate a different provider.
+            raise TimeoutError(
+                f"Kiro CLI TUI initialization timed out after {init_timeout}s "
+                f"({self._engine.value} engine, no fallback available for v2 TUI)"
             )
-            legacy_command = shlex.join(legacy_args)
-            status_monitor.notify_input_sent(self.terminal_id)
-            get_backend().send_keys(self.session_name, self.window_name, legacy_command)
-            if not await self._wait_ready_accepting_trust_dialog():
-                raise TimeoutError("Kiro CLI initialization timed out with TUI and `--legacy-ui`")
 
         self._initialized = True
         return True

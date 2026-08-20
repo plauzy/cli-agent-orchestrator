@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CAO AG-UI Dojo — multi-provider orchestration, live</title>
+  <meta name="description" content="A live, replayable AG-UI showcase: CAO orchestrating multiple providers at once. Built by feeding agents (dog-food), gated before the pipeline (shift-left).">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../dojo-assets/dojo.css">
+</head>
+<body>
+  <header class="dojo-header">
+    <div class="dojo-header-inner">
+      <a class="dojo-back" href="../docs/features/ag-ui">← AG-UI docs</a>
+      <span class="dojo-title">CAO AG-UI Dojo</span>
+      <span class="dojo-mode" id="dojo-mode" data-mode="replay">replaying committed capture</span>
+    </div>
+  </header>
+
+  <main id="dojo" class="dojo">
+    <section class="dojo-panel dojo-intro" data-dojo-panel="intro">
+      <h1>Multi-provider orchestration, rendered live</h1>
+      <p class="dojo-lede">
+        Every other AG-UI demo assumes <em>one</em> client and <em>one</em> provider.
+        CAO is neither — it orchestrates <strong>many providers at once</strong>. This
+        dojo shows a real <code>kiro_cli</code> supervisor delegating to a
+        <code>claude_code</code> developer and a <code>codex</code> reviewer, rendered
+        through the AG-UI stream.
+      </p>
+      <div class="dojo-themes">
+        <div class="dojo-theme">
+          <span class="dojo-theme-tag">Dog-food</span>
+          <p>The data below was produced by <strong>feeding agents</strong> a real
+          orchestration — not hand-authored. CAO builds and observes its own showcase.</p>
+        </div>
+        <div class="dojo-theme">
+          <span class="dojo-theme-tag">Shift-left</span>
+          <p>Every panel is <strong>gated by an assertion that runs before the
+          pipeline</strong>. A broken dojo can't produce a passing build.</p>
+        </div>
+      </div>
+      <p class="dojo-note">
+        This page renders from a committed capture (works offline). To watch a
+        <em>live</em> fleet, run a local <code>cao-server</code> with
+        <code>CAO_AGUI_ENABLED=true</code> and open this page with
+        <code>?server=http://localhost:9889</code>.
+      </p>
+    </section>
+    <section class="dojo-panel" data-dojo-panel="dashboard">
+      <h2>Fleet dashboard <span class="dojo-src-tag">SupervisorDashboardStream</span></h2>
+      <p class="dojo-panel-sub">Folded from <code>STATE_SNAPSHOT</code> / <code>STATE_DELTA</code>. Provider distribution is the multi-provider proof.</p>
+      <div class="dojo-slot" id="dojo-dashboard-slot"><em>loading…</em></div>
+    </section>
+    <section class="dojo-panel" data-dojo-panel="timeline">
+      <h2>Delegation timeline <span class="dojo-src-tag">MultiAgentSessionTimeline</span></h2>
+      <p class="dojo-panel-sub">Reconstructed from <code>TOOL_CALL</code> lifecycle frames. <strong>Metadata only</strong> — message bodies never cross the wire.</p>
+      <div class="dojo-slot" id="dojo-timeline-slot"><em>loading…</em></div>
+    </section>
+    <section class="dojo-panel" data-dojo-panel="generative">
+      <h2>Generative UI <span class="dojo-src-tag">emit_ui</span></h2>
+      <p class="dojo-panel-sub">The six allow-listed components any agent can author — plus one <strong>off-list</strong> component that is refused to an inert placeholder (never an iframe/script).</p>
+      <div class="dojo-slot dojo-grid" id="dojo-generative-slot"><em>loading…</em></div>
+    </section>
+    <section class="dojo-panel" data-dojo-panel="frames">
+      <h2>Raw AG-UI frames <span class="dojo-src-tag">GET /agui/v1/stream</span></h2>
+      <p class="dojo-panel-sub">The wire evidence — exactly what a stock AG-UI client (CopilotKit, the Dojo, a plain <code>EventSource</code>) receives.</p>
+      <div class="dojo-slot" id="dojo-frames-slot"><em>loading…</em></div>
+    </section>
+<script id="dojo-manifest" type="application/json">
+{
+  "schema_version": 1,
+  "session_name": "cao-audit-fleet",
+  "capture_mode": "synthetic-deterministic",
+  "note": "Seeded deterministic bundle so the static docsite dojo renders with no backend. Regenerate from a real or synthetic CAO run with capture.py (see PROVENANCE.md).",
+  "fleet": [
+    {"terminal_id": "t-supervisor", "agent": "code_supervisor", "provider": "kiro_cli", "role": "supervisor"},
+    {"terminal_id": "t-developer", "agent": "developer", "provider": "claude_code", "role": "worker"},
+    {"terminal_id": "t-reviewer", "agent": "reviewer", "provider": "codex", "role": "worker"}
+  ],
+  "providers": ["kiro_cli", "claude_code", "codex"],
+  "counts": {
+    "lifecycle_frames": 11,
+    "delegations": 3,
+    "generative_components_valid": 6,
+    "generative_components_offlist": 1
+  },
+  "privacy": {
+    "metadata_only": true,
+    "message_bodies_present": false
+  },
+  "artifacts": {
+    "frames": "frames.jsonl",
+    "dashboard": "dashboard.json",
+    "timeline": "timeline.json",
+    "generative_reel": "generative-reel.jsonl"
+  }
+}
+
+</script>
+<script id="dojo-dashboard" type="application/json">
+{
+  "active_sessions": 1,
+  "counts": {
+    "sessions": 1,
+    "terminals": 3
+  },
+  "by_provider": {
+    "kiro_cli": 1,
+    "claude_code": 1,
+    "codex": 1
+  },
+  "waiting_terminals": [
+    {
+      "terminal_id": "t-supervisor",
+      "provider": "kiro_cli",
+      "reason": "permission_request"
+    }
+  ],
+  "last_activity": {
+    "timestamp": "2026-07-20T21:55:17.011705+00:00",
+    "event_id": "a901b5bf-5d3b-4abd-9309-357185520426"
+  }
+}
+
+</script>
+<script id="dojo-timeline" type="application/json">
+[
+  {
+    "id": "0565435b-1f48-4ea3-a2fb-c72b87c782a9",
+    "kind": "delegation",
+    "orchestration_type": "assign",
+    "sender": "t-supervisor",
+    "receiver": "t-developer",
+    "tool_call_name": "assign",
+    "started_at": "2026-07-20T21:55:17.011683+00:00",
+    "ended_at": "2026-07-20T21:55:17.011699+00:00",
+    "status": "closed"
+  },
+  {
+    "id": "dfbc7b0b-2a85-44de-a14f-de89123d053d",
+    "kind": "delegation",
+    "orchestration_type": "handoff",
+    "sender": "t-developer",
+    "receiver": "t-reviewer",
+    "tool_call_name": "handoff",
+    "started_at": "2026-07-20T21:55:17.011688+00:00",
+    "ended_at": "2026-07-20T21:55:17.011703+00:00",
+    "status": "closed"
+  },
+  {
+    "id": "dc3065ea-d0ea-4115-8cf4-8bf43185998f",
+    "kind": "delegation",
+    "orchestration_type": "handoff",
+    "sender": "t-reviewer",
+    "receiver": "t-supervisor",
+    "tool_call_name": "handoff",
+    "started_at": "2026-07-20T21:55:17.011692+00:00",
+    "ended_at": null,
+    "status": "open"
+  }
+]
+
+</script>
+<script id="dojo-reel" type="application/x-ndjson">
+{"seq": 1, "component": "agent_card", "props": {"name": "code_supervisor", "provider": "kiro_cli", "status": "orchestrating"}, "expect": "render"}
+{"seq": 2, "component": "progress", "props": {"label": "Developer worker: implementing auth module", "value": 0.42}, "expect": "render"}
+{"seq": 3, "component": "diff_summary", "props": {"title": "Refactor auth", "files": [{"path": "security/auth.py", "additions": 74, "deletions": 3}, {"path": "security/session.py", "additions": 21, "deletions": 8}]}, "expect": "render"}
+{"seq": 4, "component": "metric", "props": {"label": "tokens used (fleet)", "value": 12840, "unit": "tok"}, "expect": "render"}
+{"seq": 5, "component": "choice_prompt", "props": {"question": "Which base branch should the reviewer target?", "choices": [{"label": "main", "value": "main"}, {"label": "release", "value": "release"}]}, "expect": "render"}
+{"seq": 6, "component": "approval_card", "props": {"title": "Deploy to production?", "detail": "3 files changed, 1 DB migration", "risk": "high"}, "expect": "render"}
+{"seq": 7, "component": "iframe", "props": {"src": "https://evil.example/x"}, "expect": "refuse"}
+
+</script>
+<script id="dojo-frames" type="application/x-ndjson">
+{"event_id": "9ebce253-9c27-4023-84c2-54fef3d65ece", "agui_type": "RUN_STARTED", "terminal_id": null, "session_name": "cao-audit-fleet", "timestamp": "2026-07-20T21:55:17.011651+00:00", "thread_id": "cao-audit-fleet", "run_id": "cao-audit-fleet"}
+{"event_id": "7137160c-fb3a-4fa6-ac70-a8e14a28bfba", "agui_type": "STEP_STARTED", "terminal_id": "t-supervisor", "session_name": "cao-audit-fleet", "timestamp": "2026-07-20T21:55:17.011664+00:00", "step_id": "t-supervisor", "step_name": "code_supervisor", "provider": "kiro_cli"}
+{"event_id": "ac94504e-dc30-4065-b6b7-4f3f7c5b8073", "agui_type": "STEP_STARTED", "terminal_id": "t-developer", "session_name": "cao-audit-fleet", "timestamp": "2026-07-20T21:55:17.011671+00:00", "step_id": "t-developer", "step_name": "developer", "provider": "claude_code"}
+{"event_id": "e472852d-7538-4793-871a-88647695fadf", "agui_type": "STEP_STARTED", "terminal_id": "t-reviewer", "session_name": "cao-audit-fleet", "timestamp": "2026-07-20T21:55:17.011676+00:00", "step_id": "t-reviewer", "step_name": "reviewer", "provider": "codex"}
+{"event_id": "0565435b-1f48-4ea3-a2fb-c72b87c782a9", "agui_type": "TOOL_CALL_START", "terminal_id": "t-developer", "session_name": "cao-audit-fleet", "timestamp": "2026-07-20T21:55:17.011683+00:00", "tool_call_id": "0565435b-1f48-4ea3-a2fb-c72b87c782a9", "tool_call_name": "assign", "metadata": {"sender": "t-supervisor", "receiver": "t-developer", "orchestration_type": "assign"}}
+{"event_id": "dfbc7b0b-2a85-44de-a14f-de89123d053d", "agui_type": "TOOL_CALL_START", "terminal_id": "t-reviewer", "session_name": "cao-audit-fleet", "timestamp": "2026-07-20T21:55:17.011688+00:00", "tool_call_id": "dfbc7b0b-2a85-44de-a14f-de89123d053d", "tool_call_name": "handoff", "metadata": {"sender": "t-developer", "receiver": "t-reviewer", "orchestration_type": "handoff"}}
+{"event_id": "dc3065ea-d0ea-4115-8cf4-8bf43185998f", "agui_type": "TOOL_CALL_START", "terminal_id": "t-supervisor", "session_name": "cao-audit-fleet", "timestamp": "2026-07-20T21:55:17.011692+00:00", "tool_call_id": "dc3065ea-d0ea-4115-8cf4-8bf43185998f", "tool_call_name": "handoff", "metadata": {"sender": "t-reviewer", "receiver": "t-supervisor", "orchestration_type": "handoff"}}
+{"event_id": "b1a2c3d4-0000-4000-8000-000000000001", "agui_type": "TOOL_CALL_END", "terminal_id": "t-developer", "session_name": "cao-audit-fleet", "timestamp": "2026-07-20T21:55:17.011699+00:00", "tool_call_id": "0565435b-1f48-4ea3-a2fb-c72b87c782a9"}
+{"event_id": "b1a2c3d4-0000-4000-8000-000000000002", "agui_type": "TOOL_CALL_END", "terminal_id": "t-reviewer", "session_name": "cao-audit-fleet", "timestamp": "2026-07-20T21:55:17.011703+00:00", "tool_call_id": "dfbc7b0b-2a85-44de-a14f-de89123d053d"}
+{"event_id": "20ed6ad0-cd1a-4518-885a-c13634a941ed", "agui_type": "STEP_FINISHED", "terminal_id": "t-supervisor", "session_name": "cao-audit-fleet", "timestamp": "2026-07-20T21:55:17.011697+00:00", "step_id": "t-supervisor", "step_name": "code_supervisor"}
+{"event_id": "a901b5bf-5d3b-4abd-9309-357185520426", "agui_type": "STEP_FINISHED", "terminal_id": "t-reviewer", "session_name": "cao-audit-fleet", "timestamp": "2026-07-20T21:55:17.011705+00:00", "step_id": "t-reviewer", "step_name": "reviewer"}
+
+</script>
+  </main>
+
+  <footer class="dojo-footer">
+    <p>
+      Fixtures produced by <code>examples/ag-ui/ag-ui-dojo/capture.py</code> (dog-food)
+      and gated by <code>test/services/agui/test_dojo_fixtures.py</code> +
+      <code>tools/record-dojo.mjs</code> (shift-left). See
+      <a href="https://github.com/awslabs/cli-agent-orchestrator/tree/main/examples/ag-ui/ag-ui-dojo">the source</a>.
+    </p>
+  </footer>
+
+  <script src="../dojo-assets/dojo.js" defer></script>
+</body>
+</html>

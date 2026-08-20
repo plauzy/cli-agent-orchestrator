@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "session_name": "cao-audit-fleet",
+  "capture_mode": "synthetic-deterministic",
+  "note": "Seeded deterministic bundle so the static docsite dojo renders with no backend. Regenerate from a real or synthetic CAO run with capture.py (see PROVENANCE.md).",
+  "fleet": [
+    {"terminal_id": "t-supervisor", "agent": "code_supervisor", "provider": "kiro_cli", "role": "supervisor"},
+    {"terminal_id": "t-developer", "agent": "developer", "provider": "claude_code", "role": "worker"},
+    {"terminal_id": "t-reviewer", "agent": "reviewer", "provider": "codex", "role": "worker"}
+  ],
+  "providers": ["kiro_cli", "claude_code", "codex"],
+  "counts": {
+    "lifecycle_frames": 11,
+    "delegations": 3,
+    "generative_components_valid": 6,
+    "generative_components_offlist": 1
+  },
+  "privacy": {
+    "metadata_only": true,
+    "message_bodies_present": false
+  },
+  "artifacts": {
+    "frames": "frames.jsonl",
+    "dashboard": "dashboard.json",
+    "timeline": "timeline.json",
+    "generative_reel": "generative-reel.jsonl"
+  }
+}
