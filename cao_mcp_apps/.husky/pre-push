@@ -9,16 +9,12 @@
 # toolchain exists.
 cd "$(dirname "$0")/.."
 
-echo "[pre-push] Python unit tests"
-if command -v uv >/dev/null 2>&1; then
-  uv run --project .. pytest ../test -m "not e2e" -q --disable-warnings || exit 1
-elif command -v python >/dev/null 2>&1 && python -c "import pytest" >/dev/null 2>&1; then
-  python -m pytest ../test -m "not e2e" -q --disable-warnings || exit 1
-elif command -v python3 >/dev/null 2>&1 && python3 -c "import pytest" >/dev/null 2>&1; then
-  python3 -m pytest ../test -m "not e2e" -q --disable-warnings || exit 1
-else
-  echo "[pre-push] skipping python tests: no uv/pytest runner on PATH"
-fi
+echo "[pre-push] Python unit tests (regression gate)"
+# Blocks on NEW failures only, measured against test/known-failures.txt.
+# Requiring absolute green made this hook unpassable -- main itself fails 71
+# tests -- which trained everyone to --no-verify and disabled the gate outright.
+# See scripts/pytest-regression-gate.sh for the rationale and how to refresh.
+sh ../scripts/pytest-regression-gate.sh || exit 1
 
 echo "[pre-push] JIT-free scan"
 if command -v npm >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then

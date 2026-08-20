@@ -1,0 +1,93 @@
+ERROR    cli_agent_orchestrator.services.fifo_reader:fifo_reader.py:362 FIFO reader for terminal term-coalesce exiting on error: filedescriptor out of range in select()
+ERROR    cli_agent_orchestrator.services.fifo_reader:fifo_reader.py:362 FIFO reader for terminal term-data exiting on error: filedescriptor out of range in select()
+ERROR    cli_agent_orchestrator.services.fifo_reader:fifo_reader.py:362 FIFO reader for terminal term-e2e exiting on error: filedescriptor out of range in select()
+ERROR    cli_agent_orchestrator.services.fifo_reader:fifo_reader.py:362 FIFO reader for terminal term-flush exiting on error: filedescriptor out of range in select()
+ERROR    cli_agent_orchestrator.services.fifo_reader:fifo_reader.py:362 FIFO reader for terminal term-race exiting on error: filedescriptor out of range in select()
+ERROR    cli_agent_orchestrator.services.terminal_service:terminal_service.py:1605 Failed to get output from terminal t1: Terminal 't1' not found
+ERROR    cli_agent_orchestrator.services.terminal_service:terminal_service.py:587 Failed to create terminal: Kiro engine 'v2' requires '--agent-engine' to accept 'v2', but the wrapper did not advertise that value. Detected wrapper version: 2.13.0.
+ERROR    cli_agent_orchestrator.services.terminal_service:terminal_service.py:587 Failed to create terminal: Kiro engine 'v2' requires wrapper flag '--trust-all-tools', but it was not advertised by Kiro wrapper help. Detected wrapper version: 2.13.0.
+ERROR    cli_agent_orchestrator.services.terminal_service:terminal_service.py:587 Failed to create terminal: Session 'cao-90897f11' already exists
+FAILED test/api/test_agui_default_on_smoke.py::test_run_plane_projects_the_lifecycle_event
+FAILED test/api/test_agui_endpoint_coverage.py::test_run_endpoint_snapshot_tolerates_terminal_lookup_failure
+FAILED test/api/test_agui_endpoint_coverage.py::test_run_endpoint_stream_builds_snapshot_and_drains_bus
+FAILED test/api/test_agui_run_endpoint.py::test_absent_accept_header_defaults_to_sse
+FAILED test/api/test_agui_run_endpoint.py::test_accept_text_event_stream_content_type
+FAILED test/api/test_agui_run_endpoint.py::test_run_lifecycle_legal_basic
+FAILED test/api/test_agui_run_endpoint.py::test_run_lifecycle_legal_with_interrupts
+FAILED test/api/test_agui_run_endpoint.py::test_run_lifecycle_no_events_after_finished
+FAILED test/api/test_agui_run_endpoint.py::test_run_read_scope_sufficient_without_resume
+FAILED test/api/test_agui_run_endpoint.py::test_run_resume_approve_via_http
+FAILED test/api/test_agui_run_endpoint.py::test_run_resume_delivery_failure_emits_run_error
+FAILED test/api/test_agui_run_endpoint.py::test_run_resume_retry_reachable_after_delivery_failure
+FAILED test/api/test_agui_run_endpoint.py::test_run_resume_unknown_interrupt_via_http
+FAILED test/api/test_agui_run_endpoint.py::test_run_write_required_for_resume
+FAILED test/api/test_agui_run_endpoint.py::test_run_write_scope_allows_resume
+FAILED test/providers/test_kiro_cli_unit.py::TestKiroCliProviderInitialization::test_initialize_dialog_answered_but_prompt_times_out_falls_back
+FAILED test/providers/test_kiro_cli_unit.py::TestKiroCliProviderInitialization::test_initialize_kiro_cli_timeout
+FAILED test/providers/test_kiro_cli_unit.py::TestKiroCliProviderInitialization::test_initialize_legacy_ui_fallback
+FAILED test/providers/test_kiro_cli_unit.py::TestKiroCliProviderInitialization::test_initialize_non_yolo_legacy_ui_fallback_preserves_model
+FAILED test/providers/test_kiro_cli_unit.py::TestKiroCliProviderInitialization::test_initialize_yolo_and_model_combine
+FAILED test/providers/test_kiro_cli_unit.py::TestKiroCliProviderInitialization::test_initialize_yolo_forces_legacy_ui_with_trust_all_tools
+FAILED test/providers/test_kiro_cli_unit.py::TestKiroCliProviderInitialization::test_initialize_yolo_no_fallback_on_timeout
+FAILED test/services/agui/test_ac5_gate.py::test_ac5_run_plane_lifecycle_legal
+FAILED test/services/agui/test_ac5_gate.py::test_ac5_run_plane_resume_lands_exactly_once[False-deny]
+FAILED test/services/agui/test_ac5_gate.py::test_ac5_run_plane_resume_lands_exactly_once[True-approve]
+FAILED test/services/agui/test_agui_coverage_completion.py::test_run_plane_open_interrupt_emits_interrupt_outcome
+FAILED test/services/agui/test_agui_coverage_completion.py::test_run_plane_open_interrupt_snapshot_failure_isolated
+FAILED test/services/agui/test_agui_coverage_completion.py::test_run_plane_resume_failure_emits_run_error
+FAILED test/services/agui/test_agui_coverage_completion.py::test_translate_live_frame_all_types[GENERATIVE_UI-data6]
+FAILED test/services/agui/test_agui_coverage_completion.py::test_translate_live_frame_all_types[RAW-data8]
+FAILED test/services/agui/test_agui_coverage_completion.py::test_translate_live_frame_all_types[RUN_ERROR-data9]
+FAILED test/services/agui/test_agui_coverage_completion.py::test_translate_live_frame_all_types[SOME_UNMAPPED_TYPE-data10]
+FAILED test/services/agui/test_agui_coverage_completion.py::test_translate_live_frame_all_types[STATE_DELTA-data1]
+FAILED test/services/agui/test_agui_coverage_completion.py::test_translate_live_frame_all_types[STATE_SNAPSHOT-data0]
+FAILED test/services/agui/test_agui_coverage_completion.py::test_translate_live_frame_all_types[STEP_FINISHED-data3]
+FAILED test/services/agui/test_agui_coverage_completion.py::test_translate_live_frame_all_types[STEP_STARTED-data12]
+FAILED test/services/agui/test_agui_coverage_completion.py::test_translate_live_frame_all_types[STEP_STARTED-data2]
+FAILED test/services/agui/test_agui_coverage_completion.py::test_translate_live_frame_all_types[TEXT_MESSAGE_CONTENT-data7]
+FAILED test/services/agui/test_agui_coverage_completion.py::test_translate_live_frame_all_types[TOOL_CALL_END-data5]
+FAILED test/services/agui/test_agui_coverage_completion.py::test_translate_live_frame_all_types[TOOL_CALL_START-data11]
+FAILED test/services/agui/test_agui_coverage_completion.py::test_translate_live_frame_all_types[TOOL_CALL_START-data4]
+FAILED test/services/agui/test_agui_coverage_final.py::test_run_plane_close_all_synthesizes_closer
+FAILED test/services/agui/test_agui_coverage_final.py::test_run_plane_initial_snapshot_failure_isolated
+FAILED test/services/agui/test_agui_coverage_final.py::test_run_plane_keepalive_on_idle
+FAILED test/services/agui/test_run_plane_heartbeat.py::test_keepalive_does_not_corrupt_pending_read
+FAILED test/services/agui/test_run_plane_heartbeat.py::test_run_plane_emits_keepalive_when_idle
+FAILED test/services/agui/test_run_plane.py::test_encoder_produces_data_only_camel_case
+FAILED test/services/agui/test_run_plane.py::test_run_plane_emits_run_finished_last
+FAILED test/services/agui/test_run_plane.py::test_run_plane_emits_run_started_first
+FAILED test/services/agui/test_run_plane.py::test_run_plane_interrupt_no_snapshot_fn
+FAILED test/services/agui/test_run_plane.py::test_run_plane_interrupt_outcome
+FAILED test/services/agui/test_run_plane.py::test_run_plane_live_projection
+FAILED test/services/agui/test_run_plane.py::test_run_plane_no_snapshot_fn
+FAILED test/services/agui/test_run_plane.py::test_run_plane_resume_already_resolved_is_idempotent
+FAILED test/services/agui/test_run_plane.py::test_run_plane_resume_approve
+FAILED test/services/agui/test_run_plane.py::test_run_plane_resume_cancelled_maps_to_deny
+FAILED test/services/agui/test_run_plane.py::test_run_plane_resume_cancelled_status_still_works_with_empty_payload
+FAILED test/services/agui/test_run_plane.py::test_run_plane_resume_deny
+FAILED test/services/agui/test_run_plane.py::test_run_plane_resume_edit
+FAILED test/services/agui/test_run_plane.py::test_run_plane_resume_empty_payload_produces_error
+FAILED test/services/agui/test_run_plane.py::test_run_plane_resume_non_boolean_approved_produces_error
+FAILED test/services/agui/test_run_plane.py::test_run_plane_resume_non_dict_payload_produces_error
+FAILED test/services/agui/test_run_plane.py::test_run_plane_resume_unknown_interrupt
+FAILED test/services/agui/test_run_plane.py::test_run_plane_state_snapshot_after_started
+FAILED test/services/agui/test_run_plane.py::TestAcceptNegotiation::test_absent_accept_identical_to_today
+FAILED test/services/test_deferred_submit_verification.py::TestConfirmWorkerStartedOrResubmit::test_direct_probe_falls_through_when_worker_not_started
+FAILED test/services/test_deferred_submit_verification.py::TestConfirmWorkerStartedOrResubmit::test_direct_probe_skipped_when_provider_not_opted_in
+FAILED test/services/test_deferred_submit_verification.py::TestConfirmWorkerStartedOrResubmit::test_enter_resubmit_when_message_in_box
+FAILED test/services/test_deferred_submit_verification.py::TestConfirmWorkerStartedOrResubmit::test_full_redeliver_when_box_empty
+FAILED test/services/test_deferred_submit_verification.py::TestConfirmWorkerStartedOrResubmit::test_provider_none_skips_direct_probe
+FAILED test/services/test_deferred_submit_verification.py::TestConfirmWorkerStartedOrResubmit::test_started_on_first_confirm_no_resubmit
+FAILED test/services/test_fifo_reader.py::TestColdStartStallDetection::test_cold_start_end_to_end_via_real_reader_thread
+FAILED test/services/test_fifo_reader.py::TestConcurrencyRaces::test_reader_loop_last_data_at_write_is_atomic_with_stop
+FAILED test/services/test_fifo_reader.py::TestReaderLoopCoalescing::test_pending_flushes_on_writer_idle
+FAILED test/services/test_fifo_reader.py::TestReaderLoopCoalescing::test_rapid_writes_produce_fewer_publishes_than_writes
+FAILED test/services/test_fifo_reader.py::TestReaderThreadLifecycle::test_data_received_across_writer_reconnects
+FAILED test/services/test_kiro_engine_phase0.py::test_non_yolo_v2_missing_legacy_ui_rejects_before_allocation
+FAILED test/services/test_kiro_engine_phase0.py::test_omitted_engine_launches_as_explicitly_pinned_v2
+FAILED test/services/test_kiro_engine_phase0.py::test_v2_agent_engine_value_exclusion_rejects_before_allocation
+FAILED test/services/test_kiro_engine_phase0.py::test_yolo_v2_prose_only_trust_flag_rejects_before_allocation
+FAILED test/services/test_kiro_engine_phase0.py::test_yolo_v2_required_value_trust_flag_rejects_before_allocation
+FAILED test/telemetry/test_otel_init.py::TestTelemetryEnabledExplicitly::test_double_init_does_not_replace_provider
+FAILED test/telemetry/test_otel_init.py::TestTelemetryEnabledExplicitly::test_enabled_installs_provider
+FAILED test/telemetry/test_otel_init.py::TestTelemetryEnabledExplicitly::test_shutdown_clears_module_handle
