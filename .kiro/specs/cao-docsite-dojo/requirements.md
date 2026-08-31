@@ -18,9 +18,10 @@ assertion. No change to the AG-UI service, the stream contract, or the allow-lis
 the immediate scope, is replay mode plus the static page plus the CI gate.
 
 **Provenance of this document:** ported and refined from
-`docs/issues/docsite-dojo/requirements.md`, whose FR/NFR numbering, evidence citations,
-and rationale are preserved. Two defects found in that version are corrected here — see
-FR-6 and FR-3 — and a Correctness properties section is added.
+`docs/issues/docsite-dojo/requirements.md` (removed; preserved at commit `b18eff6`), whose
+FR/NFR numbering, evidence citations, and rationale are preserved. Two defects found in that
+version are corrected here — see FR-6 and FR-3 — and a Correctness properties section is
+added.
 
 ---
 

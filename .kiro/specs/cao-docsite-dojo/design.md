@@ -2,9 +2,10 @@
 
 **Requirements:** `./requirements.md`
 **Status:** Specified, not implemented.
-**Provenance:** ported from `docs/issues/docsite-dojo/design.md`. That version's mermaid
-diagram, file layout, alternatives, and risks survive; three of its decisions do not, and
-the corrections are called out explicitly below rather than silently applied.
+**Provenance:** ported from `docs/issues/docsite-dojo/design.md` (removed; preserved at
+commit `b18eff6`). That version's mermaid diagram, file layout, alternatives, and risks
+survive; three of its decisions do not, and the corrections are called out explicitly below
+rather than silently applied.
 
 ---
 
@@ -69,8 +70,9 @@ most important correction to the ported design.
 
 ### Corrections to the ported design
 
-Four things in `docs/issues/docsite-dojo/design.md` were wrong or underspecified. Two were
-found by grounding it against the code; two were found by the requirements refinement.
+Four things in `docs/issues/docsite-dojo/design.md` (removed; preserved at commit `b18eff6`)
+were wrong or underspecified. Two were found by grounding it against the code; two were
+found by the requirements refinement.
 
 #### 1. Replay cannot `fetch()` the fixture
 
