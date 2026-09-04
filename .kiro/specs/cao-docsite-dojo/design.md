@@ -516,9 +516,27 @@ executions of a system — essentially, a formal statement about what the system
 Properties serve as the bridge between human-readable specifications and machine-verifiable
 correctness guarantees.*
 
-CP-1 through CP-5 are carried over from the requirements. CP-6 and CP-7 are **added by this
-design**: the acceptance criteria demand them (FR-3.3/3.5 and FR-4.5-4.9/4.12) and they are
-not covered by CP-1..CP-5.
+Properties 1, 2, 5, 8, and 9 carry forward the five correctness properties stated in the
+requirements, CP-1 through CP-5. **The correspondence is not positional** — Property 5 carries
+CP-3, Property 8 carries CP-4, and Property 9 carries CP-5 — so a `CP-n` identifier must never
+be read as a synonym for `Property n`. The requirements define exactly five correctness
+properties; no sixth or later CP exists.
+
+Properties 3, 4, 6, and 7 are **added by this design**: acceptance criteria demand them and no
+CP covers them. Property 3 is demanded by FR-6.4; Property 4 by FR-6.6; Property 6 by FR-3.2,
+FR-3.3, and FR-3.5; and Property 7 by FR-4.5, FR-4.6, FR-4.7, FR-4.8, FR-4.9, and FR-4.12.
+
+| Design property | Name | Carries |
+|---|---|---|
+| Property 1 | Transport-seam indistinguishability | CP-1 |
+| Property 2 | Dispatch totality and view fidelity | CP-2 |
+| Property 3 | Refinement invariance | design-added |
+| Property 4 | Frame content is text, never markup | design-added |
+| Property 5 | State application soundness | CP-3 |
+| Property 6 | Fixture embedding round trip | design-added |
+| Property 7 | Provenance validation completeness | design-added |
+| Property 8 | Fixture prefix validity | CP-4 |
+| Property 9 | Metadata-only invariance | CP-5 |
 
 ### Property 1: Transport-seam indistinguishability
 
@@ -644,14 +662,14 @@ Three homes, and **no new test infrastructure anywhere**:
 
 1. **Python + `hypothesis`, under `test/examples/`.** `hypothesis>=6.0` is already a CAO dev
    dependency (`pyproject.toml:369`), and `test/` already contains `examples/`, `services/`,
-   `scripts/`, `api/`. Properties about *files* live here: CP-8 (prefix validity), CP-9
-   (metadata-only), CP-7 (provenance). Nothing here imports
+   `scripts/`, `api/`. Properties about *files* live here: Property 8 (prefix validity),
+   Property 9 (metadata-only), Property 7 (provenance). Nothing here imports
    `src/cli_agent_orchestrator/services/agui/` beyond reading `_BODY_FIELDS` and
    `GENERATIVE_UI_COMPONENTS` as constants.
 2. **Playwright, in `examples/ag-ui/ag-ui-eventsource-viewer/tools/`.** That private package
    already carries `@playwright/test` 1.56.1 with `record` and `playwright:install` scripts,
    and its own description states it is dev/CI-only tooling for a zero-dependency viewer.
-   Properties about *JavaScript behaviour in the page* live here — CP-1..CP-6 — driven
+   Properties about *JavaScript behaviour in the page* live here — Properties 1-6 — driven
    through `window.__dojo` on the **built** `static/dojo/index.html` over `file://`. A new
    `test` script runs `dojo.spec.mjs`.
 3. **`npm run build` itself.** For FR-1, FR-8, and FR-10 the build failing *is* the test:
@@ -670,6 +688,10 @@ them as example tests would only add maintenance.
 
 ### Verification strategy
 
+**Convention: one acceptance criterion per row.** Each row names exactly one criterion — never
+a range — because this table is intended to be machine-checkable against `requirements.md`, and
+range notation hides interior criteria from a coverage audit.
+
 | Requirement | Verified by | Where |
 |---|---|---|
 | FR-1.1, FR-1.2 | Build smoke: artifact exists, non-empty, part markers in order | CI `npm run build` + assertion step |
@@ -687,7 +709,12 @@ them as example tests would only add maintenance.
 | FR-3.10 | **Property 5** (scrubber fold equality) | Playwright, `tools/` |
 | FR-4.1, FR-4.2, FR-4.4, FR-4.13 | Integration: existing `AG-UI demo (shift-left recording)` job produces the GIF unconditionally and the NDJSON when capture succeeds; staleness diff emitted as a warning | CI `ag-ui-demo` job (`.github/workflows/ci.yml:259`) |
 | FR-4.3 | Example: unwritable capture path → GIF still produced, exit status unchanged | CI `ag-ui-demo` job |
-| FR-4.5-FR-4.9, FR-4.12 | **Property 7** — provenance validation over generated headers, applied to committed fixture *and* extracted copy | Python + `hypothesis`, `test/examples/test_dojo_fixture_provenance.py` |
+| FR-4.5 | **Property 7** — provenance validation over generated headers: the first record is a `_meta` header carrying all five of `captured_at`, `cao_version`, `run_ids`, `truncated`, `placeholder` | Python + `hypothesis`, `test/examples/test_dojo_fixture_provenance.py` |
+| FR-4.6 | **Property 7** — a missing first record, a non-`_meta` first record, or a `captured_at` that is absent, unparseable, or later than validation time fails the build and names the offending field | Python + `hypothesis`, `test/examples/test_dojo_fixture_provenance.py` |
+| FR-4.7 | **Property 7** — `_meta.cao_version` is a parseable version string and is *displayed* alongside the recorded-run label; drift from the repository version is surfaced to the reader, never build-gated | Python + `hypothesis`, `test/examples/test_dojo_fixture_provenance.py` |
+| FR-4.8 | **Property 7** — an absent or unparseable `_meta.cao_version` fails the build and names the offending field | Python + `hypothesis`, `test/examples/test_dojo_fixture_provenance.py` |
+| FR-4.9 | **Property 7** — `_meta.run_ids` is non-empty and consistent with the frames in *both* directions: no frame run id missing from `run_ids`, no `run_ids` value absent from every frame; a mismatch fails the build and names the identifier | Python + `hypothesis`, `test/examples/test_dojo_fixture_provenance.py` |
+| FR-4.12 | **Property 7** — `_meta.placeholder` must be `false`, asserted on the committed fixture *and* on the copy extracted from the built page | Python + `hypothesis`, `test/examples/test_dojo_fixture_provenance.py` |
 | FR-4.10, FR-4.11 | Smoke: recorder references the committed demo scenario; placeholder filename distinct with `placeholder: true` | Python, `test/examples/` |
 | FR-5.1, FR-5.3 | Smoke: spec navigates to the `file://` URL of `static/dojo/index.html`; a `build.sh`-only regression must be able to fail it | Playwright, `tools/` |
 | FR-5.2 | Example: one view per `GENERATIVE_UI` record in the embedded fixture | Playwright, `tools/` |
@@ -696,9 +723,17 @@ them as example tests would only add maintenance.
 | FR-6.6 | **Property 4** — text-never-markup over hostile strings | Playwright, `tools/` |
 | FR-6.7 | Positive half is Properties 2-4 with the required frame set in the generator domain; negative half is a smoke check that **no CI step performs a lexical search of the built page for component names**. The retired grep is not reintroduced anywhere in this table | Playwright, `tools/` + CI review |
 | FR-7.1, FR-7.2, FR-7.3 | **Property 9** — metadata-only invariance with poisoned-fixture path reporting | Python + `hypothesis`, `test/examples/test_dojo_fixture_is_metadata_only.py` |
-| FR-8.1-FR-8.4 | Smoke: `scripts/validate_markdown_links.py`; `sidebars.ts` and `docusaurus.config.ts` entries; the docs build fails on a bad sidebar entry | CI docs build |
-| FR-9.1-FR-9.3 | Review gate, partly mechanised: PR 1's diff introduces no `openLive` and no `EventSource` under `dojo-src/` | CI diff check + review |
-| FR-10.1-FR-10.4 | `npm run build` succeeding *is* the test (`onInlineAuthors`/`onInlineTags` are `'throw'`) | CI docs build |
+| FR-8.1 | Smoke: a reference page for the Dojo exists under `docusaurus/docs/` and is registered in `sidebars.ts`; the docs build fails on a bad sidebar entry | CI docs build |
+| FR-8.2 | Smoke: the blog post contains a link to the reference page rather than restating its content. Gates PR 4, not PR 1 | CI docs build (PR 4) |
+| FR-8.3 | Smoke: assert the `docusaurus.config.ts` navbar entry exposing Dojo_Page is present | CI docs build |
+| FR-8.4 | Smoke: `scripts/validate_markdown_links.py` passes over the new documentation | CI docs build |
+| FR-9.1 | Mechanised — CI diff check: the replay-mode increment's diff introduces no `openLive` and no `EventSource` under `dojo-src/` | CI diff check |
+| FR-9.2 | **Review gate, not mechanised.** That live mode ships as a pull request separate from the replay increment is a cross-pull-request property and cannot be asserted from inside a single pull request | Review |
+| FR-9.3 | Review gate, partly checkable: confirm the branch's merge base is the default branch and that no cited dependency is an open pull request | CI diff check + review |
+| FR-10.1 | `onInlineAuthors: 'throw'` fails the docs build until every author referenced by the post is registered in `blog/authors.yml`; the build failing *is* the test | CI docs build |
+| FR-10.2 | `onInlineTags: 'throw'` fails the docs build on any tag absent from `blog/tags.yml`; the build failing *is* the test | CI docs build |
+| FR-10.3 | Split: where a new tag is introduced, the `tags.yml` addition in the same pull request is checkable in the diff; **the justification in the pull-request description is a review gate, not an automated check** | CI diff check + review |
+| FR-10.4 | Smoke: `npm run build` succeeds in `docusaurus/`, demonstrating author and tag registration are complete | CI docs build |
 | NFR-1.1 | Smoke: zero network requests after document load over `file://` | Playwright, `tools/` |
 | NFR-1.2 | Example: built page has no `src`/`href` pointing outside itself, no `@import`, no webfont; the only `http` occurrence is the default endpoint *value* | CI assertion on build output |
 | NFR-2.1 | **Property 8** — prefix validity over every line-boundary truncation | Python + `hypothesis`, `test/examples/test_dojo_fixture_prefix_validity.py` |
