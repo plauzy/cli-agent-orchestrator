@@ -1,5 +1,9 @@
 # Handoff: resolve PR #584 review `pullrequestreview-5074181308` — for Kiro CLI
 
+> **Rev 2 (2026-09-06):** the Addendum at the end records seven decisions and six corrections
+> from the Kiro implementation session's independent verification. Where the Addendum conflicts
+> with a section below, the Addendum wins.
+
 **Target PR:** awslabs/cli-agent-orchestrator#584 — `feat(agent-plugins): Agent Plugins 1.0.0 support` (#573)
 **PR head at review time:** `282839c1a189112db7dde5b9754a6e7102ef4068` (single signed commit; branch `feat/agent-plugins-573-upstream` on `plauzy/cli-agent-orchestrator`)
 **Review:** @gutosantos82, 2026-09-01, verdict **CHANGES_REQUESTED**. Full verbatim review text is in the Appendix.
@@ -186,3 +190,90 @@ Spot-checks:
 > 2. Fix README.md gate description, CODEBASE.md package map, "exactly two" exemption claim; remove or wire provenance.py.
 > 3. Decide the cross-role auto-grant posture before M1 opens surfaces.
 > 4. Request re-review from haofeif and fanhongy; get explicit M1/AC6 sign-off.
+
+---
+
+## Addendum (Rev 2, 2026-09-06) — decisions and corrections from implementation verification
+
+The Kiro implementation session (spec `pr584-review-remediation`) independently re-verified every
+work item against `feat/agent-plugins-573-upstream` @ `282839c1`. Six corrections to this doc were
+confirmed by re-checking the code; seven decisions follow. These supersede the sections they touch.
+
+### Corrections (all re-verified against the worktree)
+
+- **C1 supersedes §3.2's "verify":** verified — reserved env keys are rejected by the vendored
+  schema (`env.propertyNames.not.enum`) and `map_mcp_config` early-returns on `_schema_errors`
+  (`mcp_mapping.py:280`), so `_map_stdio`'s reserved-env branch is dead and the per-entry-isolation
+  claim is false. Resolution is decision D2 below.
+- **C2 supersedes §2.1's caller list:** only `install_service.py:526→535` feeds
+  `resolve_allowed_tools` a plugin-merged map — and it persists the widened allowlist.
+  `terminal_service.py:471/:501`, `cli/commands/launch.py:206`, and a fourth caller this doc
+  missed, `mcp_server/server.py:154`, all read raw (un-merged) profiles. R7 is therefore a
+  one-site plumbing change plus a guard test pinning the raw-profile asymmetry at the other
+  three callers.
+- **C3 supersedes §2.4's grep instruction:** "exactly two permanent exemptions" appears nowhere
+  in the repo (10 unrelated hits); the stale claim lives only in the PR body. §2.4 collapses to
+  the §4 human-edit item; the spec records the negative search result.
+- **C4 adds a §1.1 ordering constraint:** `grok_cli._render_mcp_config` (`grok_cli.py:281`)
+  raises `ProviderError` on any URL transport outside `{"http","sse"}`. Wiring grok's seam before
+  its `PROVIDER_TRANSPORTS` entry + a canonical→native translation (`streamable-http` → grok
+  `"http"`) would convert today's silent drop into a launch abort. Transport entries and the
+  translation land **before** the provider wiring. Minimax already maps internally; omp passes
+  through.
+- **C5 answers §3.4's "find the sibling":** the SSRF hardening to mirror is
+  `install_service.py:139-215` — https-only, `_DEFAULT_ALLOWED_HOSTS` {github.com,
+  raw.githubusercontent.com} with `CAO_PROFILE_ALLOWED_HOSTS` override, userinfo/query/fragment
+  rejection, `allow_redirects=False` + explicit `is_redirect` check, safe-path regex.
+- **C6 strengthens §3.7:** `pyproject.toml` is byte-identical `fb4cc817`→`282839c1`, so the
+  `uv.lock` diff must be **empty** — take `main`'s lock verbatim and verify with
+  `uv lock --check`; add that check as the drift guard.
+
+### Decisions
+
+- **D1 (supersedes §2.5 — provenance.py): RETAIN and wire, do not remove.** The original
+  "remove is smaller/safer" call was based on a grep that excluded `test/`: `owning_plugin` is
+  the collision-rule oracle at 14 assertion sites (`test_projection.py`, `test_installer_property.py`)
+  and the module is the documented prompt-injection mitigation (operators must be able to see
+  which plugin contributed a skill whose content enters system prompts). Wire the three consumers
+  the docstring names — `cao plugin list`, the `cao skills list` annotation, the `/plugins`
+  payload/web panel — with ~3 tests. All three surfaces sit behind the existing default-off gate,
+  so this does not widen the shipped surface. Satisfies the reviewer's "remove or wire up" on the
+  "wire up" branch. CODEBASE.md gains a `provenance` row (§2.3).
+- **D2 (resolves §3.2 — reserved-env branch): Option B — delete the dead branch, fix the claim.**
+  Whole-document rejection is the vendored-schema contract; restoring per-entry isolation would
+  change validation semantics for every whole-doc rejection and risk conformance-corpus drift —
+  a spec-behavior change that doesn't belong in this PR. Keep the two-entry fixture as a
+  regression test pinning whole-document rejection (`valid=False, servers=[]`), correct the
+  per-entry-isolation docstring/claims, and retract the corresponding correctness property.
+- **D3 (confirms §2.1 posture): default `OMIT` — no auto-grant of plugin-delivered MCP servers;
+  explicit `pluginMcp` opt-in; fail-closed classification** (undeterminable provenance ⇒ treated
+  as plugin-delivered). The install path persists the widened allowlist into native agent files,
+  so a wrong default is durable, and restricted roles exist precisely to not gain tools
+  implicitly. Surface the omission (log + plugin-list output) so operators see why a server
+  wasn't granted. Reversal to grant-plus-warning stays a one-constant change. Still list the
+  posture for maintainer sign-off in §4 — implemented default ≠ settled policy.
+- **D4 (confirms §3.5 — credential-shaped env values): warn-only, no code change.** Refusal
+  false-positives on long base64 config values; redaction breaks authentication silently. Document
+  the trust model in `docs/agent-plugins.md` — cleartext write, warning as the only control,
+  env-var indirection (`${VAR}` / `cao env`) as the supported path — with the decision named and
+  dated.
+- **D5 (confirms §3.1): add `"on"` by reusing the canonical `BOOL_TRUE_VALUES` set.**
+- **D6 (resolves §3.8 — `agent-plugin/` rename): skip and record as accepted naming.** Measured
+  cost (60 occurrences, 11 files, 23 moves, Makefile + CI targets) is churn mid-review for a P3
+  nit; note the acceptance in the PR body.
+- **D7 (records the unasked question): the delivery seam does NOT consult the ship gate, by
+  design.** The gate is a management-surface release gate, not a data-path switch; gate-off ⇒ no
+  install path ⇒ empty store ⇒ no delivery holds derivatively. Gating the seam would change six
+  wired providers and existing tests for no security gain.
+
+### Rebase / signature constraint (blocking, human-owned if no key)
+
+`282839c1` carries an SSH `gpgsig`; a plain rebase onto `main` drops it. **Never push an unsigned
+rewrite of the signed commit.** Preferred: if the SSH signing key is available to the executing
+session, `rebase -S` (`gpg.format=ssh`) with a raw-object `grep -q '^gpgsig'` post-condition
+(`%G?` is unreliable without an allowed-signers file). If the key is NOT available, do not rebase
+at all: the branch is MERGEABLE against `main` (zero conflicts on the probe), so land the work as
+ordered commits **on top of the existing signed head** and fix `uv.lock` to match `main` in a
+normal commit (C6's `uv lock --check` still applies) — signing of the new commits then happens at
+the author's push. Either way, `282839c1`'s content stays intact as commit 1 and work items land
+as focused commits 2..n, preserving §0's one-commit-per-item rule and reviewers' line anchors.
