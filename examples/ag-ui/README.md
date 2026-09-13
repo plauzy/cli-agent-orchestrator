@@ -32,9 +32,9 @@ Each example has a `run.sh` (or `capture.py`) that is self-contained:
 CAO_AGUI_ENABLED=true uv run cao-server &
 
 # Run any example
-./examples/ag-ui/supervisor-dashboard/run.sh
-./examples/ag-ui/handoff-approval/run.sh
-./examples/ag-ui/stock-client-live/run.sh
+./examples/ag-ui/ag-ui-supervisor-dashboard/run.sh
+./examples/ag-ui/ag-ui-handoff-approval/run.sh
+./examples/ag-ui/ag-ui-stock-client-live/run.sh
 ```
 
 The L2 construct examples (`supervisor-dashboard`, `session-timeline`,
@@ -47,7 +47,7 @@ The `construct-demos/tools/` directory contains the recorder that generates the
 demo GIFs referenced in the PR description and `docs/media/`. Regenerate:
 
 ```bash
-cd examples/ag-ui/construct-demos/tools && npm ci && npm run record
+cd examples/ag-ui/ag-ui-construct-demos/tools && npm ci && npm run record
 ```
 
 ## See also
