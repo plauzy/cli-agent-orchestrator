@@ -14,7 +14,6 @@ from cli_agent_orchestrator.ops_mcp_server.models import (
     SessionListResult,
 )
 from cli_agent_orchestrator.ops_mcp_server.server import (
-    _HTTP_TIMEOUT,
     _launch_session_impl,
     get_profile_details,
     get_session_info,
@@ -74,7 +73,6 @@ class TestProfileTools:
             "http://127.0.0.1:9889/agents/profiles",
             params=None,
             json=None,
-            timeout=_HTTP_TIMEOUT,
         )
 
     async def test_list_profiles_returns_empty_list(self) -> None:
@@ -160,7 +158,6 @@ class TestProfileTools:
             "http://127.0.0.1:9889/agents/profiles/install",
             params=None,
             json={"source": "developer", "provider": "kiro_cli"},
-            timeout=_HTTP_TIMEOUT,
         )
 
     async def test_install_profile_returns_result_for_url_source(self) -> None:
@@ -185,7 +182,6 @@ class TestProfileTools:
             "http://127.0.0.1:9889/agents/profiles/install",
             params=None,
             json={"source": "https://example.com/remote.md", "provider": "kiro_cli"},
-            timeout=_HTTP_TIMEOUT,
         )
 
     async def test_install_profile_omits_provider_when_not_explicit(self) -> None:
@@ -211,7 +207,6 @@ class TestProfileTools:
             "http://127.0.0.1:9889/agents/profiles/install",
             params=None,
             json={"source": "developer"},
-            timeout=_HTTP_TIMEOUT,
         )
 
     async def test_install_profile_forwards_env_vars(self) -> None:
@@ -243,7 +238,6 @@ class TestProfileTools:
                 "provider": "kiro_cli",
                 "env_vars": {"API_TOKEN": "secret", "BASE_URL": "http://localhost:27124"},
             },
-            timeout=_HTTP_TIMEOUT,
         )
 
     async def test_install_profile_returns_failure_for_invalid_provider(self) -> None:
@@ -317,7 +311,6 @@ class TestSessionLifecycleTools:
                 "allowed_tools": "fs_read,execute_bash",
             },
             json=None,
-            timeout=_HTTP_TIMEOUT,
         )
 
     async def test_launch_session_passes_custom_params(self) -> None:
@@ -351,7 +344,6 @@ class TestSessionLifecycleTools:
                 "working_directory": "/workspace/project",
             },
             json=None,
-            timeout=_HTTP_TIMEOUT,
         )
 
     async def test_launch_session_result_includes_provider_from_api_response(self) -> None:
@@ -407,7 +399,6 @@ class TestSessionLifecycleTools:
                 "model": "gpt-5.1-codex",
             },
             json={"initial_message": initial_message},
-            timeout=_HTTP_TIMEOUT,
         )
         request_url = mock_request.call_args.args[1]
         request_params = mock_request.call_args.kwargs["params"]
@@ -596,7 +587,6 @@ class TestSessionLifecycleTools:
             "http://127.0.0.1:9889/terminals/term-123/inbox/messages",
             params={"sender_id": "cao-ops-mcp", "message": "Build feature X"},
             json=None,
-            timeout=_HTTP_TIMEOUT,
         )
 
     async def test_send_session_message_returns_failure_for_not_found(self) -> None:
@@ -956,7 +946,6 @@ class TestTerminalMonitoringTools:
             "http://127.0.0.1:9889/terminals/term-123",
             params=None,
             json=None,
-            timeout=_HTTP_TIMEOUT,
         )
 
     async def test_get_terminal_status_returns_failure_for_not_found(self) -> None:
@@ -986,7 +975,6 @@ class TestTerminalMonitoringTools:
             "http://127.0.0.1:9889/terminals/term-123/output",
             params={"mode": "last"},
             json=None,
-            timeout=_HTTP_TIMEOUT,
         )
 
     async def test_get_terminal_output_passes_full_mode(self) -> None:

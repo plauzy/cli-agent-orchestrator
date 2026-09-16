@@ -5,7 +5,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from cli_agent_orchestrator.ops_mcp_server.server import (
-    _HTTP_TIMEOUT,
     _read_session_output_impl,
     read_session_output,
 )
@@ -45,7 +44,6 @@ class TestReadSessionOutputImpl:
             "http://127.0.0.1:9889/terminals/term-1/output",
             params={"mode": "full"},
             json=None,
-            timeout=_HTTP_TIMEOUT,
         )
 
     @pytest.mark.parametrize(("mode", "normalized"), [("FULL", "full"), (None, "full")])
@@ -63,7 +61,6 @@ class TestReadSessionOutputImpl:
             "http://127.0.0.1:9889/terminals/term-1/output",
             params={"mode": normalized},
             json=None,
-            timeout=_HTTP_TIMEOUT,
         )
 
     def test_resolves_session_with_single_terminal(self) -> None:
@@ -118,7 +115,6 @@ class TestReadSessionOutputImpl:
             "http://127.0.0.1:9889/sessions/cao-x",
             params=None,
             json=None,
-            timeout=_HTTP_TIMEOUT,
         )
 
     def test_session_terminal_without_id_errors(self) -> None:
@@ -263,7 +259,6 @@ class TestReadSessionOutputImpl:
             "http://127.0.0.1:9889/terminals/term-1/output",
             params={"mode": "last"},
             json=None,
-            timeout=_HTTP_TIMEOUT,
         )
 
     def test_invalid_output_payload_is_rejected(self) -> None:

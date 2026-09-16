@@ -228,21 +228,21 @@ class TestApiServerAvailabilityContract:
 
         assert result.success is False
 
-    def test_every_request_is_bounded_by_a_timeout(self):
-        """Requirement 20.2 — a wedged listener must not hang the tool forever."""
-        from cli_agent_orchestrator.ops_mcp_server.server import _HTTP_TIMEOUT, _request_json
+    def test_a_request_exception_is_returned_as_a_structured_error(self):
+        """A wedged or refused listener must surface a structured, operation-named
+        error to the calling agent rather than a traceback.
 
-        captured = {}
+        Note: this used to also assert a `_HTTP_TIMEOUT` kwarg on the request. That
+        constant was the PR branch's own bounding mechanism; upstream `main` replaced
+        the mcp_server request-timeout handling (PR #787) and dropped it from
+        `_request_json`, so the merge adopts `main`'s version and this test asserts
+        the surviving, still-required contract — errors are returned, not raised.
+        """
+        from cli_agent_orchestrator.ops_mcp_server.server import _request_json
 
-        def capture(*args, **kwargs):
-            captured.update(kwargs)
-            raise requests.ConnectionError("refused")
-
-        with patch(REQUEST, side_effect=capture):
+        with patch(REQUEST, side_effect=requests.ConnectionError("refused")):
             data, error = _request_json("get", "/health", operation="Probe")
 
-        assert captured["timeout"] == _HTTP_TIMEOUT
-        assert all(bound > 0 for bound in _HTTP_TIMEOUT)
         assert data is None and "Probe failed" in error
 
     @pytest.mark.asyncio
