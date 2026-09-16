@@ -30,7 +30,7 @@ import shutil
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Mapping, Optional
 
 from cli_agent_orchestrator.agent_plugins.models import PluginRecord
 from cli_agent_orchestrator.constants import AGENT_PLUGIN_DATA_DIR, AGENT_PLUGINS_DIR
@@ -380,6 +380,35 @@ class InstalledPluginStore:
             if tuple(fresh.projected_skill_names) == desired:
                 return True
             self.write_record(replace(fresh, projected_skill_names=desired))
+            return True
+
+    def update_projected_digests(self, name: str, digests: Mapping[str, str]) -> bool:
+        """Set one record's ``projected_skill_digests`` under the lock.
+
+        The digest sibling of :meth:`update_projected_names`, for the copy-mode
+        content markers review pullrequestreview-5209646575 (F2) requires. Same
+        compare-and-set discipline: take the lock, re-read the record, patch only
+        this one field, and return ``False`` without writing when the record has
+        been unpublished — never resurrect it.
+
+        Copy mode only in practice; symlink-mode rebuilds pass an empty map.
+
+        **Invariant:** no caller may hold ``_store_lock`` when invoking this.
+        """
+        validated = _validate_plugin_dirname(name)
+        desired = dict(digests)
+        with _store_lock(self.state_dir):
+            fresh = self.get(validated)
+            if fresh is None:
+                logger.info(
+                    "Agent plugin '%s' is no longer installed; not writing back its "
+                    "projected skill digests",
+                    validated,
+                )
+                return False
+            if dict(fresh.projected_skill_digests) == desired:
+                return True
+            self.write_record(replace(fresh, projected_skill_digests=desired))
             return True
 
     def release_projected_name(self, skill_name: str) -> Optional[str]:

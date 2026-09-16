@@ -199,17 +199,17 @@ class TestSweepRefusesUnmanagedPaths:
         assert not projected.exists()
         assert findings == []
 
-    def test_a_stray_file_at_a_projected_name_is_still_removed(self, world):
-        """A regular file is never something the engine placed.
+    def test_a_stray_file_at_a_projected_name_is_preserved(self, world):
+        """A regular file at a projected name is user data — never deleted.
 
-        The guard's job is to protect a real *directory* the user owns. A plain
-        file at a projected skill name is not a skill (skill discovery gates on
-        ``is_dir()`` plus a ``SKILL.md``) and cannot be a projection, so removing
-        it by name is safe and keeps the store tidy — the guard must not turn into
-        a reason to leave junk behind.
+        Review pullrequestreview-5209646575 (P1, F2): the previous behaviour
+        classified every regular file as CAO-managed and unlinked it on a stale
+        claim alone. A projection CAO places is a symlink or a copied directory,
+        never a plain file, so a file here is the user's and must survive, with the
+        skip reported via ``projection.sweep_skipped_unmanaged``.
         """
         stray = world["skills_dir"] / "shared-skill"
-        stray.write_text("not a skill", encoding="utf-8")
+        stray.write_text("the user's own file", encoding="utf-8")
 
         swept, findings = projection_module._sweep(
             world["store"],
@@ -218,11 +218,16 @@ class TestSweepRefusesUnmanagedPaths:
             current={},
         )
 
-        assert swept == ["shared-skill"]
-        assert not stray.exists()
-        assert findings == []
+        assert swept == []
+        assert stray.exists()
+        assert stray.read_text(encoding="utf-8") == "the user's own file"
+        assert [f.code for f in findings] == ["projection.sweep_skipped_unmanaged"]
 
-    def test_a_copy_mode_projection_is_still_swept(self, world, monkeypatch):
+    def test_a_copy_mode_projection_with_a_matching_digest_is_swept(self, world, monkeypatch):
+        """A copy-mode directory is swept only when its content digest proves it is
+        the one CAO placed."""
+        from cli_agent_orchestrator.agent_plugins import projection as proj
+
         monkeypatch.setattr(
             "cli_agent_orchestrator.services.settings_service.get_skill_projection_mode",
             lambda: "copy",
@@ -231,16 +236,74 @@ class TestSweepRefusesUnmanagedPaths:
         projected = world["skills_dir"] / "shared-skill"
         assert projected.is_dir() and not projected.is_symlink()
 
-        swept, _findings = projection_module._sweep(
+        digest = proj._skill_content_digest(projected)
+        swept, _findings = proj._sweep(
             world["store"],
             world["skills_dir"],
             previous={"shared-skill": "donor"},
             current={},
             mode="copy",
+            digests={"shared-skill": digest},
         )
 
         assert swept == ["shared-skill"]
         assert not projected.exists()
+
+    def test_a_copy_mode_directory_with_user_edits_is_preserved(self, world, monkeypatch):
+        """Review pullrequestreview-5209646575 (P1, F2): a prior name claim cannot
+        prove current ownership. A copy-mode directory whose bytes no longer match
+        the recorded digest — the user edited it — is preserved, not deleted."""
+        from cli_agent_orchestrator.agent_plugins import projection as proj
+
+        monkeypatch.setattr(
+            "cli_agent_orchestrator.services.settings_service.get_skill_projection_mode",
+            lambda: "copy",
+        )
+        _install_donor(world, "shared-skill")
+        projected = world["skills_dir"] / "shared-skill"
+        recorded = proj._skill_content_digest(projected)
+
+        # The user replaces the projected content with their own.
+        (projected / "SKILL.md").write_text("the user's own edits", encoding="utf-8")
+
+        swept, findings = proj._sweep(
+            world["store"],
+            world["skills_dir"],
+            previous={"shared-skill": "donor"},
+            current={},
+            mode="copy",
+            digests={"shared-skill": recorded},  # stale — no longer matches
+        )
+
+        assert swept == []
+        assert projected.exists()
+        assert (projected / "SKILL.md").read_text(encoding="utf-8") == "the user's own edits"
+        assert [f.code for f in findings] == ["projection.sweep_skipped_unmanaged"]
+
+    def test_a_copy_mode_directory_with_no_recorded_digest_is_preserved(self, world, monkeypatch):
+        """Fail-closed: a record written before digests existed carries none, so its
+        copy-mode directory is unproven and must be preserved rather than deleted."""
+        from cli_agent_orchestrator.agent_plugins import projection as proj
+
+        monkeypatch.setattr(
+            "cli_agent_orchestrator.services.settings_service.get_skill_projection_mode",
+            lambda: "copy",
+        )
+        _install_donor(world, "shared-skill")
+        projected = world["skills_dir"] / "shared-skill"
+
+        swept, findings = proj._sweep(
+            world["store"],
+            world["skills_dir"],
+            previous={"shared-skill": "donor"},
+            current={},
+            mode="copy",
+            digests={},  # no marker recorded
+        )
+
+        assert swept == []
+        assert projected.exists()
+        assert [f.code for f in findings] == ["projection.sweep_skipped_unmanaged"]
 
 
 class TestMaterializeRefusesUnclaimedTargets:

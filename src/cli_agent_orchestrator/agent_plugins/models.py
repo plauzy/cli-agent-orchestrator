@@ -290,6 +290,19 @@ class PluginRecord:
     """Subset of ``skill_names`` actually projected. The difference is always
     explained by a ``SKIPPED`` finding (the collision case)."""
 
+    projected_skill_digests: Mapping[str, str] = field(default_factory=dict)
+    """SHA-256 of each projected skill's content, recorded at projection time —
+    **copy mode only** (empty in symlink mode, where a link into the plugin store is
+    itself the ownership proof).
+
+    Review pullrequestreview-5209646575 (P2, F2): a prior name claim alone cannot
+    prove the bytes currently at a projected copy are the ones CAO placed, so a stale
+    claim must not license deleting a user's directory. The sweep treats a copy-mode
+    directory as CAO-managed only when its current content digest matches the one
+    recorded here. A record written before this field existed carries no digest and
+    is therefore classified as unmanaged (preserved) — fail-closed toward the user's
+    data."""
+
     findings: Tuple[Finding, ...] = ()
 
     def to_dict(self) -> Dict[str, Any]:
@@ -302,6 +315,7 @@ class PluginRecord:
             "schema_id": self.schema_id,
             "skill_names": list(self.skill_names),
             "projected_skill_names": list(self.projected_skill_names),
+            "projected_skill_digests": dict(self.projected_skill_digests),
             "findings": [finding.to_dict() for finding in self.findings],
         }
 
@@ -326,6 +340,10 @@ class PluginRecord:
             schema_id=str(data.get("schema_id", "")),
             skill_names=tuple(data.get("skill_names", ())),
             projected_skill_names=tuple(data.get("projected_skill_names", ())),
+            # Absent on a record written before this field existed. That absence is
+            # meaningful — `_is_managed_projection` reads a missing digest as
+            # "unproven, therefore preserve" (fail-closed), not as "ours".
+            projected_skill_digests=dict(data.get("projected_skill_digests") or {}),
             findings=tuple(Finding.from_dict(f) for f in data.get("findings", ())),
         )
 

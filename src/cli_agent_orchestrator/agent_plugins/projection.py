@@ -45,6 +45,7 @@ changed.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import shutil
@@ -196,17 +197,26 @@ def rebuild_projection(
     winners, collision_findings = _elect_winners(store, records, target_dir, prior)
     findings.extend(collision_findings)
 
+    # The copy-mode provenance markers recorded on the prior records — the sweep
+    # uses these to prove a copy-mode directory is still CAO's before deleting it.
+    prior_digests: Dict[str, str] = {}
+    for record in records:
+        prior_digests.update(record.projected_skill_digests or {})
+
     resolved_mode = _resolve_mode(mode)
+    fresh_digests: Dict[str, str] = {}
     materialized, mode_used, material_findings = _materialize(
-        store, winners, target_dir, resolved_mode, previous=prior
+        store, winners, target_dir, resolved_mode, previous=prior, digests_out=fresh_digests
     )
     findings.extend(material_findings)
 
-    swept, sweep_findings = _sweep(store, target_dir, prior, materialized, mode=mode_used)
+    swept, sweep_findings = _sweep(
+        store, target_dir, prior, materialized, mode=mode_used, digests=prior_digests
+    )
     findings.extend(sweep_findings)
 
     findings.extend(_transition_findings(prior, materialized))
-    _write_back(store, records, materialized)
+    _write_back(store, records, materialized, digests=fresh_digests)
 
     return ProjectionResult(
         projected=materialized,
@@ -414,8 +424,16 @@ def _materialize(
     target_dir: Path,
     mode: str,
     previous: Optional[Mapping[str, str]] = None,
+    digests_out: Optional[Dict[str, str]] = None,
 ) -> Tuple[Dict[str, str], str, List[Finding]]:
-    """Create the projected entries, falling back to copy mode when needed."""
+    """Create the projected entries, falling back to copy mode when needed.
+
+    ``digests_out`` is a caller-supplied collector: when projection lands in copy
+    mode, the SHA-256 of each placed skill's content is recorded there so the
+    record can persist it (F2's provenance marker). Passed as a collector rather
+    than added to the return tuple to keep this function's signature — and its
+    call sites' unpacking — unchanged.
+    """
     findings: List[Finding] = []
     materialized: Dict[str, str] = {}
     effective_mode = mode
@@ -519,6 +537,14 @@ def _materialize(
 
         if ok:
             materialized[skill_name] = plugin_name
+            # Copy mode only: record the content digest so a later sweep can prove
+            # the bytes at this name are still the ones CAO placed before deleting
+            # them (F2). In symlink mode the link target IS the plugin's own bytes,
+            # so containment already proves ownership and no digest is needed.
+            if digests_out is not None and effective_mode == PROJECTION_MODE_COPY:
+                placed = _skill_content_digest(link_path)
+                if placed:
+                    digests_out[skill_name] = placed
         else:
             findings.append(
                 Finding(
@@ -573,7 +599,36 @@ def _copy_into(link_path: Path, source: Path) -> Tuple[bool, Optional[str]]:
         return False, str(exc)
 
 
-def _is_managed_projection(path: Path, store: InstalledPluginStore, mode: str) -> bool:
+def _skill_content_digest(path: Path) -> Optional[str]:
+    """SHA-256 over a projected skill directory's content, or ``None`` on error.
+
+    Stable across runs: files are walked in sorted order and each contributes its
+    POSIX relative path as well as its bytes, so a rename is a different digest.
+    Returns ``None`` on any read error — an unreadable tree is an unproven input,
+    handled as "not managed" (preserve) by the caller, never a projection failure.
+    """
+    if not path.is_dir():
+        return None
+    digest = hashlib.sha256()
+    try:
+        for entry in sorted(p for p in path.rglob("*") if p.is_file()):
+            digest.update(entry.relative_to(path).as_posix().encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(entry.read_bytes())
+            digest.update(b"\0")
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
+def _is_managed_projection(
+    path: Path,
+    store: InstalledPluginStore,
+    mode: str,
+    *,
+    skill_name: Optional[str] = None,
+    digests: Optional[Mapping[str, str]] = None,
+) -> bool:
     """Whether ``path`` is still an entry the projection engine placed.
 
     The defence-in-depth half of review finding F2. Phase one of the sweep used
@@ -604,10 +659,28 @@ def _is_managed_projection(path: Path, store: InstalledPluginStore, mode: str) -
             return False
         plugins_real = os.path.realpath(store.plugins_dir)
         return resolved == plugins_real or resolved.startswith(plugins_real + os.sep)
+
     if path.is_file():
-        # Never a projection we placed; a stray file may be removed by name.
-        return True
-    return mode == PROJECTION_MODE_COPY
+        # A projection CAO places is a symlink (default) or a copied *directory*,
+        # never a plain file. Review pullrequestreview-5209646575 (P1, F2): the
+        # previous `return True` here deleted a user's regular file at a projected
+        # name on a stale claim alone. It is user data — preserve it (the sweep
+        # reports the skip via `projection.sweep_skipped_unmanaged`).
+        return False
+
+    if not path.is_dir():  # pragma: no cover - socket/fifo at a skill name
+        return False
+
+    # A real directory in copy mode is a shape CAO *could* have placed, but a prior
+    # name claim cannot prove the current bytes are CAO's. Require a content-digest
+    # match against the marker recorded at projection time. No recorded digest — a
+    # record written before digests existed — is unproven, so preserve (fail-closed).
+    if mode != PROJECTION_MODE_COPY:
+        return False
+    recorded = (digests or {}).get(skill_name)
+    if not recorded:
+        return False
+    return _skill_content_digest(path) == recorded
 
 
 def _sweep(
@@ -617,6 +690,7 @@ def _sweep(
     current: Mapping[str, str],
     *,
     mode: str = PROJECTION_MODE_SYMLINK,
+    digests: Optional[Mapping[str, str]] = None,
 ) -> Tuple[List[str], List[Finding]]:
     """Remove stale and dangling projected entries. Never raises.
 
@@ -649,7 +723,7 @@ def _sweep(
         path = target_dir / skill_name
         if not path.is_symlink() and not path.exists():
             continue
-        if not _is_managed_projection(path, store, mode):
+        if not _is_managed_projection(path, store, mode, skill_name=skill_name, digests=digests):
             logger.warning(
                 "Not sweeping '%s': the previous projection claimed it, but what is "
                 "on disk is not a CAO-managed projection. Leaving it in place.",
@@ -715,8 +789,10 @@ def _write_back(
     store: InstalledPluginStore,
     records: List[PluginRecord],
     materialized: Mapping[str, str],
+    *,
+    digests: Optional[Mapping[str, str]] = None,
 ) -> None:
-    """Update each record's ``projected_skill_names`` to match reality.
+    """Update each record's ``projected_skill_names`` (and copy-mode digests).
 
     Keeping the records truthful is what makes ``provenance.owning_plugin`` a
     plain record lookup and what gives the next rebuild its "previous winner"
@@ -729,6 +805,7 @@ def _write_back(
     re-reads under the store lock and patches only this one field, skipping a
     plugin that has since been uninstalled instead of resurrecting its record.
     """
+    all_digests = digests or {}
     for record in records:
         owned = tuple(
             sorted(name for name, plugin in materialized.items() if plugin == record.name)
@@ -737,6 +814,15 @@ def _write_back(
             store.update_projected_names(record.name, owned)
         except Exception as exc:  # pragma: no cover - unwritable state dir
             logger.warning("Could not update install record for '%s': %s", record.name, exc)
+
+        # Persist this record's copy-mode digests (empty in symlink mode, which
+        # clears any stale markers from a prior copy-mode run). Scoped to the names
+        # this plugin owns.
+        record_digests = {name: all_digests[name] for name in owned if name in all_digests}
+        try:
+            store.update_projected_digests(record.name, record_digests)
+        except Exception as exc:  # pragma: no cover - unwritable state dir
+            logger.warning("Could not update projected digests for '%s': %s", record.name, exc)
 
 
 def sweep_dangling_projections(
