@@ -32,6 +32,7 @@ from typing import Any, Literal, Optional
 
 import psutil
 
+from cli_agent_orchestrator.agent_plugins.mcp_delivery import with_plugin_mcp
 from cli_agent_orchestrator.backends.registry import get_backend
 from cli_agent_orchestrator.constants import CAO_HOME_DIR
 from cli_agent_orchestrator.models.terminal import TerminalStatus
@@ -228,7 +229,15 @@ class GrokCliProvider(BaseProvider):
         if self._agent_profile is None:
             return None
         try:
-            return load_agent_profile(self._agent_profile)
+            # Merge installed agent plugins' MCP servers into the profile that
+            # `_build_grok_command` uses to render `config.toml`. Review
+            # pullrequestreview-5209646575 (F3): Grok regenerated its MCP config
+            # from the raw profile, silently dropping plugin servers. The mapper
+            # translates canonical `streamable-http` to Grok's native `http`
+            # (`_NATIVE_TRANSPORT_NAMES`), so `_render_mcp_config` does not reject
+            # a delivered URL server. `with_plugin_mcp` never raises.
+            # `_try_load_profile` (timeout-only) is deliberately left unwrapped.
+            return with_plugin_mcp(load_agent_profile(self._agent_profile), "grok_cli")
         except FileNotFoundError:
             raise
         except Exception as exc:

@@ -86,6 +86,19 @@ _PLACEHOLDER_RE = re.compile(r"\$\{(PLUGIN_ROOT|PLUGIN_DATA)\}")
 #:   through (``resolve_mcp_server_config`` returns a command-less url entry
 #:   unmodified), so a url survives into the provider's own config and the
 #:   transport decision is the provider's to make, not CAO's to pre-empt.
+#: * ``grok_cli`` — ``_render_mcp_config`` writes a ``url``/``type`` TOML block for
+#:   a url entry, accepting ``type in {"http", "sse"}`` and raising on anything
+#:   else. Both URL transports and stdio are carried, but the canonical
+#:   ``streamable-http`` must be translated to grok's ``http`` (see
+#:   ``_NATIVE_TRANSPORT_NAMES``) or the launch would abort. Added for review
+#:   pullrequestreview-5209646575 (F3).
+#: * ``minimax_code`` — ``_serialize_server`` accepts a url entry with
+#:   ``type in {"streamable-http", "sse"}`` (mapping bare ``"http"`` to
+#:   ``streamable-http``) as well as stdio. Canonical names match natively, so no
+#:   translation is needed. Added for F3.
+#: * ``omp`` — ``_write_extension_root`` writes the entry into a sibling
+#:   ``.mcp.json`` verbatim (the CAO/Q-CLI shape), so every transport CAO's own
+#:   format expresses survives unchanged. Added for F3.
 #:
 #: Listing a provider here makes an undeliverable transport a *reported skip*
 #: rather than a silent claim of delivery.
@@ -104,6 +117,10 @@ PROVIDER_TRANSPORTS: Dict[str, frozenset] = {
     "kimi_cli": _ALL_TRANSPORTS,
     "cursor_cli": _ALL_TRANSPORTS,
     "copilot_cli": _ALL_TRANSPORTS,
+    # Serializers that accept a url entry (with the noted native transport names).
+    "grok_cli": _ALL_TRANSPORTS,  # url: {"http","sse"}; streamable-http -> http below
+    "minimax_code": _ALL_TRANSPORTS,  # url: {"streamable-http","sse"}
+    "omp": _ALL_TRANSPORTS,  # writes the entry verbatim into a sibling .mcp.json
     # Serializers that can only express a local command.
     "opencode_cli": _STDIO_ONLY,
     "codex": _STDIO_ONLY,
@@ -112,6 +129,25 @@ PROVIDER_TRANSPORTS: Dict[str, frozenset] = {
     "hermes": _STDIO_ONLY,
     "mock_cli": _STDIO_ONLY,
 }
+
+#: Per-provider rename from CAO's canonical transport vocabulary to the provider's
+#: own. Grok's TOML serializer accepts ``http`` where CAO says ``streamable-http``
+#: and *raises* on the canonical name, so a plugin declaring ``streamable-http``
+#: must arrive as ``http`` or the launch aborts (worse than a silent drop). The
+#: rename happens at mapping time, once, so every downstream consumer sees the
+#: native name. A provider absent from this map gets the canonical name unchanged.
+_NATIVE_TRANSPORT_NAMES: Dict[str, Dict[str, str]] = {
+    "grok_cli": {"streamable-http": "http"},
+}
+
+
+def _to_native_transport(provider: Optional[str], transport: Any) -> Any:
+    """Translate a canonical transport to ``provider``'s native spelling."""
+    if provider is None or not isinstance(transport, str):
+        return transport
+    return _NATIVE_TRANSPORT_NAMES.get(provider, {}).get(transport, transport)
+
+
 DEFAULT_TRANSPORTS = _STDIO_ONLY
 
 #: Substrings in an ``env`` key or header name that suggest a credential.
@@ -290,7 +326,7 @@ def map_mcp_config(
     for name in sorted(raw_servers):
         entry = raw_servers[name]
         mapped, entry_findings = _map_entry(
-            name, entry, root_str, data_str, root, data_dir, allowed
+            name, entry, root_str, data_str, root, data_dir, allowed, provider
         )
         findings.extend(entry_findings)
         if mapped is not None:
@@ -342,6 +378,7 @@ def _map_entry(
     root: Path,
     data_dir: Path,
     allowed_transports: frozenset,
+    provider: Optional[str] = None,
 ) -> Tuple[Optional[MappedServer], List[Finding]]:
     """Map one ``mcpServers`` entry. Failure invalidates only this entry."""
     findings: List[Finding] = []
@@ -359,6 +396,9 @@ def _map_entry(
         ]
 
     transport = entry.get("type")
+    # The support check is against the CANONICAL vocabulary; the rename to the
+    # provider's own spelling happens only after the entry is accepted, so a
+    # deliverable transport is never mis-classified as unsupported.
     if transport not in allowed_transports:
         # §7.2.2 rule 4: skip with a report, never fail over to a different
         # transport — §7.2.1 leaves fallback outside the format entirely.
@@ -376,7 +416,7 @@ def _map_entry(
             )
         ]
 
-    config: Dict[str, Any] = {"type": transport}
+    config: Dict[str, Any] = {"type": _to_native_transport(provider, transport)}
 
     if transport == "stdio":
         mapped_stdio, stdio_findings = _map_stdio(

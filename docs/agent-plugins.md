@@ -195,6 +195,14 @@ agent profile it installs — the same dict from which each provider's native MC
 form is already derived. So a declared server reaches Kiro's agent JSON and
 OpenCode's `opencode.json` with no per-provider work.
 
+For a provider that regenerates its MCP configuration from the profile it reloads
+at launch — Claude Code, Codex, Kimi, Antigravity, Cursor, Copilot, OMP, Grok, and
+MiniMax — the merge is applied again on that read, so a plugin installed after the
+agent was set up still reaches it. A transport a provider cannot express (an HTTP
+server for a stdio-only provider) is reported as a skipped finding rather than
+written as broken config; where a provider spells a transport differently from CAO
+(Grok's `http` for the canonical `streamable-http`), CAO translates it.
+
 When the merge happens matters, and it is worth knowing as an operator:
 
 - **`cao install <agent>`** picks up whatever plugins are installed at that

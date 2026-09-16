@@ -16,6 +16,7 @@ import shutil
 from pathlib import Path
 from typing import List, Optional
 
+from cli_agent_orchestrator.agent_plugins.mcp_delivery import with_plugin_mcp
 from cli_agent_orchestrator.backends.registry import get_backend
 from cli_agent_orchestrator.constants import CAO_HOME_DIR, SECURITY_PROMPT
 from cli_agent_orchestrator.models.terminal import TerminalStatus
@@ -128,7 +129,12 @@ class OmpProvider(BaseProvider):
         if self._agent_profile is None:
             return None
         try:
-            return load_agent_profile(self._agent_profile)
+            # Merge installed agent plugins' MCP servers into the profile that
+            # `_build_omp_command` reloads at launch. Review
+            # pullrequestreview-5209646575 (F3): OMP regenerated its `--extension`
+            # MCP file from the raw profile, so a plugin server was silently
+            # dropped. `with_plugin_mcp` never raises, so no extra guard is needed.
+            return with_plugin_mcp(load_agent_profile(self._agent_profile), "omp")
         except Exception as exc:
             raise ProviderError(
                 f"Failed to load agent profile '{self._agent_profile}': {exc}"

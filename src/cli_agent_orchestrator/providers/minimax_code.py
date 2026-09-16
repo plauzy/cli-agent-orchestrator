@@ -15,6 +15,7 @@ from typing import Any, Optional
 
 import yaml
 
+from cli_agent_orchestrator.agent_plugins.mcp_delivery import with_plugin_mcp
 from cli_agent_orchestrator.backends.registry import get_backend
 from cli_agent_orchestrator.constants import CAO_HOME_DIR, SECURITY_PROMPT
 from cli_agent_orchestrator.models.terminal import TerminalStatus
@@ -380,7 +381,13 @@ class MiniMaxCodeProvider(BaseProvider):
         profile = None
         if self._agent_profile is not None:
             try:
-                profile = load_agent_profile(self._agent_profile)
+                # Merge installed agent plugins' MCP servers into the profile whose
+                # `mcpServers` `_prepare_runtime` serializes into the MiniMax plugin
+                # dir. Review pullrequestreview-5209646575 (F3): MiniMax regenerated
+                # its MCP config from the raw profile, silently dropping plugin
+                # servers. `with_plugin_mcp` never raises; `_try_load_profile`
+                # (timeout-only) is deliberately left unwrapped.
+                profile = with_plugin_mcp(load_agent_profile(self._agent_profile), "minimax_code")
             except Exception as exc:
                 raise ProviderError(
                     f"Failed to load agent profile {self._agent_profile!r}: {exc}"

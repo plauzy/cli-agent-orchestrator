@@ -335,9 +335,17 @@ def apply_plugin_mcp_servers(
 
     Extracted rather than duplicated because review on #584 found the two paths
     had *silently disagreed*: the merge existed only on the install path, so the
-    five providers that call ``load_agent_profile()`` again at launch discarded
-    it entirely. Two copies of this logic would be free to drift apart the same
-    way; one copy cannot.
+    providers that call ``load_agent_profile()`` again at launch discarded it
+    entirely. Two copies of this logic would be free to drift apart the same way;
+    one copy cannot.
+
+    The nine providers that reload a profile at launch and regenerate native MCP
+    config from it now all pass through :func:`with_plugin_mcp`: ``claude_code``,
+    ``codex``, ``kimi_cli``, ``antigravity_cli``, ``cursor_cli``, ``copilot_cli``,
+    and — added for review pullrequestreview-5209646575 — ``omp``, ``grok_cli``,
+    and ``minimax_code``. ``hermes`` and ``mock_cli`` need no seam (no real MCP
+    launch). ``test/agent_plugins/test_mcp_launch_delivery.py`` guards against a new
+    MCP-capable provider being added without the seam.
 
     ``persisted`` is passed through to CAO's own MCP resolution: ``True`` when the
     result is written to a config file a CLI reads later (prefer the stable PATH
@@ -392,7 +400,10 @@ def with_plugin_mcp(profile: Any, provider: Optional[str] = None) -> Any:
     persisted the original raw text. Claude Code, Codex, Kimi, Antigravity and
     Cursor all call ``load_agent_profile()`` again when they build their launch
     command, so each discarded the merge and launched with no plugin server;
-    Copilot never consulted the profile for MCP at all.
+    Copilot never consulted the profile for MCP at all. Review
+    pullrequestreview-5209646575 found the same gap in three more providers whose
+    loads were never wrapped — ``omp``, ``grok_cli``, ``minimax_code`` — bringing
+    the wired set to nine.
 
     Applied on **read** rather than persisted, which keeps the property that made
     re-mapping right in the first place: the expansions are absolute
