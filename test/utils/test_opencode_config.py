@@ -326,36 +326,119 @@ class TestUpsertAgentTools:
 
 
 class TestRemoveAgentTools:
-    def test_removes_existing_agent(self, tmp_config: Path):
+    def test_removes_a_cao_only_agent_entry(self, tmp_config: Path):
+        """When the entry held only CAO grants, removing them empties it away."""
         upsert_agent_tools("developer", ["cao-mcp-server"])
-        remove_agent_tools("developer")
+        remove_agent_tools("developer", owned_prefixes=["cao-mcp-server"])
         data = json.loads(tmp_config.read_text())
         assert "developer" not in data.get("agent", {})
 
     def test_noop_on_missing_agent(self, tmp_config: Path):
         write_config({"$schema": "https://opencode.ai/config.json"})
-        remove_agent_tools("nonexistent")  # should not raise
+        remove_agent_tools("nonexistent", owned_prefixes=["cao-mcp-server"])  # no raise
         data = json.loads(tmp_config.read_text())
         assert "agent" not in data or "nonexistent" not in data.get("agent", {})
 
     def test_noop_on_completely_missing_file(self, tmp_config: Path):
-        """remove_agent_tools when opencode.json does not exist yet should not raise."""
+        """No file → true no-op; the file is not created to record a removal."""
         assert not tmp_config.exists()
-        remove_agent_tools("anything")  # triggers read_config() skeleton path
-        # The function writes back whatever read_config() returns (skeleton); the file
-        # may or may not exist afterward — what matters is no exception was raised.
-        # If a file was written it must not contain the requested agent key.
-        if tmp_config.exists():
-            data = json.loads(tmp_config.read_text())
-            assert "anything" not in data.get("agent", {})
+        remove_agent_tools("anything", owned_prefixes=["cao-mcp-server"])  # no raise
+        assert not tmp_config.exists()
 
     def test_other_agents_preserved(self, tmp_config: Path):
         upsert_agent_tools("developer", ["cao-mcp-server"])
         upsert_agent_tools("supervisor", ["cao-mcp-server"])
-        remove_agent_tools("developer")
+        remove_agent_tools("developer", owned_prefixes=["cao-mcp-server"])
         data = json.loads(tmp_config.read_text())
         assert "supervisor" in data["agent"]
         assert "developer" not in data["agent"]
+
+    def test_preserves_user_fields_and_only_removes_cao_grants(self, tmp_config: Path):
+        """P1 review pullrequestreview-5209646575: an agent's model and user tool
+        keys must survive a plugin withdrawal; only the CAO grant is removed."""
+        tmp_config.parent.mkdir(parents=True)
+        tmp_config.write_text(
+            json.dumps(
+                {
+                    "agent": {
+                        "worker": {
+                            "model": "custom/model",
+                            "tools": {
+                                "bash": False,
+                                "user*": True,
+                                "plugin-tools*": True,
+                            },
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        remove_agent_tools("worker", owned_prefixes=["plugin-tools"])
+        entry = json.loads(tmp_config.read_text())["agent"]["worker"]
+        assert entry["model"] == "custom/model"
+        assert entry["tools"]["bash"] is False
+        assert entry["tools"]["user*"] is True
+        assert "plugin-tools*" not in entry["tools"]
+
+    def test_keeps_an_entry_that_still_has_user_fields_even_with_no_tools(self, tmp_config: Path):
+        """Removing the last CAO grant must not delete an entry that carries a model."""
+        tmp_config.parent.mkdir(parents=True)
+        tmp_config.write_text(
+            json.dumps(
+                {"agent": {"worker": {"model": "custom/model", "tools": {"plugin-tools*": True}}}}
+            ),
+            encoding="utf-8",
+        )
+        remove_agent_tools("worker", owned_prefixes=["plugin-tools"])
+        entry = json.loads(tmp_config.read_text())["agent"]["worker"]
+        assert entry["model"] == "custom/model"
+        assert "tools" not in entry or entry["tools"] == {}
+
+
+class TestUpsertAgentToolsPreservesUserConfig:
+    """P1 review pullrequestreview-5209646575 — the has-servers branch must not
+    clobber unrelated agent config."""
+
+    def test_user_tool_keys_and_denials_survive_a_grant(self, tmp_config: Path):
+        tmp_config.parent.mkdir(parents=True)
+        tmp_config.write_text(
+            json.dumps(
+                {
+                    "agent": {
+                        "worker": {
+                            "model": "custom/model",
+                            "tools": {"bash": False, "user*": True},
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        upsert_agent_tools("worker", ["plugin-tools"], owned_prefixes=["plugin-tools"])
+        entry = json.loads(tmp_config.read_text())["agent"]["worker"]
+        assert entry["model"] == "custom/model"
+        assert entry["tools"]["bash"] is False
+        assert entry["tools"]["user*"] is True
+        assert entry["tools"]["plugin-tools*"] is True
+
+    def test_a_dropped_collision_prunes_only_its_own_stale_grant(self, tmp_config: Path):
+        """`owned_prefixes` wider than `mcp_names` prunes a stale CAO grant, never a
+        user key."""
+        tmp_config.parent.mkdir(parents=True)
+        tmp_config.write_text(
+            json.dumps(
+                {"agent": {"worker": {"tools": {"user*": True, "dropped*": True, "kept*": True}}}}
+            ),
+            encoding="utf-8",
+        )
+        # "kept" is granted this pass; "dropped" was a prior CAO grant now withheld
+        # (e.g. lost a collision). Both are CAO-owned; "user*" is not.
+        upsert_agent_tools("worker", ["kept"], owned_prefixes=["kept", "dropped"])
+        tools = json.loads(tmp_config.read_text())["agent"]["worker"]["tools"]
+        assert tools["kept*"] is True
+        assert "dropped*" not in tools
+        assert tools["user*"] is True
 
 
 # ---------------------------------------------------------------------------

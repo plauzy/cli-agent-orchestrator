@@ -368,6 +368,18 @@ def _materialize_opencode_mcp(
     if not isinstance(existing_before, dict):
         existing_before = {}
 
+    # The CAO-owned server names to prune stale ``"<name>*"`` grants for. It is not
+    # enough to prune only what this pass delivers: on a REMOVE the withdrawn
+    # server is absent from ``plugin_derived``, so its grant would otherwise linger.
+    # A grant is CAO-owned iff its ``mcp.<name>`` entry resolves inside the plugin
+    # store — the same containment signal the disable reconcile below trusts — so a
+    # user's own ``"<name>*"`` grant is never in this set. Union with the current
+    # delivery covers a server whose ``mcp`` entry this pass has not written yet.
+    owned_server_names = set(plugin_derived)
+    for name, cfg in existing_before.items():
+        if isinstance(cfg, dict) and entry_within_roots(cfg, plugin_store_roots):
+            owned_server_names.add(name)
+
     collisions: List[Finding] = []
 
     if merged_servers:
@@ -392,11 +404,15 @@ def _materialize_opencode_mcp(
             upsert_mcp_server(mcp_name, opencode_mcp_cfg)
             granted.append(mcp_name)
         # Grant only the servers actually written for this agent (a dropped
-        # collision is excluded); a reinstall without MCP takes the else and
-        # withdraws the whole grant, as before.
-        upsert_agent_tools(agent_id, granted)
+        # collision is excluded from `granted`). `owned_prefixes` covers every
+        # CAO-owned server name so a grant CAO wrote for a server now dropped by a
+        # collision — or previously granted and no longer delivered — is pruned,
+        # while a user's own `tools` key is never touched.
+        upsert_agent_tools(agent_id, granted, owned_prefixes=owned_server_names)
     else:
-        remove_agent_tools(agent_id)
+        # No plugin servers for this agent: withdraw only CAO-owned grants, leaving
+        # the user's model, prompt, and hand-authored tool keys intact.
+        remove_agent_tools(agent_id, owned_prefixes=owned_server_names)
 
     # Finding 1 reconcile: disable any CAO-plugin server no longer desired.
     # Plugin servers are delivered to every agent uniformly, so a server absent

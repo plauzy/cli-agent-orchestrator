@@ -12,7 +12,7 @@ invocations are not a supported scenario.
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from cli_agent_orchestrator.constants import OPENCODE_CONFIG_DIR, OPENCODE_CONFIG_FILE, SKILLS_DIR
 from cli_agent_orchestrator.utils.mcp_resolution import resolve_cao_mcp_command
@@ -153,32 +153,101 @@ def upsert_mcp_server(name: str, config: Dict[str, Any]) -> None:
     write_config(data)
 
 
-def upsert_agent_tools(agent_name: str, mcp_names: List[str]) -> None:
-    """Set ``agent.<agent_name>.tools`` to re-enable the listed MCP servers.
+def _owned_tool_keys(server_names: Iterable[str]) -> set:
+    """The ``tools`` keys CAO writes for the given plugin MCP servers.
 
-    Creates or replaces the ``tools`` sub-dict for *agent_name*; other keys
-    under ``agent.<agent_name>`` (if any) are preserved.
+    A CAO-owned key is exactly ``"<server>*"`` — the pattern
+    :func:`upsert_agent_tools` and :func:`upsert_mcp_server` write. Any other key
+    is user-authored and must be preserved. This is the only ownership signal that
+    does not depend on a value CAO cannot observe: it is derived solely from the
+    server names CAO is delivering or withdrawing in the current pass.
+    """
+    return {f"{name}*" for name in server_names}
+
+
+def upsert_agent_tools(
+    agent_name: str,
+    mcp_names: List[str],
+    *,
+    owned_prefixes: Optional[Iterable[str]] = None,
+) -> None:
+    """Enable the listed plugin MCP servers under ``agent.<agent_name>.tools``.
+
+    Edits **only** CAO-owned ``"<server>*"`` keys, leaving every other key in the
+    ``tools`` object — a user's ``bash: false`` denial, a hand-added ``foo*: true``
+    grant — untouched in presence, value, and order.
+
+    Reported by review pullrequestreview-5209646575 (P1): the previous
+    implementation replaced the whole ``tools`` object, so an unrelated plugin add
+    (via ``refresh_installed_agents_for_plugin_mcp``) erased a user's grants and
+    could drop an explicit denial, widening the next agent's permissions.
+
+    ``owned_prefixes`` is the full set of server names CAO delivers for this pass;
+    it defaults to ``mcp_names``. It is passed separately so a server dropped by an
+    install-time collision — present in ``owned_prefixes`` but absent from
+    ``mcp_names`` — still has its stale grant pruned, while a user key is never
+    pruned because it is never in ``owned_prefixes``.
     """
     data = read_config()
-    agents_section = data.setdefault("agent", {})
-    agent_entry = agents_section.setdefault(agent_name, {})
-    agent_entry["tools"] = {f"{name}*": True for name in mcp_names}
+    agent_entry = data.setdefault("agent", {}).setdefault(agent_name, {})
+    tools = agent_entry.setdefault("tools", {})
+
+    owned = _owned_tool_keys(owned_prefixes if owned_prefixes is not None else mcp_names)
+    desired = {f"{name}*": True for name in mcp_names}
+
+    # Add or update the grants we are delivering.
+    for key, value in desired.items():
+        tools[key] = value
+    # Prune ONLY our own patterns that are no longer granted; never a user key.
+    for key in list(tools):
+        if key in owned and key not in desired:
+            del tools[key]
+
+    # Only tidy up containers WE emptied — never delete user data.
+    if not tools:
+        agent_entry.pop("tools", None)
+    if not agent_entry:
+        data["agent"].pop(agent_name, None)
     write_config(data)
 
 
-def remove_agent_tools(agent_name: str) -> None:
-    """Remove the ``agent.<agent_name>`` section entirely.
+def remove_agent_tools(
+    agent_name: str,
+    *,
+    owned_prefixes: Iterable[str],
+) -> None:
+    """Withdraw CAO-owned MCP tool grants from ``agent.<agent_name>``.
 
-    True no-op when the config file doesn't exist or the agent entry is absent
-    — the file is not created just to record a removal.
+    Removes only the ``"<server>*"`` keys for the servers named in
+    ``owned_prefixes``. Every other ``tools`` key, and every other agent field
+    (``model``, ``prompt``, …), is preserved. The ``agent.<agent_name>`` entry is
+    deleted only when nothing of the user's remains.
+
+    Reported by review pullrequestreview-5209646575 (P1): the previous
+    implementation ``agents.pop(agent_name)`` deleted the entire agent entry on a
+    no-MCP refresh, erasing the user's model selection and custom tool config.
+
+    True no-op when the config file doesn't exist or the agent entry is absent —
+    the file is not created just to record a removal.
     """
     if not OPENCODE_CONFIG_FILE.exists():
         return
     data = read_config()
-    agents = data.get("agent")
-    if not agents or agent_name not in agents:
+    agent_entry = (data.get("agent") or {}).get(agent_name)
+    if not isinstance(agent_entry, dict):
         return
-    agents.pop(agent_name)
+
+    owned = _owned_tool_keys(owned_prefixes)
+    tools = agent_entry.get("tools")
+    if isinstance(tools, dict):
+        for key in list(tools):
+            if key in owned:
+                del tools[key]
+        if not tools:
+            agent_entry.pop("tools", None)
+
+    if not agent_entry:
+        (data.get("agent") or {}).pop(agent_name, None)
     write_config(data)
 
 
