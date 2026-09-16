@@ -364,21 +364,32 @@ def _materialize_opencode_mcp(
 
     # Snapshot the pre-write state so a server written earlier in this same pass
     # is never mistaken for a pre-existing user entry on a later iteration.
-    existing_before = read_config().get("mcp", {})
+    config_before = read_config()
+    existing_before = config_before.get("mcp", {})
     if not isinstance(existing_before, dict):
         existing_before = {}
+    tools_before = config_before.get("tools", {})
 
-    # The CAO-owned server names to prune stale ``"<name>*"`` grants for. It is not
-    # enough to prune only what this pass delivers: on a REMOVE the withdrawn
-    # server is absent from ``plugin_derived``, so its grant would otherwise linger.
-    # A grant is CAO-owned iff its ``mcp.<name>`` entry resolves inside the plugin
-    # store — the same containment signal the disable reconcile below trusts — so a
-    # user's own ``"<name>*"`` grant is never in this set. Union with the current
-    # delivery covers a server whose ``mcp`` entry this pass has not written yet.
+    # The CAO-owned server names whose stale ``"<name>*"`` grants may be pruned. It
+    # is not enough to prune only what this pass delivers: on a REMOVE the withdrawn
+    # server is absent from the desired set, so its grant would otherwise linger
+    # (the whole-entry delete this replaces used to take it out — review
+    # pullrequestreview-5209646575 forbids that when the entry also holds user data).
+    #
+    # A grant is CAO-owned when CAO wrote it, and CAO records exactly that: every
+    # server CAO writes gets a top-level ``tools["<name>*"] = false`` default-deny
+    # (see ``upsert_mcp_server``). So the CAO-managed server names are the current
+    # delivery, plus every server whose ``mcp`` entry resolves inside the plugin
+    # store, plus every server carrying that top-level default-deny marker. A user's
+    # own hand-authored ``"<name>*"`` grant has none of these and is never pruned.
     owned_server_names = set(plugin_derived)
     for name, cfg in existing_before.items():
         if isinstance(cfg, dict) and entry_within_roots(cfg, plugin_store_roots):
             owned_server_names.add(name)
+    if isinstance(tools_before, dict):
+        for key, value in tools_before.items():
+            if isinstance(key, str) and key.endswith("*") and value is False:
+                owned_server_names.add(key[:-1])
 
     collisions: List[Finding] = []
 
