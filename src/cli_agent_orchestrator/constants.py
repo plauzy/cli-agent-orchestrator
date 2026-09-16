@@ -262,6 +262,16 @@ PYTE_SCREEN_ROWS = 200
 # per-chunk rendered detection produces (measured worse than the raw path).
 PYTE_QUIESCENCE_DELAY_S = 0.2
 
+# Mid-burst PROCESSING probe for rendered-screen detection (seconds). A TUI that
+# redraws a spinner every second (codex 0.153 while a command runs) never goes
+# quiescent, so edge-only detection sees the rising-edge frame (usually still
+# the previous ready state) and then nothing until the turn ends: the terminal
+# reads IDLE for its whole busy turn (observed live 2026-09-08). While a burst is
+# in progress and the terminal has not yet been seen PROCESSING, the screen is
+# probed at most this often; only a PROCESSING verdict is applied from such a
+# half-settled frame — ready statuses still wait for quiescence.
+PYTE_MIDBURST_PROBE_S = _env_positive_float("CAO_PYTE_MIDBURST_PROBE_S", 1.0)
+
 # Eager inbox delivery: when enabled, deliver queued messages to terminals in
 # PROCESSING state for providers that declare
 # accepts_input_while_processing=True. Eliminates latency between agent turns
@@ -384,6 +394,40 @@ API_BASE_URL = f"http://{SERVER_HOST}:{SERVER_PORT}"
 
 # Default timeout (seconds) for HTTP calls to the CAO API server.
 MCP_REQUEST_TIMEOUT = 30
+
+# Cross-node placement + callback routing (one-agent-per-pod topology).
+# Defined here — not in mcp_server/server.py — because BOTH the MCP client
+# (which injects/reads them for routing) and terminal_service (which reads the
+# persisted session env to notify a cross-node supervisor of a deferred-init
+# failure) need the names, and services must not import from mcp_server.
+#
+#   ADVERTISED_URL_ENV        set on a SUPERVISOR node: base URL at which peers
+#                             (worker pods) can reach this node's cao-server.
+#   ELASTIC_CALLBACK_URL_ENV  set on an elastic SUPERVISOR: narrow broker URL
+#                             workers use instead of the supervisor control API.
+#   CALLBACK_URL_ENV /        injected by the supervisor into a REMOTE worker
+#   CALLBACK_TERMINAL_ID_ENV  terminal's env at creation: the supervisor
+#                             node's advertised URL + supervisor terminal ID.
+ADVERTISED_URL_ENV = "CAO_ADVERTISED_URL"
+ELASTIC_CALLBACK_URL_ENV = "CAO_ELASTIC_CALLBACK_URL"
+CALLBACK_URL_ENV = "CAO_CALLBACK_URL"
+CALLBACK_TERMINAL_ID_ENV = "CAO_CALLBACK_TERMINAL_ID"
+ELASTIC_WORKER_ID_ENV = "CAO_ELASTIC_WORKER_ID"
+ELASTIC_RELEASE_TOKEN_ENV = "CAO_ELASTIC_RELEASE_TOKEN"
+ELASTIC_WORKER_ID_HEADER = "X-CAO-Worker-ID"
+ELASTIC_RELEASE_TOKEN_HEADER = "X-CAO-Release-Token"
+
+# The cluster's worker broker: where `cao fleet` and `cao worker` point, and
+# the token they authenticate with. Already set on a supervisor pod, which is why
+# these names are reused rather than invented — the same two values that let the
+# supervisor take a lease let an operator inspect and release one.
+#
+# The header is the broker's own, not a bearer token. It grants worker
+# create/list/release plus the broker's allowlisted per-worker routes; it is NOT a
+# credential for the node API behind them.
+ELASTIC_BROKER_URL_ENV = "CAO_ELASTIC_BROKER_URL"
+ELASTIC_BROKER_TOKEN_ENV = "CAO_ELASTIC_BROKER_TOKEN"
+ELASTIC_BROKER_TOKEN_HEADER = "X-CAO-Broker-Token"
 
 
 # Operators can extend network allowlists via the env vars handled below.
@@ -882,6 +926,16 @@ WORKFLOW_STEP_TIMEOUT = 600.0
 # flat 30s and covers any plausible multi-step, multi-minute workflow; an operator
 # running near the 100-step ceiling can raise it via the env override if needed.
 WORKFLOW_RUN_REQUEST_TIMEOUT = (WORKFLOW_STEP_TIMEOUT + 120.0) * 12 + 180.0  # = 8820.0s (~2.45h)
+
+# Client-side HTTP timeout (seconds) for the BLOCKING single-step replay call
+# ``POST /workflows/runs/{id}/steps/{step}:replay`` (``cao workflow step``, issue
+# #640). Also inline-blocking, but it runs at most ONE step, capped server-side at
+# ``WORKFLOW_STEP_TIMEOUT`` — so the multi-step ``WORKFLOW_RUN_REQUEST_TIMEOUT``
+# ceiling would hold an idle socket for ~2.45h before reporting a hung server, with
+# an author watching. Sized as the step ceiling plus the same +180s headroom
+# ``handoff`` uses for its single blocking step (mcp_server/server.py
+# ``client_timeout = timeout + 180.0``).
+WORKFLOW_STEP_REQUEST_TIMEOUT = WORKFLOW_STEP_TIMEOUT + 180.0  # = 780.0s (13min)
 
 # Poll interval (seconds) for the async-run FOLLOWERS: ``cao workflow run`` (bare
 # follow-to-terminal + ``wait``) and the ``workflow_wait`` MCP tool (issue #505,
