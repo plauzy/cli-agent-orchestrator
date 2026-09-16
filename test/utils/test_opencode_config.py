@@ -162,6 +162,60 @@ class TestTranslateMcpServerConfig:
         assert "environment" not in result
         assert "env" not in result
 
+    def test_cwd_is_carried_into_opencode_output(self):
+        """P2 review pullrequestreview-5209646575 (F4): OpenCode consumes `F.cwd`
+        when spawning a local MCP process, so a mapped `cwd` must survive
+        translation."""
+        result = translate_mcp_server_config(
+            {"type": "stdio", "command": "srv", "cwd": "/plugins/demo/root"}
+        )
+        assert result["cwd"] == "/plugins/demo/root"
+
+    def test_absent_cwd_stays_absent(self):
+        result = translate_mcp_server_config({"command": "srv"})
+        assert "cwd" not in result
+
+    def test_empty_cwd_is_not_emitted(self):
+        """An empty string is not a working directory; do not emit a useless key."""
+        result = translate_mcp_server_config({"command": "srv", "cwd": ""})
+        assert "cwd" not in result
+
+
+class TestMappedCwdReachesOpenCodeEndToEnd:
+    """P2 review pullrequestreview-5209646575 (F4) — the real map→translate path.
+
+    Rather than trust a hand-built dict, run the actual mapper (which supplies the
+    contained absolute `cwd`, explicit or defaulted to the plugin root) and then the
+    translator, asserting the `cwd` survives into the emitted OpenCode entry.
+    """
+
+    def _map_one(self, tmp_path: Path, entry: dict) -> dict:
+        from cli_agent_orchestrator.agent_plugins.mcp_mapping import map_mcp_config
+
+        root = tmp_path / "root"
+        data = tmp_path / "data"
+        root.mkdir()
+        data.mkdir()
+        cfg = {
+            "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+            "mcpServers": {"s": entry},
+        }
+        result = map_mcp_config(root, data, cfg)
+        assert result.valid, [f.code for f in result.findings]
+        return dict(result.servers[0].config), str(root)
+
+    def test_default_plugin_root_cwd_reaches_opencode(self, tmp_path: Path):
+        mapped, root = self._map_one(tmp_path, {"type": "stdio", "command": "srv"})
+        emitted = translate_mcp_server_config(mapped)
+        assert emitted["cwd"] == root, "an omitted cwd defaults to the plugin root"
+
+    def test_explicit_cwd_reaches_opencode(self, tmp_path: Path):
+        mapped, root = self._map_one(
+            tmp_path, {"type": "stdio", "command": "srv", "cwd": "${PLUGIN_ROOT}/sub"}
+        )
+        emitted = translate_mcp_server_config(mapped)
+        assert emitted["cwd"] == str(Path(root) / "sub")
+
     def test_custom_uvx_entry_passes_through(self):
         """A user-defined uvx-based MCP server is translated verbatim.
 

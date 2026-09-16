@@ -132,6 +132,17 @@ def translate_mcp_server_config(cao_config: Dict[str, Any]) -> Dict[str, Any]:
     }
     if "env" in cao_config:
         result["environment"] = cao_config["env"]
+    # Review pullrequestreview-5209646575 (P2, F4): OpenCode's MCP.connectLocal
+    # spawns the process with `cwd: F.cwd ? resolve(dir, F.cwd) : dir`
+    # (docs/issues/573-agent-plugins/opencode-verification.md:110-115), so a server
+    # whose command or args are relative to its working directory must have that
+    # directory carried through. The mapper always supplies a contained absolute
+    # `cwd` (explicit, or defaulted to the plugin root — mcp_mapping.py:477-498);
+    # pass it through unchanged so OpenCode resolves it as absolute rather than
+    # relative to its session directory.
+    cwd = cao_config.get("cwd")
+    if isinstance(cwd, str) and cwd:
+        result["cwd"] = cwd
     return result
 
 
