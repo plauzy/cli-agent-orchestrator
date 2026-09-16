@@ -169,7 +169,7 @@ class TestProjectionDegradesRatherThanRaising:
         monkeypatch.setattr(
             projection_mod,
             "_materialize",
-            lambda store, winners, target_dir, mode, previous=None: (
+            lambda store, winners, target_dir, mode, previous=None, cache=None: (
                 {},
                 mode,
                 [

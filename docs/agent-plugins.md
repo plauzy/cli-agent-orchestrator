@@ -163,6 +163,15 @@ Mode or elevation), CAO falls back to copying and reports that it did. You can
 make the choice explicit with `"skills": {"projection_mode": "copy"}` in
 `settings.json`.
 
+A copied projection carries a `.cao-projection.json` recording a digest of the
+bytes CAO wrote and the skill name it belongs to, and CAO replaces or removes such
+a directory only when both still hold. So a copy you edited in place is left alone
+and reported rather than overwritten or swept, a copy relocated to another name
+confers no ownership, and a regular file at a projected skill name is never
+removed. See
+[Agent-plugin-provided skills](skills.md#agent-plugin-provided-skills) for the
+full rule.
+
 ## Validation and what gets reported
 
 Every install and every `validate` produces a report of **findings**, each
@@ -194,6 +203,30 @@ internal MCP configuration, and merges the result into the `mcpServers` of every
 agent profile it installs — the same dict from which each provider's native MCP
 form is already derived. So a declared server reaches Kiro's agent JSON and
 OpenCode's `opencode.json` with no per-provider work.
+
+### Which providers receive plugin MCP servers
+
+| When | Providers |
+|---|---|
+| **Install time** — written into a config file the CLI reads later | `kiro_cli`, `opencode_cli` |
+| **Launch time** — recomputed each time a terminal is created | `claude_code`, `codex`, `kimi_cli`, `cursor_cli`, `copilot_cli`, `antigravity_cli`, `omp`, `grok_cli`, `mcode` |
+| **Never** — the provider builds no MCP configuration at all | `hermes`, `mock_cli` |
+
+The last row is *reported*, not silent: installing an agent for one of those
+providers emits an `mcp.provider_unsupported` finding naming each server that
+will not arrive. Only MCP is affected — the plugin's skills are delivered
+normally.
+
+Launch-time delivery is recomputed rather than persisted on purpose: the mapped
+paths are absolute `${PLUGIN_ROOT}`/`${PLUGIN_DATA}` expansions, so a stored copy
+would go stale the moment `CAO_HOME_DIR` moved or a `--force` reinstall relocated
+the root.
+
+The rows above are maintained by hand, but the *classification they describe* is
+machine-checked: `test_mcp_launch_delivery.py` asserts that every `ProviderType`
+value falls into exactly one delivery bucket, so a newly supported provider cannot
+be added without a test failing. Nothing parses this table — if you change the
+code, change these rows too.
 
 When the merge happens matters, and it is worth knowing as an operator:
 
@@ -232,6 +265,13 @@ answers. On OpenCode, that shared `opencode.json` may also hold servers **you**
 wrote by hand; CAO applies the same rule there, dropping a plugin server with a
 report rather than overwriting an entry it cannot prove it placed.
 
+The same restraint applies to the per-agent tool grant OpenCode needs. CAO **merges
+into** `agent.<id>.tools` and withdraws only the `<servername>*` keys it recorded
+granting (in a `cao-grants.json` sidecar beside `opencode.json`) or can place inside
+its own plugin store — so a `model`, `prompt` or `"bash": false` you set on a
+CAO-installed agent survives every install, refresh and uninstall. See
+[`opencode-cli.md`](opencode-cli.md) for the exact rule.
+
 > **A plugin's MCP servers are commands the plugin chose, run on your machine
 > with your user's permissions.** CAO expands only the two placeholders below,
 > keeps every server's working directory and `./`-rooted command inside the
@@ -267,9 +307,19 @@ Some entries are rejected, always with a report and never silently:
   itself, after applying the plugin's own `env`; an entry that tries to override
   them is invalidated.
 - **`cwd` must stay contained**, checked after expansion against whichever root
-  it is anchored to. Omitted, it defaults to the plugin root.
+  it is anchored to. Omitted, it defaults to the plugin root, and is passed to
+  OpenCode as `cwd`.
 - **A transport the target provider cannot carry is skipped**, not failed over
-  to a different one.
+  to a different one. Where the two vocabularies merely differ, the name is
+  translated rather than refused — Grok writes `streamable-http` as its own
+  `http`.
+- **A server name the target provider cannot express is skipped.** The
+  specification puts no pattern on `mcpServers` keys, but a provider's own config
+  format may: MiniMax Code accepts only `^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$`, so
+  a server called `Acme` is dropped with a report for that provider and delivered
+  normally to every other. Reported rather than passed through because MiniMax's
+  serializer *rejects* such a name while a terminal is being created — passing it
+  on would cost you the agent, not just the tool.
 - **Credential-shaped `env` and `headers` values are warned about**, never
   blocked. The specification forbids credentials there; use `cao env` and CAO's
   secret gate for real secrets.

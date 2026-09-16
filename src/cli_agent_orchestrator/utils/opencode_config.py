@@ -12,7 +12,7 @@ invocations are not a supported scenario.
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping
+from typing import Any, Dict, Iterable, List, Mapping, Set
 
 from cli_agent_orchestrator.constants import OPENCODE_CONFIG_DIR, OPENCODE_CONFIG_FILE, SKILLS_DIR
 from cli_agent_orchestrator.utils.mcp_resolution import resolve_cao_mcp_command
@@ -21,6 +21,25 @@ from cli_agent_orchestrator.utils.path_validation import flatten_path_separators
 logger = logging.getLogger(__name__)
 
 _SCHEMA = "https://opencode.ai/config.json"
+
+#: Sidecar that records which ``agent.<id>.tools`` keys CAO granted.
+#:
+#: Kept *beside* ``opencode.json`` rather than inside it because OpenCode owns
+#: that file's schema: an ``x-cao-grants`` key under ``agent.<id>`` would put CAO
+#: bookkeeping into a user-visible, user-editable entry, and the sibling ``mcp``
+#: entries forbid extra properties outright (``additionalProperties: false``), so
+#: there is no consistent in-file place to put it. Kept beside the config rather
+#: than in the plugin store because the two must be deleted together: a wiped
+#: ``CAO_HOME_DIR`` with a surviving ``opencode.json`` is exactly the state in
+#: which stale grants would otherwise become unremovable.
+#:
+#: What the sidecar buys that plugin-store containment does not: a grant for a
+#: server the *profile* declares — ``cao-mcp-server*`` above all — whose ``mcp``
+#: entry never resolves inside the store and so can never be proven CAO's from
+#: the config bytes alone.
+GRANT_RECORD_FILENAME = "cao-grants.json"
+
+_EMPTY_GRANT_RECORD: Dict[str, Any] = {"version": 1, "agents": {}}
 
 
 def to_opencode_agent_id(profile_name: str) -> str:
@@ -115,6 +134,17 @@ def translate_mcp_server_config(cao_config: Dict[str, Any]) -> Dict[str, Any]:
     - ``command`` (str) + ``args`` (list) → ``command`` (list, combined)
     - ``"enabled": true`` added
     - ``env`` → ``environment`` (OpenCode's key for process env vars)
+    - ``cwd`` → ``cwd`` (OpenCode ``McpLocalConfig.cwd``; agent-plugin servers
+      default to their ``PLUGIN_ROOT``)
+
+    Reproduced by review 3 on #584: ``cwd`` was dropped here, so a plugin whose
+    ``command``/``args`` are relative to its working directory started in
+    OpenCode's workspace directory instead. The mapper always supplies an
+    absolute, contained ``cwd`` for plugin servers
+    (``agent_plugins/mcp_mapping.py``), so OpenCode's "relative paths resolve from
+    the workspace directory" rule never applies to those. A profile-declared
+    ``cwd`` is passed through as the author wrote it — ``AgentProfile.mcpServers``
+    is ``Dict[str, Any]``, so CAO does not own that value.
     """
     # Resolve the bundled cao-mcp-server console script to a PATH-independent
     # invocation before flattening into OpenCode's command list.
@@ -132,6 +162,13 @@ def translate_mcp_server_config(cao_config: Dict[str, Any]) -> Dict[str, Any]:
     }
     if "env" in cao_config:
         result["environment"] = cao_config["env"]
+    # Emitted only when the source actually has one: an invented `cwd` would
+    # change where a profile-declared server runs, and an empty string is not a
+    # directory. OpenCode's `mcp` entries are `additionalProperties: false`, so
+    # `cwd` is the one legal place for this and no marker key may join it.
+    cwd = cao_config.get("cwd")
+    if isinstance(cwd, str) and cwd:
+        result["cwd"] = cwd
     return result
 
 
@@ -153,33 +190,213 @@ def upsert_mcp_server(name: str, config: Dict[str, Any]) -> None:
     write_config(data)
 
 
-def upsert_agent_tools(agent_name: str, mcp_names: List[str]) -> None:
-    """Set ``agent.<agent_name>.tools`` to re-enable the listed MCP servers.
+def _grant_record_path() -> Path:
+    """Where the grant sidecar lives, derived from ``OPENCODE_CONFIG_FILE`` at call time.
 
-    Creates or replaces the ``tools`` sub-dict for *agent_name*; other keys
-    under ``agent.<agent_name>`` (if any) are preserved.
+    Deliberately *not* a module constant. ``OPENCODE_CONFIG_FILE`` is fixed at
+    ``~/.aws/opencode/opencode.json`` in production (there is no override for it),
+    but every test fixture isolates OpenCode state by rebinding this module's
+    global — and a path computed at import time would ignore that rebind and write
+    the developer's real home. Deriving it per call is what keeps the sidecar
+    following the config file it belongs to.
     """
+    return OPENCODE_CONFIG_FILE.with_name(GRANT_RECORD_FILENAME)
+
+
+def read_grant_record() -> Dict[str, Any]:
+    """Load the grant sidecar, degrading to an empty record.
+
+    A missing sidecar is the normal pre-fix / first-install state and is silent.
+    A corrupt or wrongly-shaped one is *warned about and ignored* rather than
+    raised on: the sidecar exists to let CAO withdraw its own grants, so a
+    damaged one must degrade to "CAO can only prove ownership from the plugin
+    store" — never to a failed install.
+    """
+    path = _grant_record_path()
+    if not path.exists():
+        return dict(_EMPTY_GRANT_RECORD, agents={})
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("opencode grant record at %s is unreadable (%s) — ignoring", path, exc)
+        return dict(_EMPTY_GRANT_RECORD, agents={})
+    if not isinstance(loaded, dict) or not isinstance(loaded.get("agents"), dict):
+        logger.warning("opencode grant record at %s has an unexpected shape — ignoring", path)
+        return dict(_EMPTY_GRANT_RECORD, agents={})
+    return loaded
+
+
+def _write_grant_record(record: Dict[str, Any]) -> None:
+    """Persist the grant sidecar atomically (temp file + ``replace``).
+
+    Same discipline as ``InstalledPluginStore.write_record``: a torn write here
+    would look like a corrupt record on the next read and silently downgrade CAO
+    to plugin-store-only ownership, leaking grants.
+
+    Best effort, symmetrically with :func:`read_grant_record`. By the time this
+    runs ``opencode.json`` has already been updated, so raising would report the
+    install as *failed* after the user-visible half succeeded — and the cost of a
+    lost sidecar is only that CAO falls back to the containment proof, which is
+    exactly the pre-sidecar behaviour. An unwritable sidecar must not be worse
+    than an absent one.
+    """
+    path = _grant_record_path()
+    temp_path = path.with_name(f".{path.name}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        temp_path.replace(path)
+    except OSError as exc:
+        logger.warning(
+            "Could not record OpenCode tool grants at %s (%s); CAO will fall back to "
+            "plugin-store containment when withdrawing them",
+            path,
+            exc,
+        )
+
+
+def _recorded_grants(agent_name: str) -> Set[str]:
+    """The ``tools`` keys the sidecar says CAO granted to *agent_name*."""
+    agents = read_grant_record().get("agents", {})
+    recorded = agents.get(agent_name) if isinstance(agents, dict) else None
+    if not isinstance(recorded, list):
+        return set()
+    return {key for key in recorded if isinstance(key, str)}
+
+
+def _record_grants(agent_name: str, keys: Iterable[str]) -> None:
+    """Set (or clear) the sidecar row for *agent_name*, writing only on change."""
+    record = read_grant_record()
+    agents = record.setdefault("agents", {})
+    if not isinstance(agents, dict):  # pragma: no cover - read_grant_record guarantees dict
+        agents = {}
+        record["agents"] = agents
+    desired = sorted(set(keys))
+    if desired:
+        if agents.get(agent_name) == desired:
+            return
+        agents[agent_name] = desired
+    else:
+        if agent_name not in agents:
+            return
+        agents.pop(agent_name)
+    record["version"] = 1
+    _write_grant_record(record)
+
+
+def _reconcile_agent_grants(
+    agent_name: str,
+    mcp_names: Iterable[str],
+    plugin_store_roots: Iterable[Path],
+    *,
+    prune_empty_agent: bool,
+) -> None:
+    """Bring ``agent.<agent_name>.tools`` in line with *mcp_names*, touching only CAO's keys.
+
+    The set CAO may take away is the union of two provable sources — never "every
+    key in the map":
+
+    * what the sidecar records CAO having granted to this agent, and
+    * ``<server>*`` for any ``mcp`` entry whose paths resolve inside the plugin
+      store, which is CAO-managed by construction (this is what keeps a
+      pre-sidecar install, or one whose sidecar was lost, still cleanable).
+
+    Everything else in ``tools`` is the user's and is copied through untouched.
+    """
+    roots = list(plugin_store_roots)
+    owned_now = {f"{name}*": True for name in mcp_names}
+
     data = read_config()
-    agents_section = data.setdefault("agent", {})
-    agent_entry = agents_section.setdefault(agent_name, {})
-    agent_entry["tools"] = {f"{name}*": True for name in mcp_names}
-    write_config(data)
+    before = json.dumps(data, sort_keys=True)
+
+    owned_before: Set[str] = _recorded_grants(agent_name)
+    if not owned_now and not owned_before and _agent_entry_absent(data, agent_name):
+        # Nothing to grant, nothing recorded to withdraw, and no entry to prune.
+        # Returning here keeps the removal path a *true* no-op: the reconcile below
+        # would otherwise materialise an empty `"agent": {}` section into a config
+        # that never had one, which the pre-fix `remove_agent_tools` did not do.
+        return
+    servers = data.get("mcp")
+    if isinstance(servers, dict):
+        for server_name, entry in servers.items():
+            if isinstance(entry, Mapping) and entry_within_roots(entry, roots):
+                owned_before.add(f"{server_name}*")
+
+    agents_section = data.get("agent")
+    if not isinstance(agents_section, dict):
+        agents_section = {}
+        data["agent"] = agents_section
+    agent_entry = agents_section.get(agent_name)
+    if not isinstance(agent_entry, dict):
+        agent_entry = {}
+        agents_section[agent_name] = agent_entry
+    tools = agent_entry.get("tools")
+    if not isinstance(tools, dict):
+        tools = {}
+    else:
+        tools = dict(tools)
+
+    for withdrawn in owned_before - set(owned_now):
+        tools.pop(withdrawn, None)
+    tools.update(owned_now)
+    agent_entry["tools"] = tools
+
+    if prune_empty_agent and set(agent_entry) <= {"tools"} and not tools:
+        # Nothing of the user's left to keep alive: the entry existed only to
+        # carry CAO's grant. Dropping it restores the pre-install shape instead
+        # of leaving `{"tools": {}}` litter behind.
+        agents_section.pop(agent_name, None)
+
+    if json.dumps(data, sort_keys=True) != before:
+        write_config(data)
+    _record_grants(agent_name, owned_now)
 
 
-def remove_agent_tools(agent_name: str) -> None:
-    """Remove the ``agent.<agent_name>`` section entirely.
+def upsert_agent_tools(
+    agent_name: str,
+    mcp_names: List[str],
+    *,
+    plugin_store_roots: Iterable[Path] = (),
+) -> None:
+    """Grant *agent_name* the listed MCP servers by merging into ``agent.<agent_name>.tools``.
 
-    True no-op when the config file doesn't exist or the agent entry is absent
-    — the file is not created just to record a removal.
+    Reproduced by review 3 on #584: this replaced the whole ``tools`` map with
+    ``{f"{name}*": True for name in mcp_names}``, so any tool policy the user had
+    written for a CAO-installed agent — ``"bash": false``, a ``"user*": true`` for
+    their own server — was destroyed on every install, refresh and reinstall.
+    Keys CAO did not put there are now preserved; only keys CAO can *prove* are
+    its own (``plugin_store_roots`` containment, or the ``cao-grants.json``
+    sidecar) are withdrawn when they leave the desired set.
+
+    ``plugin_store_roots`` defaults to empty so a caller that has no store handy
+    still gets correct merge behaviour — it simply relies on the sidecar alone
+    for withdrawal, which is the conservative direction (a grant CAO cannot prove
+    it owns is left in place, never deleted).
+    """
+    _reconcile_agent_grants(agent_name, mcp_names, plugin_store_roots, prune_empty_agent=False)
+
+
+def remove_agent_tools(agent_name: str, *, plugin_store_roots: Iterable[Path] = ()) -> None:
+    """Withdraw every grant CAO gave *agent_name*, leaving the user's keys alone.
+
+    Reproduced by review 3 on #584: this popped the entire ``agent.<agent_name>``
+    entry, discarding a user's ``model``, ``prompt``, ``temperature`` and tool
+    policy for an agent CAO merely installed. The entry is now dropped only when
+    withdrawing CAO's grants empties it completely — i.e. when it never held
+    anything but CAO's ``tools`` keys.
+
+    True no-op when the config file doesn't exist — the file is not created just
+    to record a removal.
     """
     if not OPENCODE_CONFIG_FILE.exists():
         return
-    data = read_config()
+    _reconcile_agent_grants(agent_name, (), plugin_store_roots, prune_empty_agent=True)
+
+
+def _agent_entry_absent(data: Mapping[str, Any], agent_name: str) -> bool:
+    """Whether ``agent.<agent_name>`` is not present in a parsed config."""
     agents = data.get("agent")
-    if not agents or agent_name not in agents:
-        return
-    agents.pop(agent_name)
-    write_config(data)
+    return not isinstance(agents, dict) or agent_name not in agents
 
 
 # ── removal + install-side ownership guard (design.md §10a) ──────────────────

@@ -674,3 +674,425 @@ class TestOpencodeRemovalIsDisableNotDelete:
             encoding="utf-8"
         )
         assert "demo-tools" not in copilot_md
+
+
+class TestOpencodeCwdIsEmitted:
+    """Reproduced by review 3 on #584 — the mapped ``cwd`` never reached OpenCode.
+
+    The mapper always supplies an absolute, contained working directory for a
+    plugin server (defaulting to its ``PLUGIN_ROOT``), and OpenCode's
+    ``McpLocalConfig.cwd`` is what its spawn honours — so dropping it in
+    translation silently started the server in OpenCode's workspace directory.
+    Asserted on the real emitted ``opencode.json``, not on the translator alone.
+    """
+
+    def test_the_default_plugin_root_cwd_reaches_opencode_json(self, opencode_workspace):
+        """An ``mcp.json`` with no ``cwd`` still lands one: the plugin root."""
+        from cli_agent_orchestrator.services.install_service import install_agent
+
+        opencode_workspace["write_profile"]("worker")
+        install_plugin(opencode_workspace, "demo", mcp=mcp_doc(**{"demo-tools": stdio()}))
+        install_agent("worker", "opencode_cli")
+
+        entry = opencode_json(opencode_workspace)["mcp"]["demo-tools"]
+        expected = opencode_workspace["store"].plugin_root("demo")
+        assert Path(entry["cwd"]).resolve() == expected.resolve()
+
+    def test_an_explicit_cwd_reaches_opencode_json(self, opencode_workspace):
+        """A declared ``${PLUGIN_ROOT}``-relative ``cwd`` is expanded and emitted."""
+        from cli_agent_orchestrator.services.install_service import install_agent
+
+        opencode_workspace["write_profile"]("worker")
+        source = build_plugin(
+            opencode_workspace["tmp_path"] / "src" / "demo",
+            "demo",
+            skills=["alpha"],
+            mcp_text=mcp_doc(**{"demo-tools": stdio(cwd="${PLUGIN_ROOT}/work")}),
+        )
+        (source / "work").mkdir()
+        outcome = install(
+            PluginSource(kind="path", location=str(source)),
+            store=opencode_workspace["store"],
+            skills_dir=opencode_workspace["skills_dir"],
+            refresh_agents=False,
+        )
+        assert outcome.installed, [f.message for f in outcome.report.findings]
+
+        install_agent("worker", "opencode_cli")
+
+        entry = opencode_json(opencode_workspace)["mcp"]["demo-tools"]
+        expected = opencode_workspace["store"].plugin_root("demo") / "work"
+        # Resolved on both sides: a tmp path can itself be a symlink.
+        assert Path(entry["cwd"]).resolve() == expected.resolve()
+
+    def test_a_pre_fix_entry_without_cwd_is_upgraded_not_reported(
+        self, opencode_workspace, monkeypatch
+    ):
+        """The upgrade path: an entry written before this fix gains its ``cwd``.
+
+        Such an entry is not byte-equal to what CAO writes now, so ownership has to
+        hold through the in-store ``environment`` clause of
+        ``is_cao_owned_mcp_entry``. If it did not, every pre-fix plugin entry would
+        be reported as a user collision and never gain a ``cwd``.
+        """
+        from cli_agent_orchestrator.services.install_service import install_agent
+
+        captured = _finding_spy(monkeypatch)
+        opencode_workspace["write_profile"]("worker")
+        install_plugin(opencode_workspace, "demo", mcp=mcp_doc(**{"demo-tools": stdio()}))
+
+        plugin_root = opencode_workspace["store"].plugin_root("demo")
+        config_file = opencode_workspace["opencode_config"]
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        config_file.write_text(
+            json.dumps(
+                {
+                    "$schema": "https://opencode.ai/config.json",
+                    "mcp": {
+                        "demo-tools": {
+                            "type": "local",
+                            "command": ["demo-server"],
+                            "enabled": True,
+                            # In-store, which is what proves the entry is CAO's.
+                            "environment": {"PLUGIN_ROOT": str(plugin_root)},
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        install_agent("worker", "opencode_cli")
+
+        entry = opencode_json(opencode_workspace)["mcp"]["demo-tools"]
+        assert Path(entry["cwd"]).resolve() == plugin_root.resolve()
+        assert "mcp_delivery.opencode_config_collision" not in [f.code for f in captured]
+
+
+class TestAProviderWithNoMcpPathSaysSo:
+    """Reproduced by review 3 on #584: "no MCP path" was indistinguishable from silence.
+
+    Hermes and the mock provider build no MCP configuration whatsoever. Their
+    ``PROVIDER_TRANSPORTS`` row used to claim stdio, so a plugin's stdio server was
+    reported as *mapped* and then quietly went nowhere. An empty row plus an
+    explicit finding is the honest answer, and it is loud because an operator who
+    installed a plugin for its tool needs to know the tool is not coming.
+    """
+
+    def test_installing_for_hermes_reports_provider_unsupported(self, agent_workspace, monkeypatch):
+        from cli_agent_orchestrator.services.install_service import install_agent
+
+        captured = _finding_spy(monkeypatch)
+        agent_workspace["write_profile"]("worker")
+        install_plugin(agent_workspace, "demo", mcp=mcp_doc(**{"demo-tools": stdio()}))
+
+        assert install_agent("worker", "hermes").success
+
+        codes = [f.code for f in captured]
+        assert "mcp.provider_unsupported" in codes, codes
+        # Not reported as a transport problem: no transport would help.
+        assert "mcp.transport_unsupported" not in codes
+
+    def test_the_plugins_skills_are_unaffected(self, agent_workspace, monkeypatch):
+        """The finding's promise, asserted: only MCP is undeliverable, not skills."""
+        from cli_agent_orchestrator.services.install_service import install_agent
+
+        agent_workspace["write_profile"]("worker")
+        install_plugin(
+            agent_workspace, "demo", mcp=mcp_doc(**{"demo-tools": stdio()}), skills=("alpha",)
+        )
+        assert install_agent("worker", "hermes").success
+        assert (agent_workspace["skills_dir"] / "alpha").exists()
+
+
+class TestOpencodeAgentEntryIsNeverClobbered:
+    """Reproduced by review 3 on #584 — CAO destroyed user state in ``agent.<id>``.
+
+    ``upsert_agent_tools`` replaced the whole ``tools`` map and
+    ``remove_agent_tools`` popped the whole ``agent.<id>`` entry, so a user's
+    ``model``, ``prompt`` or ``"bash": false`` on a CAO-installed agent was wiped
+    on every install, refresh and uninstall. OpenCode's config is shared and
+    hand-edited by design (unlike Kiro's and Copilot's per-agent files, which CAO
+    rewrites wholesale and legitimately owns), so the same "only touch what CAO
+    can prove it owns" rule that governs ``mcp`` entries has to govern the grant.
+
+    Asserted end to end on the real ``opencode.json`` through ``install_agent``
+    and the real refresh, not on the helpers alone.
+    """
+
+    def test_a_users_agent_keys_survive_an_agent_install(self, opencode_workspace):
+        """The install-side clobber: a pre-existing hand-written entry is merged into."""
+        from cli_agent_orchestrator.services.install_service import install_agent
+
+        opencode_workspace["write_profile"]("worker")
+        install_plugin(opencode_workspace, "demo", mcp=mcp_doc(**{"demo-tools": stdio()}))
+
+        config_file = opencode_workspace["opencode_config"]
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        config_file.write_text(
+            json.dumps(
+                {
+                    "$schema": "https://opencode.ai/config.json",
+                    "agent": {
+                        "worker": {
+                            "model": "custom/model",
+                            "prompt": "stay terse",
+                            "tools": {"bash": False, "user*": True},
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        assert install_agent("worker", "opencode_cli").success
+
+        entry = opencode_json(opencode_workspace)["agent"]["worker"]
+        assert entry["model"] == "custom/model"
+        assert entry["prompt"] == "stay terse"
+        assert entry["tools"]["bash"] is False
+        assert entry["tools"]["user*"] is True
+        assert entry["tools"]["demo-tools*"] is True
+
+    def test_the_full_lifecycle_preserves_user_state_and_still_withdraws_the_grant(
+        self, opencode_workspace
+    ):
+        """The reviewer's scenario: install → user edits → reinstall → plugin removed.
+
+        The grant must come and go across the whole lifecycle while the user's
+        keys are never touched — the two halves of the finding in one flow, so a
+        fix that only merges (and never withdraws) fails here too.
+        """
+        from cli_agent_orchestrator.services.install_service import (
+            install_agent,
+            refresh_installed_agents_for_plugin_mcp,
+        )
+
+        opencode_workspace["write_profile"]("worker")
+        install_plugin(
+            opencode_workspace,
+            "demo",
+            mcp=mcp_doc(**{"demo-tools": stdio(args=["--root", "${PLUGIN_ROOT}"])}),
+        )
+
+        # 1. First install — CAO writes its grant.
+        assert install_agent("worker", "opencode_cli").success
+        assert opencode_json(opencode_workspace)["agent"]["worker"]["tools"]["demo-tools*"] is True
+
+        # 2. The user edits the entry CAO created, then reinstalls.
+        data = opencode_json(opencode_workspace)
+        data["agent"]["worker"]["model"] = "custom/model"
+        data["agent"]["worker"]["tools"]["bash"] = False
+        data["agent"]["worker"]["tools"]["user*"] = True
+        opencode_workspace["opencode_config"].write_text(
+            json.dumps(data, indent=2) + "\n", encoding="utf-8"
+        )
+
+        assert install_agent("worker", "opencode_cli").success
+        entry = opencode_json(opencode_workspace)["agent"]["worker"]
+        assert entry["model"] == "custom/model"
+        assert entry["tools"] == {"demo-tools*": True, "bash": False, "user*": True}
+
+        # 3. The plugin goes away — only CAO's own key is withdrawn.
+        uninstall(
+            "demo",
+            store=opencode_workspace["store"],
+            skills_dir=opencode_workspace["skills_dir"],
+            refresh_agents=False,
+        )
+        refresh_installed_agents_for_plugin_mcp()
+
+        entry = opencode_json(opencode_workspace)["agent"]["worker"]
+        assert "demo-tools*" not in entry["tools"]
+        assert entry["model"] == "custom/model"
+        assert entry["tools"]["bash"] is False
+        assert entry["tools"]["user*"] is True
+
+    def test_one_agents_install_leaves_another_agents_user_keys_alone(self, opencode_workspace):
+        """Grants are per-agent; installing ``other`` must not reach into ``worker``."""
+        from cli_agent_orchestrator.services.install_service import install_agent
+
+        opencode_workspace["write_profile"]("worker")
+        opencode_workspace["write_profile"]("other")
+        install_plugin(opencode_workspace, "demo", mcp=mcp_doc(**{"demo-tools": stdio()}))
+
+        assert install_agent("worker", "opencode_cli").success
+        data = opencode_json(opencode_workspace)
+        data["agent"]["worker"]["tools"]["bash"] = False
+        opencode_workspace["opencode_config"].write_text(
+            json.dumps(data, indent=2) + "\n", encoding="utf-8"
+        )
+
+        assert install_agent("other", "opencode_cli").success
+
+        agents = opencode_json(opencode_workspace)["agent"]
+        assert agents["worker"]["tools"] == {"demo-tools*": True, "bash": False}
+        assert agents["other"]["tools"]["demo-tools*"] is True
+
+    def test_a_server_the_profile_stopped_declaring_loses_only_its_grant(self, opencode_workspace):
+        """A profile-declared server withdrawn by the user: grant goes, entry stays.
+
+        The `mcp` entry is not CAO's to delete (it is not in the plugin store), so
+        only the per-agent grant is withdrawn -- and the user's own `tools` keys
+        are not collateral.
+        """
+        from cli_agent_orchestrator.services.install_service import install_agent
+
+        opencode_workspace["write_profile"](
+            "worker",
+            frontmatter='mcpServers:\n  profile-srv:\n    type: stdio\n    command: "srv"\n',
+        )
+        assert install_agent("worker", "opencode_cli").success
+        assert opencode_json(opencode_workspace)["agent"]["worker"]["tools"]["profile-srv*"] is True
+
+        data = opencode_json(opencode_workspace)
+        data["agent"]["worker"]["tools"]["user*"] = True
+        opencode_workspace["opencode_config"].write_text(
+            json.dumps(data, indent=2) + "\n", encoding="utf-8"
+        )
+
+        # The user drops the server from the profile and reinstalls.
+        opencode_workspace["write_profile"]("worker")
+        assert install_agent("worker", "opencode_cli").success
+
+        result = opencode_json(opencode_workspace)
+        assert "profile-srv*" not in result["agent"]["worker"]["tools"]
+        assert result["agent"]["worker"]["tools"]["user*"] is True
+        # Not a plugin-store entry, so CAO neither deletes nor disables it.
+        assert result["mcp"]["profile-srv"]["enabled"] is True
+
+    def test_a_missing_sidecar_still_withdraws_provable_plugin_grants(self, opencode_workspace):
+        """The upgrade path: an install predating the sidecar stays cleanable.
+
+        Containment is the second proof, so deleting `cao-grants.json` costs CAO
+        the record but not the ability to withdraw a plugin server's grant.
+        """
+        from cli_agent_orchestrator.services.install_service import (
+            install_agent,
+            refresh_installed_agents_for_plugin_mcp,
+        )
+
+        opencode_workspace["write_profile"]("worker")
+        install_plugin(
+            opencode_workspace,
+            "demo",
+            mcp=mcp_doc(**{"demo-tools": stdio(args=["--root", "${PLUGIN_ROOT}"])}),
+        )
+        assert install_agent("worker", "opencode_cli").success
+
+        data = opencode_json(opencode_workspace)
+        data["agent"]["worker"]["tools"]["user*"] = True
+        opencode_workspace["opencode_config"].write_text(
+            json.dumps(data, indent=2) + "\n", encoding="utf-8"
+        )
+        # Simulate a pre-sidecar install.
+        opencode_workspace["opencode_config"].with_name("cao-grants.json").unlink()
+
+        uninstall(
+            "demo",
+            store=opencode_workspace["store"],
+            skills_dir=opencode_workspace["skills_dir"],
+            refresh_agents=False,
+        )
+        refresh_installed_agents_for_plugin_mcp()
+
+        tools = opencode_json(opencode_workspace)["agent"]["worker"]["tools"]
+        assert "demo-tools*" not in tools
+        assert tools["user*"] is True
+
+    def test_a_prepopulated_entry_survives_a_plugin_add_and_a_plugin_remove(
+        self, opencode_workspace
+    ):
+        """Both directions through the real refresh, in one test.
+
+        Added after independent review noted the reviewer's literal complaint --
+        "installing/uninstalling a plugin triggers a refresh that clobbers my
+        OpenCode agent config" -- was only met by composing two tests. This drives
+        the actual production entry point (``install``/``uninstall`` with
+        ``refresh_agents=True``, which is what the CLI does) against an entry the
+        user wrote *before* CAO ever touched it.
+        """
+        from cli_agent_orchestrator.services.install_service import install_agent
+
+        opencode_workspace["write_profile"]("worker")
+
+        # The user's own entry, written before any plugin exists.
+        config_file = opencode_workspace["opencode_config"]
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        config_file.write_text(
+            json.dumps(
+                {
+                    "$schema": "https://opencode.ai/config.json",
+                    "agent": {
+                        "worker": {
+                            "model": "custom/model",
+                            "prompt": "stay terse",
+                            "tools": {"bash": False, "user*": True},
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        assert install_agent("worker", "opencode_cli").success
+
+        def user_state():
+            entry = opencode_json(opencode_workspace)["agent"]["worker"]
+            return (
+                entry["model"],
+                entry["prompt"],
+                entry["tools"].get("bash"),
+                entry["tools"].get("user*"),
+            )
+
+        assert user_state() == ("custom/model", "stay terse", False, True)
+
+        # --- direction 1: plugin ADD triggers the real refresh -----------------
+        source = build_plugin(
+            opencode_workspace["tmp_path"] / "src" / "demo",
+            "demo",
+            skills=["alpha"],
+            mcp_text=mcp_doc(**{"demo-tools": stdio(args=["--root", "${PLUGIN_ROOT}"])}),
+        )
+        outcome = install(
+            PluginSource(kind="path", location=str(source)),
+            store=opencode_workspace["store"],
+            skills_dir=opencode_workspace["skills_dir"],
+            refresh_agents=True,
+        )
+        assert outcome.installed, [f.message for f in outcome.report.findings]
+
+        entry = opencode_json(opencode_workspace)["agent"]["worker"]
+        assert entry["tools"]["demo-tools*"] is True, "the refresh did not deliver the grant"
+        assert user_state() == ("custom/model", "stay terse", False, True)
+
+        # --- direction 2: plugin REMOVE triggers the real refresh --------------
+        uninstall(
+            "demo",
+            store=opencode_workspace["store"],
+            skills_dir=opencode_workspace["skills_dir"],
+            refresh_agents=True,
+        )
+
+        entry = opencode_json(opencode_workspace)["agent"]["worker"]
+        assert "demo-tools*" not in entry["tools"], "the grant was not withdrawn"
+        assert user_state() == ("custom/model", "stay terse", False, True)
+
+    def test_the_grant_sidecar_is_written_beside_the_opencode_config(self, opencode_workspace):
+        """Provenance is recorded, not guessed — that is what makes withdrawal safe.
+
+        Beside ``opencode.json`` rather than in it: OpenCode owns that file's
+        schema and its ``mcp`` entries forbid extra properties, so there is no
+        consistent in-file place for CAO bookkeeping.
+        """
+        from cli_agent_orchestrator.services.install_service import install_agent
+
+        opencode_workspace["write_profile"]("worker")
+        install_plugin(opencode_workspace, "demo", mcp=mcp_doc(**{"demo-tools": stdio()}))
+        assert install_agent("worker", "opencode_cli").success
+
+        sidecar = opencode_workspace["opencode_config"].with_name("cao-grants.json")
+        assert sidecar.exists()
+        record = json.loads(sidecar.read_text(encoding="utf-8"))
+        assert record["version"] == 1
+        assert "demo-tools*" in record["agents"]["worker"]

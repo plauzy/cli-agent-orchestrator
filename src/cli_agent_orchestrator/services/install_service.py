@@ -353,10 +353,17 @@ def _materialize_opencode_mcp(
       is provably CAO's (its command resolves inside the plugin store), so a
       user's own server and CAO's ``cao-mcp-server`` are never touched.
 
+    The same "only touch what CAO can prove it owns" rule governs the per-agent
+    grant: ``upsert_agent_tools``/``remove_agent_tools`` merge into
+    ``agent.<id>.tools`` and withdraw only the keys recorded in the
+    ``cao-grants.json`` sidecar or provably naming a plugin-store server, so a
+    user's ``model``, ``prompt`` or ``"bash": false`` on a CAO-installed agent
+    survives every install and uninstall (review 3 on #584).
+
     Ownership is a heuristic without persisted provenance; see
     ``opencode_config.is_cao_owned_mcp_entry`` and design.md §10a options 1/2 for
-    the exact-cleanup follow-up. Keeping the top-level ``tools`` default-deny and
-    the per-agent grant matches the prior in-place behaviour.
+    the exact-cleanup follow-up. Keeping the top-level ``tools`` default-deny
+    matches the prior in-place behaviour.
     """
     store = InstalledPluginStore()
     plugin_store_roots = (store.plugins_dir, store.data_dir)
@@ -393,10 +400,11 @@ def _materialize_opencode_mcp(
             granted.append(mcp_name)
         # Grant only the servers actually written for this agent (a dropped
         # collision is excluded); a reinstall without MCP takes the else and
-        # withdraws the whole grant, as before.
-        upsert_agent_tools(agent_id, granted)
+        # withdraws only the grant keys CAO recorded or can prove, leaving any
+        # tool policy the user wrote for this agent intact.
+        upsert_agent_tools(agent_id, granted, plugin_store_roots=plugin_store_roots)
     else:
-        remove_agent_tools(agent_id)
+        remove_agent_tools(agent_id, plugin_store_roots=plugin_store_roots)
 
     # Finding 1 reconcile: disable any CAO-plugin server no longer desired.
     # Plugin servers are delivered to every agent uniformly, so a server absent

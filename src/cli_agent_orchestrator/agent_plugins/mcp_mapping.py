@@ -108,11 +108,37 @@ PROVIDER_TRANSPORTS: Dict[str, frozenset] = {
     "opencode_cli": _STDIO_ONLY,
     "codex": _STDIO_ONLY,
     "antigravity_cli": _STDIO_ONLY,
-    # No MCP delivery path at all; listed so the table is exhaustive.
-    "hermes": _STDIO_ONLY,
-    "mock_cli": _STDIO_ONLY,
+    # Serializers that can express a url entry as well as a local command.
+    # ``grok_cli`` emits a TOML ``[mcp_servers.<name>]`` table with ``url``/``type``
+    # (its ``type`` vocabulary differs from CAO's — see ``GROK_URL_TRANSPORTS``);
+    # ``omp`` and ``mcode`` write a JSON ``mcpServers`` document that carries the
+    # entry through.
+    "omp": _ALL_TRANSPORTS,
+    "grok_cli": _ALL_TRANSPORTS,
+    "mcode": _ALL_TRANSPORTS,
+    # No MCP delivery path at all. An empty set, not stdio-only: these providers
+    # build no MCP configuration whatsoever, so reporting a *skip* per server is
+    # the honest answer and "stdio is deliverable" would be a false claim. The
+    # delivery-matrix test derives its expectations from this table, so the two
+    # cannot drift.
+    "hermes": frozenset(),
+    "mock_cli": frozenset(),
 }
 DEFAULT_TRANSPORTS = _STDIO_ONLY
+
+#: Providers whose config serializer constrains MCP **server names**, and the
+#: pattern a name must match to be deliverable.
+#:
+#: MiniMax Code writes each server into a plugin manifest whose loader rejects a
+#: name outside this shape, and ``minimax_code._serialize_server`` raises
+#: ``ProviderError`` on one. That raise happens during terminal creation, so
+#: without this gate a plugin free to name its server ``Demo_Tools`` (the MCP
+#: spec and CAO's own schema place no such restriction) would make the provider
+#: **unlaunchable** rather than merely missing a tool. Reported as a skip here so
+#: the server is dropped and the agent still starts.
+PROVIDER_SERVER_NAME_PATTERNS: Dict[str, "re.Pattern[str]"] = {
+    "mcode": re.compile(r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"),
+}
 
 #: Substrings in an ``env`` key or header name that suggest a credential.
 _CREDENTIAL_NAME_HINTS = (
@@ -287,10 +313,34 @@ def map_mcp_config(
     raw_servers = cfg.get("mcpServers") or {}
     allowed = PROVIDER_TRANSPORTS.get(provider, DEFAULT_TRANSPORTS) if provider else _ALL_TRANSPORTS
 
+    if provider and not allowed:
+        # The provider builds no MCP configuration at all, so *no* transport
+        # would help. Reported as its own code rather than as
+        # `transport_unsupported`: the latter names a transport and lists the
+        # supported ones, which reads as "declare a different type and it will
+        # work" — advice that cannot be followed here. Per server, so an operator
+        # reading the install report sees each tool they are not getting.
+        findings.extend(
+            Finding(
+                severity=Severity.SKIPPED,
+                code="mcp.provider_unsupported",
+                spec_ref="CAO policy",
+                message=(
+                    f"Provider {provider!r} has no MCP delivery path in CAO; server "
+                    f"{name!r} is not delivered. Its skills are unaffected."
+                ),
+                path=f"{MCP_FILENAME}#{name}",
+            )
+            for name in sorted(raw_servers)
+        )
+        return MappedMcpResult(findings=tuple(findings), present=True, valid=True)
+
+    name_pattern = PROVIDER_SERVER_NAME_PATTERNS.get(provider) if provider else None
+
     for name in sorted(raw_servers):
         entry = raw_servers[name]
         mapped, entry_findings = _map_entry(
-            name, entry, root_str, data_str, root, data_dir, allowed
+            name, entry, root_str, data_str, root, data_dir, allowed, name_pattern
         )
         findings.extend(entry_findings)
         if mapped is not None:
@@ -342,10 +392,31 @@ def _map_entry(
     root: Path,
     data_dir: Path,
     allowed_transports: frozenset,
+    name_pattern: Optional["re.Pattern[str]"] = None,
 ) -> Tuple[Optional[MappedServer], List[Finding]]:
     """Map one ``mcpServers`` entry. Failure invalidates only this entry."""
     findings: List[Finding] = []
     where = f"{MCP_FILENAME}#{name}"
+
+    if name_pattern is not None and not name_pattern.fullmatch(name):
+        # Checked beside the transport rule because it is the same kind of rule:
+        # a schema-valid value the target provider's serializer cannot express.
+        # Skipped rather than passed through because this one does not merely
+        # produce bad config — MiniMax's `_serialize_server` *raises*, during
+        # terminal creation, so passing it through costs the operator the whole
+        # agent instead of one tool.
+        return None, [
+            Finding(
+                severity=Severity.SKIPPED,
+                code="mcp.server_name_unsupported",
+                spec_ref="CAO policy",
+                message=(
+                    f"Server {name!r} has a name the target provider cannot express "
+                    f"(must match {name_pattern.pattern}); entry skipped"
+                ),
+                path=where,
+            )
+        ]
 
     if not isinstance(entry, Mapping):
         return None, [

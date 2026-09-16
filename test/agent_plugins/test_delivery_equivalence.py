@@ -344,6 +344,28 @@ STDIO_ONLY_PROVIDERS = {
 }
 
 
+def test_the_audited_stdio_only_set_matches_the_delivery_table():
+    """The audited list above and ``PROVIDER_TRANSPORTS`` must not drift.
+
+    Two hand-maintained descriptions of the same fact is how review 3 on #584
+    found ``omp``/``grok_cli``/``mcode`` missing from the table while this file's
+    expectations still passed. Derived here so a table edit that contradicts the
+    audit fails immediately.
+
+    Providers with an *empty* transport row are excluded: they carry nothing at
+    all, which is a different claim from "stdio only", and this file's
+    ``ALL_PROVIDERS`` does not enumerate them.
+    """
+    from cli_agent_orchestrator.agent_plugins.mcp_mapping import PROVIDER_TRANSPORTS
+
+    derived = {
+        provider
+        for provider, transports in PROVIDER_TRANSPORTS.items()
+        if transports and transports == frozenset({"stdio"})
+    }
+    assert derived == STDIO_ONLY_PROVIDERS
+
+
 @pytest.mark.parametrize("provider", ALL_PROVIDERS)
 def test_every_provider_receives_every_stdio_plugin_server(delivery_world, provider):
     """A stdio server is deliverable everywhere, so every provider gets it."""

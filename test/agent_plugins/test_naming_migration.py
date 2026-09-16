@@ -87,6 +87,13 @@ _UNSCOPED_DOCS = [
     "mcp-apps.md",
     "memory.md",
     "otel-deployment.md",
+    # Provider docs that gained an agent-plugin MCP-delivery note in review 3 on
+    # #584. Every occurrence in them is CAO's own noun, so the strict rule fits
+    # directly — no third-party "Plugin" to work around.
+    "omp-cli.md",
+    "grok-cli.md",
+    "hermes.md",
+    "mock-cli-provider.md",
 ]
 
 #: Docs whose H1 scopes the noun ("# Event Plugins", "# Agent Plugins"), so bare
@@ -108,6 +115,42 @@ _VOCABULARY_BACKLOG_DOCS = [
     "opencode-cli.md",  # OpenCode's own plugin system (its Node.js prerequisite) — same reason
     "minimax-code.md",  # MiniMax's own "Plugin" schema and user-installed Plugins — same reason
 ]
+
+#: Third-party-plugin docs that **also** legitimately reference CAO's agent
+#: plugins, declared explicitly rather than discovered.
+#:
+#: The original contract assumed the two were mutually exclusive: a doc naming a
+#: third party's plugin concept was presumed never to discuss agent plugins, and
+#: the moment one did it was told to "qualify its prose and move to
+#: ``_UNSCOPED_DOCS``". Review 3 on #584 showed that instruction can be
+#: impossible to follow. Provider docs must now document what agent-plugin MCP
+#: delivery does on their provider (OpenCode's grant sidecar; MiniMax's
+#: server-name constraint), while the same doc keeps describing that vendor's own
+#: capital-P "Plugin" — a noun neither ``agent`` nor ``event`` can correctly
+#: qualify. Promotion to ``_UNSCOPED_DOCS`` would demand exactly that misnaming.
+#:
+#: So membership here is a narrower promise than the backlog's, not a wider
+#: exemption: the third party's own noun may stay bare, but every reference to
+#: **CAO's** system must use the qualified ``agent plugin`` / ``agent-plugin``
+#: spelling. The list stays the reviewer-visible signal — a doc cannot start
+#: citing agent plugins without appearing here.
+_THIRD_PARTY_DOCS_CITING_AGENT_PLUGINS = [
+    "minimax-code.md",
+    "opencode-cli.md",
+]
+
+#: Every spelling that counts as *qualified* when naming CAO's agent plugins.
+#:
+#: ``agent-plugin`` (hyphenated, singular) is included because it was a real
+#: loophole: the contract test looked only for ``agent plugin`` and
+#: ``agent-plugins.md``, so prose like "agent-plugin servers default to their
+#: PLUGIN_ROOT" referenced the system while reading as unclassified to the guard.
+_AGENT_PLUGIN_MENTIONS = ("agent plugin", "agent-plugin", "agent-plugins.md")
+
+
+def _cites_agent_plugins(text: str) -> bool:
+    lowered = text.lower()
+    return any(token in lowered for token in _AGENT_PLUGIN_MENTIONS)
 
 
 class TestDocsVocabularyInUnscopedDocs:
@@ -240,19 +283,69 @@ class TestNoPluginDocIsSilentlyExempt:
         assert not missing, "listed doc(s) do not exist: " + ", ".join(missing)
 
     @pytest.mark.parametrize("doc", _VOCABULARY_BACKLOG_DOCS)
-    def test_a_backlog_doc_does_not_discuss_agent_plugins(self, doc):
-        """The backlog is only defensible while these docs are about the *other* system.
+    def test_a_backlog_doc_that_cites_agent_plugins_declares_it(self, doc):
+        """A third-party-plugin doc may cite agent plugins only if it says so here.
 
         A bare "plugin" in a doc that predates agent plugins is ambiguous but
         harmless as long as the doc never discusses agent plugins. The moment one
-        does, its unqualified prose becomes actively misleading and the doc has to
-        graduate to a real rule. This test is what forces that.
+        does, its unqualified prose becomes actively misleading — so the doc has to
+        declare which rule it now lives under. Two destinations, and the right one
+        depends on whose noun the doc is using:
+
+        * ``_UNSCOPED_DOCS`` when every occurrence can be qualified; or
+        * ``_THIRD_PARTY_DOCS_CITING_AGENT_PLUGINS`` when the bare noun names a
+          vendor's own product, which no CAO qualifier can correctly describe.
+
+        Either way the citation is visible in a list a reviewer reads, which is the
+        property that matters. Silence is the only outcome this forbids.
         """
-        text = (DOCS / doc).read_text(encoding="utf-8").lower()
-        assert "agent plugin" not in text and "agent-plugins.md" not in text, (
+        text = (DOCS / doc).read_text(encoding="utf-8")
+        if not _cites_agent_plugins(text):
+            return  # Still purely about the other system; nothing to declare.
+        assert doc in _THIRD_PARTY_DOCS_CITING_AGENT_PLUGINS, (
             f"{doc} now references agent plugins, so bare 'plugin' in it is ambiguous. "
-            f"Qualify its prose and move it to _UNSCOPED_DOCS."
+            f"Qualify its prose and move it to _UNSCOPED_DOCS, or — if its bare noun is "
+            f"a third party's own product that no CAO qualifier fits — add it to "
+            f"_THIRD_PARTY_DOCS_CITING_AGENT_PLUGINS."
         )
+
+    @pytest.mark.parametrize("doc", _THIRD_PARTY_DOCS_CITING_AGENT_PLUGINS)
+    def test_a_declared_doc_really_does_cite_agent_plugins(self, doc):
+        """The narrower promise must still be earned, or the entry is stale.
+
+        A doc listed here but no longer citing agent plugins belongs back in the
+        plain backlog, where the stricter "does not discuss them at all" rule
+        applies again.
+        """
+        assert doc in _VOCABULARY_BACKLOG_DOCS, f"{doc} must also be a third-party-plugin doc"
+        assert _cites_agent_plugins((DOCS / doc).read_text(encoding="utf-8")), (
+            f"{doc} no longer references agent plugins — remove it from "
+            f"_THIRD_PARTY_DOCS_CITING_AGENT_PLUGINS so the stricter rule applies again."
+        )
+
+    # NOTE — there is deliberately no mechanical content check for the docs in
+    # `_THIRD_PARTY_DOCS_CITING_AGENT_PLUGINS`, and that is a considered decision
+    # rather than an omission.
+    #
+    # A first attempt shipped one and independent review correctly called it
+    # decorative: it tested three literal phrases, only at their first occurrence,
+    # inside a 40-character window, and none of the three occurred in either doc —
+    # so it matched nothing while looking like enforcement.
+    #
+    # The obvious repair was to lean on case: in these docs the vendor's product is
+    # "Plugin" and CAO's is "plugin", so flag every lowercase bare occurrence. That
+    # premise is false. `opencode-cli.md`'s prerequisites describe *OpenCode's own*
+    # extension system as "its plugin system", lowercase, which is how OpenCode
+    # writes it. Any regex strong enough to pass that line needs a phrase allowlist,
+    # which is how the first version became decorative in the first place.
+    #
+    # What is enforced instead is the *declaration*: the two tests above make a doc
+    # unable to start citing agent plugins without appearing in this list, where a
+    # reviewer reads it. The narrower promise (CAO's noun qualified, the vendor's
+    # left alone) is held by review, and the six bare CAO references this commit
+    # introduced were qualified when the check was removed rather than left behind
+    # it. Do not re-add a matcher without a discriminator that survives that
+    # OpenCode line.
 
 
 class TestRenameRetirementIsPreparedNotActivated:

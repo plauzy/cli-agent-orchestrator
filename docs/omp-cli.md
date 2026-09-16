@@ -64,6 +64,11 @@ For stdio MCP servers, CAO resolves the runtime command and adds
 are preserved. Every generated directory is mode `0700`, generated files are
 mode `0600`, and terminal cleanup removes only its own directory.
 
+MCP servers declared by installed [agent plugins](agent-plugins.md) are merged
+into this `.mcp.json` at launch time, alongside the profile's own — recomputed on
+every terminal creation rather than persisted, so the paths never go stale. A
+server the profile already declares wins; all three transports are carried.
+
 ## Tool restrictions and approvals
 
 OMP's `--tools` only filters built-ins; it cannot fully restrict discovered

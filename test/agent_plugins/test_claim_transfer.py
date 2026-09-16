@@ -199,14 +199,17 @@ class TestSweepRefusesUnmanagedPaths:
         assert not projected.exists()
         assert findings == []
 
-    def test_a_stray_file_at_a_projected_name_is_still_removed(self, world):
-        """A regular file is never something the engine placed.
+    def test_a_regular_file_at_a_projected_name_is_preserved_with_a_finding(self, world):
+        """Reported by review 3 on #584 — this asserted the opposite before.
 
-        The guard's job is to protect a real *directory* the user owns. A plain
-        file at a projected skill name is not a skill (skill discovery gates on
-        ``is_dir()`` plus a ``SKILL.md``) and cannot be a projection, so removing
-        it by name is safe and keeps the store tidy — the guard must not turn into
-        a reason to leave junk behind.
+        The old rule was "a regular file is never something the engine placed, so
+        removing it by name is safe and keeps the store tidy". Both halves of that
+        are true and the conclusion does not follow: CAO never places a file at a
+        projected name, which means a file there is *by construction* somebody
+        else's — a note, a downloaded archive, a stub the user left. Tidiness is
+        not a licence to delete data CAO can prove it did not write. The name claim
+        is the only thing linking CAO to it, and a name claim is exactly what this
+        review established cannot authorise a delete.
         """
         stray = world["skills_dir"] / "shared-skill"
         stray.write_text("not a skill", encoding="utf-8")
@@ -218,11 +221,16 @@ class TestSweepRefusesUnmanagedPaths:
             current={},
         )
 
-        assert swept == ["shared-skill"]
-        assert not stray.exists()
-        assert findings == []
+        assert swept == []
+        assert stray.is_file()
+        assert stray.read_text(encoding="utf-8") == "not a skill"
+        skipped = [f for f in findings if f.code == "projection.sweep_skipped_unmanaged"]
+        assert skipped, [f.code for f in findings]
+        # The message must name what was found, so the operator knows the remedy.
+        assert "a regular file" in skipped[0].message
 
     def test_a_copy_mode_projection_is_still_swept(self, world, monkeypatch):
+        """The legitimate case the guard wraps: a copy CAO wrote carries its marker."""
         monkeypatch.setattr(
             "cli_agent_orchestrator.services.settings_service.get_skill_projection_mode",
             lambda: "copy",
@@ -230,13 +238,13 @@ class TestSweepRefusesUnmanagedPaths:
         _install_donor(world, "shared-skill")
         projected = world["skills_dir"] / "shared-skill"
         assert projected.is_dir() and not projected.is_symlink()
+        assert (projected / projection_module.MARKER_FILENAME).is_file()
 
         swept, _findings = projection_module._sweep(
             world["store"],
             world["skills_dir"],
             previous={"shared-skill": "donor"},
             current={},
-            mode="copy",
         )
 
         assert swept == ["shared-skill"]
@@ -251,11 +259,29 @@ class TestMaterializeRefusesUnclaimedTargets:
     directory is the same ``shutil.rmtree``. So materialization could destroy a
     directory the engine never placed, with the sweep guard fully in place.
 
-    The rule is deliberately non-circular: a real directory at a name the
-    *previous* projection did not own is somebody else's data and is refused,
-    while a name we did own stays replaceable — which is what keeps a plugin
-    upgrade and a copy-to-symlink migration working.
+    The rule is deliberately non-circular, and review 3 on #584 replaced *which*
+    non-circular rule it is: "a name the previous projection owned" became "a path
+    CAO can structurally prove it wrote" (a store symlink, or a copy whose marker
+    digest still verifies). A name we own but whose bytes changed is no longer
+    replaceable; a plugin upgrade and a copy-to-symlink migration still are.
     """
+
+    def test_a_regular_file_at_the_target_is_refused_not_unlinked(self, world):
+        """``_remove_quiet`` unlinks a file as readily as it rmtree's a directory.
+
+        The old guard only asked about directories, so a file at a projected name
+        was deleted on the materialize path even after the sweep path was fixed.
+        """
+        stray = world["skills_dir"] / "shared-skill"
+        stray.write_text("the user's note", encoding="utf-8")
+
+        _install_donor(world, "shared-skill")
+        result = rebuild_projection(world["store"], skills_dir=world["skills_dir"])
+
+        assert stray.is_file(), "materialization unlinked a file it did not place"
+        assert stray.read_text(encoding="utf-8") == "the user's note"
+        assert [f for f in result.findings if f.code == "projection.target_not_ours"]
+        assert "shared-skill" not in result.projected
 
     def test_an_unclaimed_directory_is_not_destroyed_by_materialization(self, world):
         # A directory with no SKILL.md is not classified pre-existing (that test

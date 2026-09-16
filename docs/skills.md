@@ -173,6 +173,35 @@ Mode or elevation), CAO falls back to copying the skill content and reports the
 fallback. Set `"skills": {"projection_mode": "copy"}` in `settings.json` to make
 that explicit.
 
+**A copied projection proves it is CAO's before CAO touches it again.** A symlink
+into the agent-plugin store is self-evidently CAO's; a copied directory is not, so each
+one carries a `.cao-projection.json` holding a digest of the bytes CAO wrote. CAO
+replaces or removes a copied directory only when that digest still verifies —
+which has three consequences worth knowing:
+
+- **A copy you edited in place is yours.** It is left alone rather than
+  overwritten or deleted, and always reported. Removing the agent plugin leaves
+  your edited directory behind; delete it by hand if you do not want it. Which
+  finding you see depends on what is in the directory: one that still has a
+  `SKILL.md` is recognised as your own skill and reported as
+  `projection.preexisting_collision`, *plus* a `projection.sweep_skipped_unmanaged`
+  recording that CAO gave up its claim on the name without deleting anything. A
+  directory with no `SKILL.md`, a regular file, or a symlink pointing outside the
+  agent-plugin store is reported as `projection.target_not_ours`.
+- **A regular file at a projected skill name is never removed.** CAO only ever
+  places symlinks and directories there, so a file is by definition not its own.
+- **A copy written before CAO recorded digests is adopted** on the next rebuild if
+  it is still byte-identical to the agent plugin's own skill, and re-marked. If it is
+  not identical, it is treated as yours. Note this cuts both ways: a copy *you*
+  made by hand that happens to be byte-identical to the agent plugin's skill is
+  indistinguishable from CAO's own, and is adopted as a managed projection.
+
+The marker is bound to the directory holding it — it records the skill name, and a
+marker naming a different name proves nothing — so copying a projected skill to
+another name does not carry ownership with it. It is a dot-file, so it is invisible
+to skill discovery and never becomes part of the skill. `cao skills add` strips it,
+so a skill you build from a copied projection is unambiguously yours.
+
 ## How Agents Discover Skills
 
 By default, every installed skill is available to every CAO agent. When an agent is launched, CAO appends a catalog block to the prompt listing each available skill's name and description, along with instructions to use the `load_skill` MCP tool to retrieve full content. The agent then decides when and whether to load each skill based on the task at hand.

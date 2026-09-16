@@ -313,6 +313,10 @@ _LOUD_CODES = frozenset(
         "mcp_delivery.opencode_config_collision",
         "mcp_delivery.unusable_config",
         "mcp_delivery.mapping_failed",
+        # Both are "you installed a plugin and its tool is not there", and neither
+        # is fixable by editing the profile — the operator has to know.
+        "mcp.provider_unsupported",
+        "mcp.server_name_unsupported",
     }
 )
 

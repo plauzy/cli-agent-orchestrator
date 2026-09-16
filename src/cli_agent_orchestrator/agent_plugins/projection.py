@@ -45,9 +45,12 @@ changed.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import shutil
+import stat as stat_module
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Set, Tuple
@@ -55,6 +58,16 @@ from typing import Dict, List, Mapping, Optional, Set, Tuple
 from cli_agent_orchestrator.agent_plugins.models import Finding, PluginRecord, Severity
 from cli_agent_orchestrator.agent_plugins.store import InstalledPluginStore, PluginStoreError
 from cli_agent_orchestrator.constants import SKILLS_DIR
+
+#: Provenance marker written inside every *copied* projection.
+#:
+#: A dot-file, which is what makes it invisible to every reader that matters:
+#: ``utils/skills.py`` gates on ``SKILL.md``, Kiro's installer globs
+#: ``*/SKILL.md``, and the plugin validator's ``_discover_skills`` skips
+#: dot-entries. So it proves ownership without becoming part of the skill.
+MARKER_FILENAME = ".cao-projection.json"
+MARKER_FORMAT = 1
+DIGEST_PREFIX = "sha256-tree-v1:"
 
 logger = logging.getLogger(__name__)
 
@@ -193,16 +206,26 @@ def rebuild_projection(
     records = store.list_installed()
     prior = dict(previous) if previous is not None else _previous_projection(records)
 
-    winners, collision_findings = _elect_winners(store, records, target_dir, prior)
+    # One digest cache for the whole rebuild: election, materialization and sweep
+    # each ask about the same directories, and hashing a skill tree three times
+    # per rebuild would be a real cost on a large skill store. Scoped to this call
+    # so it can never serve a stale answer across rebuilds.
+    digest_cache: Dict[str, str] = {}
+
+    winners, collision_findings = _elect_winners(store, records, target_dir, prior, digest_cache)
     findings.extend(collision_findings)
 
     resolved_mode = _resolve_mode(mode)
     materialized, mode_used, material_findings = _materialize(
-        store, winners, target_dir, resolved_mode, previous=prior
+        store, winners, target_dir, resolved_mode, cache=digest_cache
     )
     findings.extend(material_findings)
 
-    swept, sweep_findings = _sweep(store, target_dir, prior, materialized, mode=mode_used)
+    # No cache for the sweep, deliberately: materialization just rewrote some of
+    # these trees, so a digest computed before that write would be a stale answer
+    # to "are these bytes still ours". `_sweep` therefore takes no cache at all
+    # rather than a parameter every caller has to remember to pass as None.
+    swept, sweep_findings = _sweep(store, target_dir, prior, materialized)
     findings.extend(sweep_findings)
 
     findings.extend(_transition_findings(prior, materialized))
@@ -245,7 +268,8 @@ def _previous_projection(records: List[PluginRecord]) -> Dict[str, str]:
 def _preexisting_skill_names(
     store: InstalledPluginStore,
     target_dir: Path,
-    managed: Set[str],
+    previous: Mapping[str, str],
+    cache: Optional[Dict[str, str]] = None,
 ) -> Set[str]:
     """Names already owned by a built-in or user-added skill.
 
@@ -259,26 +283,29 @@ def _preexisting_skill_names(
        precisely what Requirement 14.1 forbids and what makes the reachable-set
        union in Requirement 13.2 a true union.
 
-    "CAO-managed" is decided two ways, and both are needed. A symlink resolving
-    inside ``AGENT_PLUGINS_DIR`` is *structurally* ours, which is the reliable
-    test. Copy-mode projections carry no such marker, so the ``managed`` names
-    carried over from the previous projection cover them.
+    "CAO-managed" is decided by the one structural predicate
+    (:func:`_is_managed_projection`), not by a name carried over from the previous
+    projection. Review 3 on #584: a prior claim on a name says nothing about what
+    is at that name *now*, so a copied projection the user has since edited is
+    correctly reported here as pre-existing (they own it) while an untouched or
+    marker-verified one is still recognised as CAO's. ``previous`` is passed rather
+    than a set of names because the adoption rule needs the *source* the previous
+    owner would have copied from.
     """
     names: Set[str] = set()
-    plugins_real = os.path.realpath(store.plugins_dir)
 
     if target_dir.is_dir():
         try:
             for item in target_dir.iterdir():
-                if item.name.startswith(".") or item.name in managed:
+                if item.name.startswith("."):
                     continue
-                if item.is_symlink():
-                    try:
-                        resolved = os.path.realpath(item)
-                    except OSError:  # pragma: no cover - exotic FS failure
-                        continue
-                    if resolved == plugins_real or resolved.startswith(plugins_real + os.sep):
-                        continue  # our own projection, not a pre-existing skill
+                if _is_managed_projection(
+                    item,
+                    store,
+                    source=_recorded_source(store, previous, item.name),
+                    cache=cache,
+                ):
+                    continue  # our own projection, not a pre-existing skill
                 if item.is_dir() and (item / "SKILL.md").is_file():
                     names.add(item.name)
         except OSError as exc:  # pragma: no cover - unreadable skill store
@@ -305,6 +332,7 @@ def _elect_winners(
     records: List[PluginRecord],
     target_dir: Path,
     previous: Mapping[str, str],
+    cache: Optional[Dict[str, str]] = None,
 ) -> Tuple[Dict[str, str], List[Finding]]:
     """Decide which plugin owns each contested skill name.
 
@@ -332,7 +360,7 @@ def _elect_winners(
         for skill_name in sorted(set(record.skill_names)):
             claims.setdefault(skill_name, []).append(record.name)
 
-    preexisting = _preexisting_skill_names(store, target_dir, managed=set(previous))
+    preexisting = _preexisting_skill_names(store, target_dir, previous, cache)
 
     winners: Dict[str, str] = {}
     for skill_name in sorted(claims):
@@ -413,7 +441,7 @@ def _materialize(
     winners: Mapping[str, str],
     target_dir: Path,
     mode: str,
-    previous: Optional[Mapping[str, str]] = None,
+    cache: Optional[Dict[str, str]] = None,
 ) -> Tuple[Dict[str, str], str, List[Finding]]:
     """Create the projected entries, falling back to copy mode when needed."""
     findings: List[Finding] = []
@@ -468,19 +496,16 @@ def _materialize(
         link_path = target_dir / skill_name
         # `_place` removes whatever occupies the target before writing. That is
         # correct for an entry the engine placed and catastrophic for one it did
-        # not: found by an independent audit of the F2 fix, which guarded the
-        # sweep's delete-by-name path but left this one — a real directory here is
-        # deleted by `_remove_quiet` just the same. Refuse when we have no record
-        # of having placed this name: a real directory (not a symlink into the
-        # store) at a name the previous projection did not own is somebody else's
-        # data. Names we did own stay replaceable, which is what keeps a plugin
-        # upgrade and a copy-to-symlink mode migration working.
-        claimed_before = (previous or {}).get(skill_name) is not None
-        if (
-            link_path.exists()
-            and not link_path.is_symlink()
-            and link_path.is_dir()
-            and not claimed_before
+        # not. The guard used to be "did a previous projection claim this name",
+        # which review 3 on #584 rejected for the same reason it rejected the
+        # sweep's version: a name claim cannot prove the current *bytes* are CAO's,
+        # so an in-place edit of a copied skill was silently overwritten. It is now
+        # the same structural predicate the sweep uses, so a marker-verified copy
+        # and a store symlink stay replaceable — which is what keeps a plugin
+        # upgrade and a copy-to-symlink migration working — while a regular file,
+        # a foreign symlink, an unmarked directory and an edited one are refused.
+        if (link_path.is_symlink() or link_path.exists()) and not _is_managed_projection(
+            link_path, store, source=source, cache=cache
         ):
             findings.append(
                 Finding(
@@ -489,15 +514,21 @@ def _materialize(
                     spec_ref="CAO policy",
                     message=(
                         f"Skill '{skill_name}' from plugin '{plugin_name}' was not "
-                        f"projected: {link_path} is an existing directory that no "
-                        f"previous projection placed, so it was left untouched."
+                        f"projected: {link_path} is {_describe_unmanaged(link_path)}, "
+                        f"so it was left untouched."
                     ),
                     path=skill_name,
                 )
             )
             continue
 
-        ok, used_fallback, error = _place(link_path, source, effective_mode)
+        ok, used_fallback, error = _place(
+            link_path,
+            source,
+            effective_mode,
+            plugin_name=plugin_name,
+            skill_name=skill_name,
+        )
 
         if used_fallback:
             effective_mode = PROJECTION_MODE_COPY
@@ -536,7 +567,14 @@ def _materialize(
     return materialized, effective_mode, findings
 
 
-def _place(link_path: Path, source: Path, mode: str) -> Tuple[bool, bool, Optional[str]]:
+def _place(
+    link_path: Path,
+    source: Path,
+    mode: str,
+    *,
+    plugin_name: Optional[str] = None,
+    skill_name: Optional[str] = None,
+) -> Tuple[bool, bool, Optional[str]]:
     """Put one projected skill at ``link_path``.
 
     Returns ``(ok, used_copy_fallback, error)``.
@@ -556,58 +594,245 @@ def _place(link_path: Path, source: Path, mode: str) -> Tuple[bool, bool, Option
             # Windows without Developer Mode or elevation raises here. Fall
             # back rather than failing the install (Requirement 13.4).
             logger.warning("Symlink projection failed for %s, copying instead: %s", link_path, exc)
-            ok, error = _copy_into(link_path, source)
+            ok, error = _copy_into(
+                link_path, source, plugin_name=plugin_name, skill_name=skill_name
+            )
             return ok, True, error
 
-    ok, error = _copy_into(link_path, source)
+    ok, error = _copy_into(link_path, source, plugin_name=plugin_name, skill_name=skill_name)
     return ok, False, error
 
 
-def _copy_into(link_path: Path, source: Path) -> Tuple[bool, Optional[str]]:
-    """Replace ``link_path`` with a fresh copy of ``source``."""
+def _copy_into(
+    link_path: Path,
+    source: Path,
+    *,
+    plugin_name: Optional[str] = None,
+    skill_name: Optional[str] = None,
+) -> Tuple[bool, Optional[str]]:
+    """Replace ``link_path`` with a fresh copy of ``source``, then mark it as ours.
+
+    The marker is what makes a copy-mode projection *provably* CAO's later; see
+    :func:`_write_marker`. Written after ``copytree`` and unconditionally, so a
+    plugin that packaged a stale marker inside its own skill directory cannot
+    smuggle one in — CAO always overwrites with the digest it just computed.
+    """
     try:
         _remove_quiet(link_path)
         shutil.copytree(source, link_path, symlinks=False)
-        return True, None
     except OSError as exc:
         return False, str(exc)
+    if plugin_name is not None and skill_name is not None:
+        _write_marker(link_path, plugin_name, skill_name, source)
+    return True, None
 
 
-def _is_managed_projection(path: Path, store: InstalledPluginStore, mode: str) -> bool:
+def _no_follow_opener(path: str, flags: int) -> int:
+    """``open()`` opener that refuses a symlink at the final component.
+
+    ``_tree_digest`` has already classified the entry with ``os.lstat``, so this
+    closes the TOCTOU window between that check and the open.
+    """
+    return os.open(path, flags | getattr(os, "O_NOFOLLOW", 0))
+
+
+def _tree_digest(root: Path, _cache: Optional[Dict[str, str]] = None) -> Optional[str]:
+    """A content digest over a projected directory tree, excluding the marker.
+
+    Sorted relative paths plus entry kind, size and file bytes — so a rename, a
+    truncation, an added file and an edited byte all change it.
+
+    **Nothing is followed and nothing but regular files is opened.** ``os.walk``
+    runs with ``followlinks=False``, which only covers *directory* symlinks; every
+    entry is then classified with ``os.lstat``. A symlink is hashed by the text of
+    its target, and anything that is neither a regular file nor a symlink (a FIFO,
+    socket or device) contributes its kind and nothing more. That matters because
+    this also digests plugin **source** trees for the adoption rule: a plugin is
+    free to ship a symlink or a FIFO, and ``open()`` on a FIFO would block the
+    projection forever while a symlink would silently hash a file outside the
+    plugin.
+
+    The marker file is excluded because it contains the digest; including it would
+    make the value unverifiable by construction.
+
+    Returns ``None`` when the tree cannot be read, which callers must treat as
+    "not proven ours" rather than as a match.
+    """
+    key = str(root)
+    if _cache is not None and key in _cache:
+        return _cache[key]
+    digest = hashlib.sha256()
+    try:
+        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+            dirnames.sort()
+            rel_dir = os.path.relpath(dirpath, root)
+            for name in sorted(dirnames):
+                digest.update(f"d\0{os.path.join(rel_dir, name)}\0".encode())
+            for name in sorted(filenames):
+                if rel_dir == "." and name == MARKER_FILENAME:
+                    continue
+                full = Path(dirpath) / name
+                rel = os.path.join(rel_dir, name)
+                info = os.lstat(full)
+                if stat_module.S_ISLNK(info.st_mode):
+                    # Hashed by target text, never dereferenced.
+                    digest.update(f"l\0{rel}\0".encode())
+                    digest.update(os.readlink(full).encode())
+                    continue
+                if not stat_module.S_ISREG(info.st_mode):
+                    # FIFO, socket, device: record that something of this kind is
+                    # here and move on. Opening it could block indefinitely.
+                    digest.update(f"s\0{rel}\0{stat_module.S_IFMT(info.st_mode)}\0".encode())
+                    continue
+                digest.update(f"f\0{rel}\0{info.st_size}\0".encode())
+                with open(full, "rb", opener=_no_follow_opener) as handle:
+                    for chunk in iter(lambda: handle.read(65536), b""):
+                        digest.update(chunk)
+    except OSError as exc:
+        logger.warning("Could not digest the projected tree at %s: %s", root, exc)
+        return None
+    value = f"{DIGEST_PREFIX}{digest.hexdigest()}"
+    if _cache is not None:
+        _cache[key] = value
+    return value
+
+
+def _write_marker(link_path: Path, plugin_name: str, skill_name: str, source: Path) -> None:
+    """Record that CAO placed this copied tree, and what its bytes were.
+
+    Best effort: a marker CAO cannot write leaves an *unmarked* copy, which the
+    adoption rule in :func:`_is_managed_projection` recovers as long as the copy
+    is still byte-identical to its source. Failing the projection over a marker
+    would be worse than a projection CAO has to re-prove later.
+    """
+    digest = _tree_digest(link_path)
+    if digest is None:  # pragma: no cover - unreadable tree we just wrote
+        return
+    payload = {
+        "format": MARKER_FORMAT,
+        "plugin": plugin_name,
+        "skill": skill_name,
+        # Resolved, because `_verified_marker` containment-checks it against a
+        # realpath'd plugin store. Recording the unresolved path made every marker
+        # fail to verify on any host whose CAO home has a symlink component --
+        # macOS `/tmp` -> `/private/tmp`, or a symlinked `$HOME`.
+        "source": os.path.realpath(source),
+        "digest": digest,
+    }
+    try:
+        (link_path / MARKER_FILENAME).write_text(
+            json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+        )
+    except OSError as exc:
+        logger.warning("Could not write the projection marker at %s: %s", link_path, exc)
+
+
+def _verified_marker(
+    path: Path, store: InstalledPluginStore, cache: Optional[Dict[str, str]] = None
+) -> Optional[Dict[str, object]]:
+    """The marker at ``path`` if it is well-formed, *bound to this path*, and current.
+
+    Four checks, all required:
+
+    1. ``format`` is one CAO wrote.
+    2. ``source`` lies inside the plugin store — a marker naming somewhere else
+       was not written by a projection. Compared after ``realpath`` on both sides,
+       or a symlink component anywhere in the CAO home breaks every marker.
+    3. **The marker is bound to the directory holding it**: both the recorded
+       ``skill`` and the last segment of ``source`` must equal ``path.name``.
+       Without this a marker is a bearer token — copying a marked projection to
+       another name carries ownership with it, and a later plugin claiming that
+       name would replace the user's directory with no finding at all. That is
+       *worse* than the pre-marker behaviour, which refused such a directory.
+    4. The recomputed digest equals the recorded one, which is what makes an
+       in-place edit visible: without it a marker would be a name claim again,
+       exactly the thing this review rejected.
+
+    ``plugin`` is read but deliberately **not** matched against the caller's
+    expectation: a legitimate winner transition hands a name from one plugin to
+    another, and requiring it to match would refuse that. The transition never
+    changes the *skill* name, which is why binding on that costs nothing.
+    """
+    marker_path = path / MARKER_FILENAME
+    if not marker_path.is_file():
+        return None
+    try:
+        loaded = json.loads(marker_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(loaded, dict) or loaded.get("format") != MARKER_FORMAT:
+        return None
+    source = loaded.get("source")
+    if not isinstance(source, str):
+        return None
+    source_real = os.path.realpath(source)
+    if not _within(source_real, store.plugins_dir):
+        return None
+    if loaded.get("skill") != path.name or os.path.basename(source_real) != path.name:
+        return None
+    recorded = loaded.get("digest")
+    if not isinstance(recorded, str) or recorded != _tree_digest(path, cache):
+        return None
+    return loaded
+
+
+def _within(candidate: str, root: Path) -> bool:
+    """Whether ``candidate`` is lexically inside ``root``, after realpath on root."""
+    root_real = os.path.realpath(root)
+    return candidate == root_real or candidate.startswith(root_real + os.sep)
+
+
+def _is_managed_projection(
+    path: Path,
+    store: InstalledPluginStore,
+    *,
+    source: Optional[Path] = None,
+    cache: Optional[Dict[str, str]] = None,
+) -> bool:
     """Whether ``path`` is still an entry the projection engine placed.
 
-    The defence-in-depth half of review finding F2. Phase one of the sweep used
-    to remove ``previous - current`` **by name only** — no structural check at
-    all, while phase two right below it already had the realpath-containment test
-    it needed. So a name that a stale record still claimed was enough to
-    ``shutil.rmtree`` whatever sat at that name, including a real directory the
-    user had just installed there. A name match must never be sufficient to
-    delete a real directory.
+    A name match must never be sufficient to delete or replace what is on disk.
+    Three ways a path is provably CAO's, and nothing else counts:
 
-    A symlink resolving inside the plugin store is *structurally* ours, which is
-    the reliable proof and the same test ``_preexisting_skill_names`` trusts. A
-    real directory carries no such marker, so it is treated as ours only when the
-    projection is running in copy mode, where a real directory is the shape we
-    place. In symlink mode — the default, and the mode the reported failure
-    happens in — a real directory is by definition not ours and survives.
+    1. **A symlink resolving inside the plugin store.** Structurally ours, and the
+       same test ``_preexisting_skill_names`` trusts.
+    2. **A directory carrying a verified marker** — well-formed, sourced inside
+       the plugin store, and with a content digest that still matches
+       (:func:`_verified_marker`).
+    3. **A directory byte-identical to the ``source`` the caller names.** The
+       adoption rule: identity with the plugin's own bytes is exact proof, and it
+       is the upgrade path for copy-mode projections written before markers
+       existed. Without it, every pre-marker copy would become permanently
+       unmanaged.
 
-    Residual, deliberately conservative: a copy-mode projection left over from an
-    earlier copy-mode rebuild is not swept by a later symlink-mode rebuild. It is
-    then classified as pre-existing, so the user keeps the directory and the
-    plugin loses the collision — over-preservation rather than data loss, and
-    reported as a finding rather than silent.
+    Reported by review 3 on #584: this used to answer ``True`` for **any** regular
+    file (a stray file "may be removed by name") and for **any** directory in copy
+    mode. Both are name claims wearing a structural disguise. A regular file is
+    now *never* ours — CAO projects symlinks and directories, never files, so a
+    file at a projected name is by construction something else, and the user keeps
+    it. Anything that is not a directory is treated the same way, which also
+    covers sockets and devices.
+
+    The remaining residual is over-preservation, never data loss: an unmarked,
+    non-identical copy is refused and reported, so the user keeps the directory
+    and the plugin loses the name.
     """
     if path.is_symlink():
         try:
             resolved = os.path.realpath(path)
         except OSError:  # pragma: no cover - exotic FS failure
             return False
-        plugins_real = os.path.realpath(store.plugins_dir)
-        return resolved == plugins_real or resolved.startswith(plugins_real + os.sep)
-    if path.is_file():
-        # Never a projection we placed; a stray file may be removed by name.
+        return _within(resolved, store.plugins_dir)
+    if not path.is_dir():
+        # A regular file, socket or device. CAO never places one of these at a
+        # projected name, so it cannot be ours no matter who claimed the name.
+        return False
+    if _verified_marker(path, store, cache) is not None:
         return True
-    return mode == PROJECTION_MODE_COPY
+    if source is not None and source.is_dir():
+        theirs = _tree_digest(path, cache)
+        return theirs is not None and theirs == _tree_digest(source, cache)
+    return False
 
 
 def _sweep(
@@ -615,8 +840,6 @@ def _sweep(
     target_dir: Path,
     previous: Mapping[str, str],
     current: Mapping[str, str],
-    *,
-    mode: str = PROJECTION_MODE_SYMLINK,
 ) -> Tuple[List[str], List[Finding]]:
     """Remove stale and dangling projected entries. Never raises.
 
@@ -649,11 +872,20 @@ def _sweep(
         path = target_dir / skill_name
         if not path.is_symlink() and not path.exists():
             continue
-        if not _is_managed_projection(path, store, mode):
+        # The plugin that owned the name last time still names the bytes CAO
+        # would have copied, which is what lets an unmarked pre-fix copy be
+        # adopted instead of stranded. Absent (uninstalled plugin) is fine — the
+        # marker path does not need it.
+        source = _recorded_source(store, previous, skill_name)
+        # No digest cache here on purpose -- see the call site in
+        # `rebuild_projection`: materialization may have just rewritten this tree.
+        if not _is_managed_projection(path, store, source=source):
+            found = _describe_unmanaged(path)
             logger.warning(
                 "Not sweeping '%s': the previous projection claimed it, but what is "
-                "on disk is not a CAO-managed projection. Leaving it in place.",
+                "on disk is %s. Leaving it in place.",
                 path,
+                found,
             )
             findings.append(
                 Finding(
@@ -662,8 +894,8 @@ def _sweep(
                     spec_ref="CAO policy",
                     message=(
                         f"Skill '{skill_name}' was claimed by a previous projection but "
-                        f"what is on disk is not a CAO-managed projection, so it was left "
-                        f"in place. It is now treated as a user-owned skill."
+                        f"what is on disk is {found}, so it was left in place. It is now "
+                        f"treated as a user-owned skill."
                     ),
                     path=str(path),
                 )
@@ -692,6 +924,38 @@ def _sweep(
         logger.warning("Dangling-projection sweep could not scan %s: %s", target_dir, exc)
 
     return swept, findings
+
+
+def _recorded_source(
+    store: InstalledPluginStore, previous: Mapping[str, str], skill_name: str
+) -> Optional[Path]:
+    """Where the plugin that last owned ``skill_name`` keeps that skill, if still installed."""
+    plugin_name = (previous or {}).get(skill_name)
+    if not plugin_name:
+        return None
+    try:
+        source = store.plugin_root(plugin_name) / "skills" / skill_name
+    except (ValueError, OSError):
+        # `plugin_root` validates the directory name and raises `ValueError` on an
+        # unsafe one, which a hand-edited or corrupt record can carry. No source
+        # means "cannot prove ownership by adoption", which is the safe answer.
+        return None
+    return source if source.is_dir() else None
+
+
+def _describe_unmanaged(path: Path) -> str:
+    """What was found at a projected name, for the operator-facing finding.
+
+    "Not a CAO-managed projection" told an operator nothing actionable. The two
+    cases have different remedies: a regular file was never CAO's at all, whereas
+    an unverified directory usually means someone edited a copied skill in place
+    and now owns it.
+    """
+    if path.is_symlink():
+        return "a symlink pointing outside CAO's plugin store"
+    if not path.is_dir():
+        return "a regular file"
+    return "a directory CAO did not place, or whose contents have changed since it did"
 
 
 def _remove_quiet(path: Path) -> bool:

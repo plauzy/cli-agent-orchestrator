@@ -6,6 +6,7 @@ from pathlib import Path
 import click
 
 from cli_agent_orchestrator.agent_plugins.projection import (
+    MARKER_FILENAME,
     ProjectionClaimError,
     release_projection_claim,
 )
@@ -67,7 +68,11 @@ def _install_skill_folder(source_dir: Path, force: bool = False) -> Path:
         else:
             shutil.rmtree(destination_dir)
 
-    shutil.copytree(source_dir, destination_dir)
+    # A user may well point `cao skills add` at a copied plugin projection. Its
+    # `.cao-projection.json` would still verify against the copied bytes, so
+    # carrying it over would make the user's own skill look like a CAO projection
+    # and therefore sweepable. Excluded so what they add is unambiguously theirs.
+    shutil.copytree(source_dir, destination_dir, ignore=shutil.ignore_patterns(MARKER_FILENAME))
     return destination_dir
 
 

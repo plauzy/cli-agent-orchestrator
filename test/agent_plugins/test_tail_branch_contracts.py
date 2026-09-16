@@ -144,7 +144,17 @@ class TestOpencodeCollisionSnapshotShape:
     def test_a_non_object_mcp_section_is_treated_as_empty(self, monkeypatch, tmp_path):
         """A hand-edited opencode.json must not break collision detection."""
         from cli_agent_orchestrator.services import install_service as isvc
+        from cli_agent_orchestrator.utils import opencode_config as cfg_module
 
+        # `read_config`/`upsert_mcp_server` are patched on `isvc`, but the grant
+        # helpers are called through `opencode_config`, so this test has always
+        # written the developer's real `~/.aws/opencode/opencode.json` — a
+        # pre-existing leak, not one review 3 introduced (it now also writes the
+        # `cao-grants.json` sidecar there). Redirect the module global so it cannot;
+        # every other fixture in the suite isolates the same way.
+        monkeypatch.setattr(
+            cfg_module, "OPENCODE_CONFIG_FILE", tmp_path / "opencode" / "opencode.json"
+        )
         monkeypatch.setattr(isvc, "read_config", lambda: {"mcp": "not-an-object"})
         written = {}
         monkeypatch.setattr(

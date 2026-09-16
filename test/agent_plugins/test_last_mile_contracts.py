@@ -59,33 +59,86 @@ class TestProjectionReplacesWhateverIsAtTheTarget:
         return source
 
     def test_symlink_mode_replaces_a_leftover_copy_directory(self, store, skills_dir, tmp_path):
-        """Switching copy -> symlink must not leave the stale copy in place."""
+        """Switching copy -> symlink must not leave the stale copy in place.
+
+        Amended by review 3 on #584. The leftover is now produced by a real
+        copy-mode rebuild rather than hand-built with different content, because
+        that is what the migration path actually leaves behind — and after this
+        review, what CAO may replace is exactly what it can prove it wrote. A
+        hand-made directory with different bytes is somebody else's data and is
+        covered by ``test_an_edited_copy_at_a_projected_name_is_refused`` below.
+        """
         self._publish(store, tmp_path)
-        stale = skills_dir / "alpha"
-        stale.mkdir(parents=True, exist_ok=True)
-        (stale / "SKILL.md").write_text("stale copy", encoding="utf-8")
+        first = rebuild_projection(store, skills_dir=skills_dir, mode="copy")
+        assert first.projected.get("alpha") == "demo"
+        assert not (skills_dir / "alpha").is_symlink()
 
         result = rebuild_projection(store, skills_dir=skills_dir, mode="symlink")
 
         assert result.projected.get("alpha") == "demo"
         assert (skills_dir / "alpha").is_symlink()
 
-    def test_symlink_mode_replaces_an_existing_symlink(self, store, skills_dir, tmp_path):
+    def test_an_edited_copy_at_a_projected_name_is_refused(self, store, skills_dir, tmp_path):
+        """Reported by review 3 on #584: a name claim cannot prove the bytes are CAO's.
+
+        A copied projection the user edited in place is theirs now. Replacing it
+        would silently destroy that edit, which is the same data loss the sweep
+        side of this finding describes.
+        """
         self._publish(store, tmp_path)
-        elsewhere = tmp_path / "elsewhere"
-        elsewhere.mkdir()
-        (skills_dir / "alpha").symlink_to(elsewhere, target_is_directory=True)
+        rebuild_projection(store, skills_dir=skills_dir, mode="copy")
+        (skills_dir / "alpha" / "SKILL.md").write_text("my own edit", encoding="utf-8")
+
+        result = rebuild_projection(store, skills_dir=skills_dir, mode="symlink")
+
+        assert "alpha" not in result.projected
+        assert not (skills_dir / "alpha").is_symlink()
+        assert (skills_dir / "alpha" / "SKILL.md").read_text(encoding="utf-8") == "my own edit"
+
+    def test_symlink_mode_replaces_its_own_stale_symlink(self, store, skills_dir, tmp_path):
+        """A symlink into the plugin store is structurally CAO's, so it is retargeted.
+
+        This is the winner-transition path: the name moves between plugins and the
+        old link must be repointed, not preserved.
+        """
+        self._publish(store, tmp_path)
+        other_source = build_plugin(tmp_path / "src-other", "aaa-other", skills=["alpha"])
+        store.publish(other_source, make_record("aaa-other", skill_names=("alpha",)))
+        (skills_dir / "alpha").symlink_to(
+            store.plugin_root("demo") / "skills" / "alpha", target_is_directory=True
+        )
 
         rebuild_projection(store, skills_dir=skills_dir, mode="symlink")
 
         resolved = (skills_dir / "alpha").resolve()
-        assert str(store.plugin_root("demo")) in str(resolved)
+        # `aaa-other` sorts first, so it wins the name.
+        assert str(store.plugin_root("aaa-other")) in str(resolved)
 
-    def test_copy_mode_replaces_a_leftover_symlink(self, store, skills_dir, tmp_path):
+    def test_a_symlink_pointing_outside_the_store_is_refused(self, store, skills_dir, tmp_path):
+        """Amended by review 3 on #584: materialize and sweep now agree here.
+
+        The sweep already refused a foreign symlink; ``_materialize`` replaced one,
+        because its guard asked "is this a directory we did not claim" and a
+        symlink is not a directory. A user who symlinked their own skill into the
+        skill store had it silently replaced. One predicate, one answer.
+        """
         self._publish(store, tmp_path)
-        elsewhere = tmp_path / "elsewhere2"
+        elsewhere = tmp_path / "elsewhere"
         elsewhere.mkdir()
+        (elsewhere / "SKILL.md").write_text("mine", encoding="utf-8")
         (skills_dir / "alpha").symlink_to(elsewhere, target_is_directory=True)
+
+        result = rebuild_projection(store, skills_dir=skills_dir, mode="symlink")
+
+        assert "alpha" not in result.projected
+        assert (skills_dir / "alpha").resolve() == elsewhere.resolve()
+
+    def test_copy_mode_replaces_a_leftover_store_symlink(self, store, skills_dir, tmp_path):
+        """The reverse migration: symlink -> copy replaces CAO's own link."""
+        self._publish(store, tmp_path)
+        (skills_dir / "alpha").symlink_to(
+            store.plugin_root("demo") / "skills" / "alpha", target_is_directory=True
+        )
 
         result = rebuild_projection(store, skills_dir=skills_dir, mode="copy")
 

@@ -18,6 +18,7 @@ from hypothesis import strategies as st
 
 from cli_agent_orchestrator.agent_plugins.mcp_mapping import (
     PRE_EXPANDED_KEY,
+    PROVIDER_TRANSPORTS,
     expand_placeholders,
     is_pre_expanded,
     load_and_map,
@@ -25,6 +26,7 @@ from cli_agent_orchestrator.agent_plugins.mcp_mapping import (
     strip_marker,
 )
 from cli_agent_orchestrator.agent_plugins.models import Severity
+from cli_agent_orchestrator.models.provider import ProviderType
 
 from .conftest import MCP_SCHEMA_ID, PLUGIN_SCHEMA_ID, build_plugin
 
@@ -338,6 +340,80 @@ class TestTransportMatrix:
 
         assert result.servers == ()
         assert "mcp.transport_unsupported" in codes(result)
+
+    def test_the_matrix_names_every_provider_type_exactly(self):
+        """Reproduced by review 3 on #584: three providers had no row at all.
+
+        Absence is not neutral — an unlisted provider silently inherits
+        ``DEFAULT_TRANSPORTS`` (stdio only), so ``omp``, ``grok_cli`` and ``mcode``
+        were quietly refusing HTTP servers their serializers can express. Set
+        equality rather than a subset check, so a stale row for a deleted provider
+        is caught as well.
+        """
+        assert set(PROVIDER_TRANSPORTS) == {p.value for p in ProviderType}
+
+    @pytest.mark.parametrize("provider", ["omp", "grok_cli", "mcode"])
+    def test_omp_grok_and_minimax_carry_http_transports(self, roots, provider):
+        """All three write a url entry their target can consume."""
+        root, data = roots
+        result = map_mcp_config(
+            root,
+            data,
+            config({"remote": {"type": "streamable-http", "url": "https://x"}}),
+            provider=provider,
+        )
+        assert [server.name for server in result.servers] == ["remote"], codes(result)
+
+    @pytest.mark.parametrize("provider", ["hermes", "mock_cli"])
+    def test_a_provider_with_no_mcp_path_reports_provider_unsupported(self, roots, provider):
+        """An empty transport row is not "stdio only" — it is "nothing at all".
+
+        Reporting ``transport_unsupported`` here would name a transport and list
+        the supported ones, which reads as advice the operator could act on. There
+        is no transport that would work, so the finding has to say so.
+        """
+        root, data = roots
+        result = map_mcp_config(
+            root,
+            data,
+            config({"local": {"type": "stdio", "command": "x"}}),
+            provider=provider,
+        )
+        assert result.servers == ()
+        assert result.valid is True
+        assert "mcp.provider_unsupported" in codes(result)
+        assert "mcp.transport_unsupported" not in codes(result)
+
+    def test_a_name_the_provider_cannot_carry_is_skipped_with_a_report(self, roots):
+        """MiniMax's serializer *raises* on such a name, during terminal creation.
+
+        The vendored ``mcp.schema.json`` puts no pattern on ``mcpServers`` keys, so
+        ``Acme`` is a perfectly valid plugin-authored name — wiring MiniMax without
+        this gate turned it into an unlaunchable agent rather than a missing tool.
+        Siblings must still map: the skip is name-scoped.
+        """
+        root, data = roots
+        result = map_mcp_config(
+            root,
+            data,
+            config(
+                {
+                    "Acme": {"type": "stdio", "command": "x"},
+                    "fine-name": {"type": "stdio", "command": "y"},
+                }
+            ),
+            provider="mcode",
+        )
+        assert [server.name for server in result.servers] == ["fine-name"]
+        assert "mcp.server_name_unsupported" in codes(result)
+
+    def test_that_name_is_accepted_by_a_provider_without_the_constraint(self, roots):
+        """The constraint is the provider's, not CAO's — nobody else is penalised."""
+        root, data = roots
+        result = map_mcp_config(
+            root, data, config({"Acme": {"type": "stdio", "command": "x"}}), provider="kiro_cli"
+        )
+        assert [server.name for server in result.servers] == ["Acme"], codes(result)
 
     @pytest.mark.parametrize("provider", ["codex", "antigravity_cli"])
     def test_stdio_still_maps_for_those_providers(self, roots, provider):
