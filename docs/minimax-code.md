@@ -103,6 +103,17 @@ by the default MCP timeout. Absolute executable paths are converted to a bare
 command plus a terminal-local `PATH` prefix because the MiniMax Plugin schema
 requires PATH-resolved commands.
 
+MCP servers declared by installed [agent plugins](agent-plugins.md) are merged
+into that generated Plugin at launch time, alongside the profile's own —
+recomputed on every terminal creation rather than persisted, so the paths never
+go stale. One constraint is specific to this provider: the MiniMax Plugin schema
+accepts only server names matching
+`^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$`, so an agent-plugin server named e.g. `Acme` is
+skipped for `mcode` with a report and delivered normally to other providers. It is
+skipped rather than passed through because the serializer rejects such a name
+while the terminal is being created, which would cost you the agent rather than
+one tool.
+
 ## Tool restrictions
 
 MiniMax Code has no public native flag for CAO's `allowedTools` vocabulary.

@@ -155,9 +155,14 @@ CAO creates a private Grok home for every terminal and launches Grok with
 generated config atomically with mode `0600`. It does not run `grok mcp add`
 and does not modify the user's `~/.grok/config.toml`.
 
-The isolated config contains the profile's MCP servers. CAO injects the
-terminal-specific `CAO_TERMINAL_ID` into stdio MCP server environments so
-`cao-mcp-server` can route `assign`, `handoff`, and `send_message` correctly.
+The isolated config contains the profile's MCP servers, plus any declared by
+installed [agent plugins](agent-plugins.md) — merged at launch time and
+recomputed on every terminal creation rather than persisted, so the paths never
+go stale. Grok names the streamable-HTTP transport `http`, so CAO writes a
+`streamable-http` server as `type = "http"`; `sse` is preserved as `sse`. CAO
+injects the terminal-specific `CAO_TERMINAL_ID` into stdio MCP server
+environments so `cao-mcp-server` can route `assign`, `handoff`, and
+`send_message` correctly.
 Existing login state is reused without copying credential contents into CAO
 logs or the repository. Generated state is removed when the terminal is
 cleaned up.
