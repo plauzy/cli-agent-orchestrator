@@ -55,9 +55,11 @@ from cli_agent_orchestrator.backends.registry import get_backend
 from cli_agent_orchestrator.cli.commands.init import seed_default_skills
 from cli_agent_orchestrator.clients.database import (
     create_inbox_message,
+    get_handoff_result,
     get_inbox_messages,
     get_terminal_metadata,
     init_db,
+    upsert_handoff_result,
 )
 from cli_agent_orchestrator.constants import (
     ALLOWED_HOSTS,
@@ -65,6 +67,7 @@ from cli_agent_orchestrator.constants import (
     CAO_HOME_DIR,
     CORS_ORIGINS,
     DEFAULT_PROVIDER,
+    HANDOFF_RESULTS_ROUTE,
     INBOX_POLLING_INTERVAL,
     INBOX_RECONCILE_INTERVAL,
     MODEL_ID_MAX_LEN,
@@ -585,6 +588,28 @@ class RunStepRequest(BaseModel):
     engine: Optional[KiroEngine] = Field(
         default=None, description="Explicit Kiro engine for this child step"
     )
+
+    job_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Caller-generated opaque identifier for this job (issue #447). "
+            "When present, the server persists state and result under this key "
+            "so the caller can retrieve the result via GET /handoff-results/{job_id} "
+            "if the transport times out before the response arrives. "
+            "Must be a 32-character lowercase hex string (uuid4().hex)."
+        ),
+    )
+
+    @field_validator("job_id")
+    @classmethod
+    def _validate_job_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if not re.fullmatch(r"[0-9a-f]{32}", v):
+            raise ValueError(
+                "job_id must be a 32-character lowercase hex string (e.g. uuid4().hex)"
+            )
+        return v
 
 
 class RunStepResponse(BaseModel):
@@ -3742,6 +3767,57 @@ def _schedule_elastic_terminal_ended(
         background_tasks.add_task(_notify_elastic_terminal_ended, terminal_id)
 
 
+async def _record_job_state(job_id: Optional[str], state: str, **fields: Any) -> None:
+    """Best-effort ``handoff_results`` write for a run-step call (issue #447).
+
+    No-op when the caller supplied no ``job_id`` — durability is opt-in, so a
+    request without one behaves exactly as it did before this existed. A write
+    failure is logged and swallowed: durability bookkeeping must never turn a
+    step's own outcome into a different one.
+
+    EVERY terminal exit of ``run_step`` that can follow the ``state="running"``
+    write must reach this, or the job is stranded at "running" until the
+    retention sweep deletes the row and a caller polling
+    ``GET /handoff-results`` after a transport timeout never learns the step
+    ended (PR #453 review, blocking). A new ``except`` arm on that route is
+    incomplete without a call here.
+
+    Off the loop for the same reason ``run_agent_step``'s completed-write is
+    (PR #453 review nit): the write is SQLite I/O, and the handler is async.
+
+    MODULE-LEVEL ON PURPOSE, not nested in ``run_step`` beside ``_settle_step``:
+    every arm that persists needs the same guard, and inlining it nine times
+    would both duplicate it and spend the route body's ``logger``-call budget
+    that ``run-step-replay-branch`` SR-7 pins to the two step-bookkeeping
+    guards. Nothing here closes over request state, so there is no reason for it
+    to live inside the route.
+    """
+    if not job_id:
+        return
+    try:
+        await asyncio.to_thread(upsert_handoff_result, job_id, state, **fields)
+    except Exception as exc:  # noqa: BLE001 — durability is best-effort; never fail the step
+        # PREFIX ONLY, never the whole id (PR #453 review finding 4): job_id is the
+        # SOLE retrieval capability for a row that can carry worker prompts and
+        # output, so a full id in the server log escalates any log reader to that
+        # worker's result. Eight hex chars is enough to correlate this line with a
+        # job_id its legitimate holder already has, and 96 bits short of guessing one.
+        #
+        # EXCEPTION CLASS NAME ONLY -- no ``exc_info``, no ``str(exc)``. A
+        # SQLAlchemy DBAPI error stringifies its bound parameters
+        # (``[parameters: ('<job_id>', 'running', ...)]``), so either one would
+        # reprint in full the id the line above deliberately truncates, defeating
+        # the whole point of the prefix. The class name still separates the cases
+        # an operator acts on differently (OperationalError = locked/unwritable DB,
+        # IntegrityError = key collision) without echoing any row content.
+        logger.warning(
+            "run_step: failed to persist job_id_prefix=%s as %s (%s)",
+            job_id[:8],
+            state,
+            type(exc).__name__,
+        )
+
+
 @app.post(
     TERMINALS_RUN_STEP_ROUTE,
     response_model=RunStepResponse,
@@ -3791,7 +3867,20 @@ async def run_step(
 
     The plugin registry is threaded so teardown's ``post_kill_terminal`` hooks
     fire (parity with the DELETE endpoint).
+
+    Durability (issue #447): when the caller supplies a ``job_id``, the handler
+    records state="running" at request start. On success, ``run_agent_step``
+    itself persists state="completed" BETWEEN extraction and teardown (not
+    here, and not after it returns) — the terminal being torn down is the only
+    other place the result lives, so persistence must land before that
+    happens, not merely before the HTTP response. On failure, this handler
+    persists state="error". A caller that misses the response due to an
+    MCP-transport timeout can retrieve the result via
+    ``GET /handoff-results/{job_id}`` at any point thereafter. Requests without
+    a ``job_id`` behave exactly as before (no persistence overhead).
     """
+    job_id = body.job_id  # None when the caller omits it (backward-compatible)
+
     # BR-31: for a script-tier run-step call, record the live terminal into the
     # shared ScriptRunRecord's step_states as soon as it exists, so U4's orphan sweep
     # can tear it down if the subprocess dies mid-call. No-op for YAML/handoff
@@ -3882,6 +3971,12 @@ async def run_step(
             )
         except KeyError as e:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    # Mark the job as in-progress before the long-running substrate starts.
+    # This is best-effort; a failure here must not block execution. Placed
+    # AFTER the generation fence above so a fenced-out (stale-generation)
+    # call never leaves a job_id stuck at "running" with no terminal state.
+    await _record_job_state(job_id, "running")
 
     # ---- issue #583, unit ``run-step-replay-branch``: the replay branch ----------
     #
@@ -4060,6 +4155,7 @@ async def run_step(
             on_step_terminal_ready=on_step_terminal_ready,
             model=body.model,
             use_worktree=body.use_worktree,
+            job_id=job_id,
         )
         # Success -> transition the script step RUNNING->COMPLETED (no-op for
         # non-script callers). Before building the response so a settle failure
@@ -4075,6 +4171,12 @@ async def run_step(
             teardown=body.teardown,
             reuse_terminal_id=body.reuse_terminal_id,
         )
+
+        # NOTE (issue #447 / PR #453 review): the "completed" persist happens
+        # INSIDE run_agent_step, between extraction and teardown — not here.
+        # Persisting only after this call returns would run after the terminal
+        # (the only other copy of the result) has already been torn down,
+        # contradicting the "persist result, then tear down" requirement.
         return RunStepResponse(
             terminal_id=result.terminal_id,
             last_message=result.last_message,
@@ -4126,6 +4228,7 @@ async def run_step(
         # rather than regex-scraping the message (the future engine reads it too).
         # Transition the script step RUNNING->FAILED (no-op for non-script callers).
         _settle_step(e.terminal_id, str(e))
+        await _record_job_state(job_id, "error", terminal_id=e.terminal_id, error_message=str(e))
         code = status.HTTP_502_BAD_GATEWAY if e.kind == "error" else status.HTTP_504_GATEWAY_TIMEOUT
         raise HTTPException(
             status_code=code,
@@ -4152,6 +4255,7 @@ async def run_step(
         # status code for this exact failure instead of silently falling
         # through to the generic kind-less 500 below.
         _settle_step(None, str(e))
+        await _record_job_state(job_id, "error", error_message=str(e))
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail={"message": str(e), "kind": "timeout", "terminal_id": None},
@@ -4160,6 +4264,7 @@ async def run_step(
         # Ordered before the ValueError arm they subclass: an engine rejection is
         # a bad request, not an unknown terminal.
         _settle_step(None, str(e))
+        await _record_job_state(job_id, "error", error_message=str(e))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except OutputExtractionError as e:
         # Also ordered before the ValueError arm it subclasses. The terminal and
@@ -4168,24 +4273,29 @@ async def run_step(
         # endpoint's documented contract above ("any other failure -> 500",
         # plain-string detail, no ``kind``), not 404 (issue #570).
         _settle_step(None, str(e))
+        await _record_job_state(job_id, "error", error_message=str(e))
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
     except TerminalLimitError as e:
         # The node is at its tracked-terminal cap (CAO_MAX_TERMINALS) — surfaced
         # as 429 so a step scheduler can retry on a different node instead of
         # reading a kind-less 500.
         _settle_step(None, str(e))
+        await _record_job_state(job_id, "error", error_message=str(e))
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(e))
     except ValueError as e:
         # Unknown terminal / bad input surfaced by the terminal layer.
+        await _record_job_state(job_id, "error", error_message=str(e))
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except WorktreeError as e:
         # use_worktree=true against a working_directory that isn't a git repo,
         # or the 'git worktree add' itself failed -- a client-input problem
         # (bad/missing repo), not a server crash.
         _settle_step(None, str(e))
+        await _record_job_state(job_id, "error", error_message=str(e))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         _settle_step(None, str(e))
+        await _record_job_state(job_id, "error", error_message=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to run step: {str(e)}",
@@ -6624,6 +6734,64 @@ async def export_graph_endpoint(
         )
 
     return {"written_files": written_files, "sink": body.sink, "dest": body.dest}
+
+
+@app.get(
+    HANDOFF_RESULTS_ROUTE,
+    summary="Retrieve a durable handoff step result (issue #447)",
+    description=(
+        "Returns the persisted state and result for a handoff job identified by "
+        "``job_id`` (generated by the MCP client and passed to ``POST /terminals/run-step`` "
+        "in the ``job_id`` field). Use this to recover a result that was not delivered "
+        "over the original request because the MCP transport timed out. "
+        "Possible ``state`` values: ``running`` (step still in progress), "
+        "``completed`` (result in ``last_message``), ``error`` (failure in ``error_message``)."
+    ),
+)
+async def get_handoff_result_endpoint(
+    job_id: str,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict:
+    """Retrieve a durable handoff step result by job_id (issue #447).
+
+    Returns the persisted record when found; 404 when the job_id is unknown
+    (either the caller never sent a job_id, or the record has been purged by
+    the retention sweep). Scope-gated (PR #453 review finding 4): ``last_message``
+    can carry worker output (prompts/secrets), so this follows the same
+    ``require_any_scope`` posture as other content-serving GETs (``/events``,
+    ``/memory/export``) rather than staying open. A no-op when auth is
+    disabled (the default) — ``require_any_scope`` only enforces when an IdP
+    is configured.
+    """
+    try:
+        record = get_handoff_result(job_id)
+    except Exception as exc:  # noqa: BLE001 — see the leak note below
+        # A storage failure must never hand the job_id to the ASGI error logger.
+        # This handler has no generic exception handler above it, so an escaping
+        # SQLAlchemy DBAPI error (a locked SQLite file being the realistic case)
+        # reaches uvicorn's ServerErrorMiddleware, which logs the whole traceback
+        # to ``uvicorn.error`` -- and that traceback prints the bound parameters,
+        # ``[parameters: ('<job_id>',)]``. The access-log filter in
+        # ``utils/logging.py`` scrubs the request PATH and never sees this
+        # surface, so the read path needs its own guard even though the write
+        # path is already covered (PR #453 review, read-error path).
+        # EXCEPTION CLASS NAME ONLY, and ``from None`` so nothing downstream can
+        # walk ``__cause__``/``__context__`` back to the parameter-bearing error.
+        logger.error(
+            "get_handoff_result: lookup failed for job_id_prefix=%s (%s)",
+            job_id[:8],
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Handoff result lookup failed; the record may still exist, retry shortly",
+        ) from None
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Handoff result not found for job_id '{job_id}'",
+        )
+    return record
 
 
 @app.delete("/terminals/{terminal_id}")

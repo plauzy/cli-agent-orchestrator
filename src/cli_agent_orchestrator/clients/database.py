@@ -464,6 +464,43 @@ class FlowModel(Base):
     enabled = Column(Boolean, default=True)
 
 
+class HandoffResultModel(Base):
+    """Durable record of a handoff step result (issue #447).
+
+    The caller generates a ``job_id`` and passes it to ``POST /terminals/run-step``;
+    the server upserts on that key. Client-side generation exists so the MCP client
+    holds the key BEFORE the request it might not get an answer to -- NOT for
+    deduplication: ``_handoff_impl`` mints a fresh ``uuid4().hex`` per call, so a
+    retry carries a different key and runs a second step.
+
+    ``state``:
+      - ``"running"`` — step in progress (written by the run-step handler at
+        request start, after the generation fence)
+      - ``"completed"`` — step finished successfully; ``last_message`` populated.
+        Written inside ``run_agent_step``, between result extraction and terminal
+        teardown -- the terminal is the only other copy of the result, so the row
+        must exist before it is destroyed.
+      - ``"error"`` — step failed; ``error_message`` populated. Written by the
+        run-step handler's failure arms, which are the only place that can tell
+        which exception occurred.
+
+    ``created_at``/``updated_at`` carry ``DateTime(timezone=True)``, which is a
+    no-op on SQLite: the offset is dropped on write, so the stored values are
+    NAIVE UTC. The retention sweep must therefore compare against a UTC cutoff --
+    see ``cleanup_service.cleanup_old_data``.
+    """
+
+    __tablename__ = "handoff_results"
+
+    job_id = Column(String, primary_key=True)
+    state = Column(String, nullable=False)  # "running" | "completed" | "error"
+    terminal_id = Column(String, nullable=True)
+    last_message = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
 class IdempotencyKeyModel(Base):
     """Maps a caller-supplied idempotency key to the terminal it created.
 
@@ -567,6 +604,9 @@ def init_db() -> None:
     # Appended LAST (issue #657). Runs after the source_kind table rebuild so
     # the partial index enforces the full PR #674 memory identity.
     _migrate_memory_scope_null_uniqueness()
+    # Appended LAST (issue #447, ``handoff_results``). Its own new table, no shared
+    # columns with anything above, so registry order is immaterial here too.
+    _migrate_add_handoff_results()
 
 
 def _restrict_db_file_permissions() -> None:
@@ -590,6 +630,44 @@ def _restrict_db_file_permissions() -> None:
             os.chmod(path, 0o600)
         except OSError as e:
             logger.warning(f"Could not restrict DB file permissions on {path}: {e}")
+
+
+def _migrate_add_handoff_results() -> None:
+    """Create the handoff_results table on existing databases (issue #447).
+
+    ``Base.metadata.create_all`` already handles fresh databases; this
+    idempotent migration handles existing ones where the table does not
+    exist yet.  SQLite supports ``CREATE TABLE IF NOT EXISTS``, so we
+    delegate to raw SQL rather than a full schema rebuild.
+
+    The bare ``DATETIME`` columns here and the ORM model's
+    ``DateTime(timezone=True)`` are not a divergence in what gets STORED:
+    ``timezone=True`` is a no-op on SQLite, which keeps no offset either way, so
+    both paths hold naive UTC wall-clock (the writer's default is ``_utcnow``).
+    Registered LAST in ``init_db`` and order-independent: it touches its own new
+    table and no column of any other, so it neither depends on nor perturbs the
+    migrators above it.
+    """
+    import sqlite3
+
+    from cli_agent_orchestrator.constants import DATABASE_FILE
+
+    try:
+        with sqlite3.connect(str(DATABASE_FILE)) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS handoff_results (
+                    job_id TEXT PRIMARY KEY,
+                    state TEXT NOT NULL,
+                    terminal_id TEXT,
+                    last_message TEXT,
+                    error_message TEXT,
+                    created_at DATETIME,
+                    updated_at DATETIME
+                )
+                """)
+            conn.commit()
+    except Exception as e:
+        logger.warning(f"Migration check for handoff_results failed: {e}")
 
 
 def _migrate_project_aliases_schema() -> None:
@@ -2420,6 +2498,96 @@ def list_aliases_for_project(project_id: str) -> List[Dict[str, Any]]:
     except Exception as e:
         logger.debug(f"list_aliases_for_project failed (non-fatal): {e}")
         return []
+
+
+# ---------------------------------------------------------------------------
+# Handoff result durability helpers (issue #447)
+# ---------------------------------------------------------------------------
+
+
+def upsert_handoff_result(
+    job_id: str,
+    state: str,
+    *,
+    terminal_id: Optional[str] = None,
+    last_message: Optional[str] = None,
+    error_message: Optional[str] = None,
+) -> None:
+    """Create or update the durable record for a handoff step (issue #447).
+
+    Called from three places, NOT two, and only one of them is the handler:
+
+    1. ``api.main.run_step``, at request start — ``state="running"``.
+    2. ``services.agent_step.run_agent_step``, between result extraction and
+       terminal teardown — ``state="completed"``. NOT the handler after
+       ``run_agent_step`` returns: by then the terminal holding the only other
+       copy of the result is already gone.
+    3. ``api.main.run_step``'s failure arms — ``state="error"``. The handler owns
+       these because only it can distinguish the exception types.
+
+    Together, 2 and 3 make the result retrievable via
+    ``GET /handoff-results/{job_id}`` even if the transport closes before the
+    response arrives.
+
+    Idempotent per key: a second call for the same ``job_id`` updates the existing
+    row. That is last-write-wins bookkeeping, NOT execution deduplication -- there
+    is no mechanism by which a concurrent or retried call observes ``"running"``
+    and waits; a second call with the same key runs a second step.
+    """
+    now = _utcnow()
+    with SessionLocal() as db:
+        row = db.query(HandoffResultModel).filter(HandoffResultModel.job_id == job_id).first()
+        if row is None:
+            row = HandoffResultModel(
+                job_id=job_id,
+                state=state,
+                terminal_id=terminal_id,
+                last_message=last_message,
+                error_message=error_message,
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(row)
+        else:
+            row.state = state
+            if terminal_id is not None:
+                row.terminal_id = terminal_id
+            if last_message is not None:
+                row.last_message = last_message
+            if error_message is not None:
+                row.error_message = error_message
+            row.updated_at = now
+        db.commit()
+
+
+def get_handoff_result(job_id: str) -> Optional[dict]:
+    """Return the handoff result record for ``job_id``, or None if not found."""
+    with SessionLocal() as db:
+        row = db.query(HandoffResultModel).filter(HandoffResultModel.job_id == job_id).first()
+        if row is None:
+            return None
+        return {
+            "job_id": row.job_id,
+            "state": row.state,
+            "terminal_id": row.terminal_id,
+            "last_message": row.last_message,
+            "error_message": row.error_message,
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+        }
+
+
+def delete_old_handoff_results(cutoff: datetime) -> int:
+    """Delete handoff result rows older than ``cutoff`` (retention sweep).
+
+    Returns the number of rows deleted.
+    """
+    with SessionLocal() as db:
+        deleted = (
+            db.query(HandoffResultModel).filter(HandoffResultModel.created_at < cutoff).delete()
+        )
+        db.commit()
+        return deleted
 
 
 def update_message_status(message_id: int, status: MessageStatus) -> bool:
