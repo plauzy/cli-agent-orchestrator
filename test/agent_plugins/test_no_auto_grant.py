@@ -487,6 +487,118 @@ class TestTheInstallPathActuallyExcludesThem:
         assert config["agent"]["naming-agent"]["tools"][f"{PLUGIN_SERVER}*"] is True
 
 
+class TestADocumentedGlobGrantIsHonored:
+    """``docs/agent-plugins.md:207`` promises ``"*"``, ``@server-name``, **or a
+    matching glob**, and shows ``@plugin-*`` at line 225.
+
+    Both grant sites implemented exact membership only, so the glob an operator
+    is told to write authorized nothing: OpenCode wrote the server into the
+    shared ``mcp`` section and enabled it, then granted the agent no tool alias
+    for it.
+
+    This does NOT restore automatic granting (issue #573 AC7). A pattern still
+    has to be written into the profile by a human, and it is expanded against
+    the concrete DELIVERED names -- a plugin install on its own still widens
+    nothing, which is what the ``TestTheInstallPathActuallyExcludesThem`` cases
+    above continue to assert.
+    """
+
+    def test_opencode_grants_a_plugin_server_a_glob_names(self, installer):
+        """The reported defect, on the artifact OpenCode is launched from."""
+        installer.run(
+            "glob-agent",
+            ProviderType.OPENCODE_CLI.value,
+            allowed=["fs_read", "@cao-op*"],
+        )
+
+        config = installer.opencode_json()
+
+        # Precondition: delivery is not what is broken, the grant is.
+        assert PLUGIN_SERVER in config["mcp"]
+        agent_tools = config.get("agent", {}).get("glob-agent", {}).get("tools", {})
+        assert agent_tools.get(f"{PLUGIN_SERVER}*") is True, (
+            f"the documented @cao-op* grant authorized nothing: agent.glob-agent.tools is "
+            f"{agent_tools} while {PLUGIN_SERVER} was written and enabled "
+            f"(docs/agent-plugins.md:207)"
+        )
+        assert f"{PLUGIN_SERVER}*" in installer.opencode_sidecar()["agents"]["glob-agent"]
+
+    def test_kiro_grants_a_plugin_server_a_glob_names(self, installer):
+        """The same rule on the provider whose grant is the allowlist itself.
+
+        Kiro's emitted ``allowedTools`` carries the pattern verbatim, so the
+        claim here is that the pattern reaches the artifact alongside the
+        delivered server -- the concrete expansion is the launching provider's,
+        and Grok's is asserted in ``test/providers/test_grok_cli_unit.py``.
+        """
+        installer.run(
+            "glob-agent-kiro",
+            ProviderType.KIRO_CLI.value,
+            allowed=["fs_read", "@cao-op*"],
+        )
+
+        emitted = installer.kiro_json("glob-agent-kiro")
+
+        assert PLUGIN_SERVER in emitted["mcpServers"]
+        assert "@cao-op*" in emitted["allowedTools"]
+
+    def test_a_non_matching_glob_still_denies(self, installer):
+        """The control that keeps the fix from being "grant on any pattern"."""
+        installer.run(
+            "other-glob-agent",
+            ProviderType.OPENCODE_CLI.value,
+            allowed=["fs_read", "@other-*"],
+        )
+
+        config = installer.opencode_json()
+
+        assert PLUGIN_SERVER in config["mcp"], "the server must still be DELIVERED"
+        agent_tools = config.get("agent", {}).get("other-glob-agent", {}).get("tools", {})
+        assert f"{PLUGIN_SERVER}*" not in agent_tools, agent_tools
+        assert f"{PLUGIN_SERVER}*" not in installer.opencode_sidecar().get("agents", {}).get(
+            "other-glob-agent", []
+        )
+
+    def test_the_glob_grant_is_case_sensitive(self, installer):
+        """``@CAO-OP*`` must not match ``cao-ops`` on any platform.
+
+        ``fnmatch.fnmatch`` case-folds wherever ``os.path.normcase`` does, so a
+        case-insensitive host would widen this grant. The rule uses
+        ``fnmatchcase``.
+        """
+        installer.run(
+            "shouty-agent",
+            ProviderType.OPENCODE_CLI.value,
+            allowed=["fs_read", "@CAO-OP*"],
+        )
+
+        config = installer.opencode_json()
+        agent_tools = config.get("agent", {}).get("shouty-agent", {}).get("tools", {})
+
+        assert f"{PLUGIN_SERVER}*" not in agent_tools, agent_tools
+
+    def test_a_glob_never_grants_a_server_that_was_not_delivered(self, installer):
+        """The negative case that matters: expansion is over concrete names.
+
+        A grant derived from the pattern rather than from the delivered set
+        would write a tool key for a server that does not exist -- pre-authorizing
+        whatever later answered to that name.
+        """
+        installer.run(
+            "ghost-agent",
+            ProviderType.OPENCODE_CLI.value,
+            allowed=["fs_read", "@ghost-*"],
+        )
+
+        config = installer.opencode_json()
+        written = set(config.get("mcp", {}))
+        granted = set(config.get("agent", {}).get("ghost-agent", {}).get("tools", {}))
+
+        assert not any(key.startswith("ghost-") for key in granted), granted
+        # Every granted key must name a server that was actually written.
+        assert {key.rstrip("*") for key in granted} <= written, (granted, written)
+
+
 class TestTheHelperCannotBeDefeatedByOrdering:
     """R1.3 / R1.4 — the direct regression guard for G0.
 

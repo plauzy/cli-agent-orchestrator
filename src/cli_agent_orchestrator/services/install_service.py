@@ -62,7 +62,7 @@ from cli_agent_orchestrator.utils.path_validation import (
     validate_path_component,
 )
 from cli_agent_orchestrator.utils.skill_injection import compose_agent_prompt
-from cli_agent_orchestrator.utils.tool_mapping import resolve_allowed_tools
+from cli_agent_orchestrator.utils.tool_mapping import granted_mcp_servers, resolve_allowed_tools
 
 logger = logging.getLogger(__name__)
 
@@ -368,9 +368,13 @@ def _materialize_opencode_mcp(
     named it would reinstate on OpenCode exactly the widening the resolved
     allowlist withholds on every other provider. Delivery is unaffected: the
     server is still written into the shared ``mcp`` section, it is simply not
-    switched on for an agent that was not granted it. Membership is exact
-    (``"*"`` or ``@<name>``), matching ``resolve_allowed_tools``'s own vocabulary
-    rather than inventing a glob semantics no other grant site has.
+    switched on for an agent that was not granted it. Membership follows
+    ``tool_mapping.granted_mcp_servers`` — ``"*"``, an explicit ``@<name>``, or a
+    matching glob, which is what ``docs/agent-plugins.md`` documents — and it is
+    the ONE rule Grok's launch path uses too, rather than a second matcher free
+    to drift from it. The expansion is over the names actually written here, so a
+    pattern can only ever select from what was delivered, and a human still had
+    to write that pattern into the profile.
 
     Ownership is a heuristic without persisted provenance; see
     ``opencode_config.is_cao_owned_mcp_entry`` and design.md §10a options 1/2 for
@@ -391,6 +395,10 @@ def _materialize_opencode_mcp(
 
     if merged_servers:
         granted: List[str] = []
+        # Expanded once, against the concrete names about to be written: a
+        # ``@plugin-*`` in the profile selects from THESE and can never name a
+        # server that was not delivered.
+        grantable = set(granted_mcp_servers(allowed_tools, merged_servers))
         for mcp_name, mcp_cfg in merged_servers.items():
             opencode_mcp_cfg = translate_mcp_server_config(dict(mcp_cfg))
             existing = existing_before.get(mcp_name)
@@ -409,7 +417,7 @@ def _materialize_opencode_mcp(
                 )
                 continue
             upsert_mcp_server(mcp_name, opencode_mcp_cfg)
-            if "*" in allowed_tools or f"@{mcp_name}" in allowed_tools:
+            if mcp_name in grantable:
                 granted.append(mcp_name)
         # Grant only the servers actually written for this agent AND present in
         # its resolved allowlist (a dropped collision is excluded, and so is a

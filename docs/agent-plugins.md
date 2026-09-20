@@ -204,7 +204,10 @@ citing the specification clause it enforces:
 
 **A plugin never widens an agent's tool allowlist.** A plugin-provided MCP server
 reaches an agent only if that agent's profile names it — `"*"`, an explicit
-`@server-name`, or a matching glob in `allowedTools`. Servers you declare in the
+`@server-name`, or a matching glob in `allowedTools`. A glob is matched
+**case-sensitively** against the servers actually delivered to that agent, so
+`@plugin-*` grants a delivered `plugin-tools`, `@PLUGIN-*` grants nothing, and a
+pattern matching nothing delivered grants nothing. Servers you declare in the
 profile yourself are still granted automatically; only plugin-provided ones are
 excluded.
 

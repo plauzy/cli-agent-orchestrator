@@ -42,6 +42,7 @@ from cli_agent_orchestrator.utils.agent_profiles import load_agent_profile
 from cli_agent_orchestrator.utils.mcp_resolution import resolve_mcp_server_config
 from cli_agent_orchestrator.utils.terminal import wait_for_shell
 from cli_agent_orchestrator.utils.text import strip_terminal_escapes
+from cli_agent_orchestrator.utils.tool_mapping import granted_mcp_servers
 
 logger = logging.getLogger(__name__)
 
@@ -391,27 +392,31 @@ class GrokCliProvider(BaseProvider):
 
         Grok's ``MCPTool(server__*)`` permission language accepts a pattern.
         Never interpolate an arbitrary ``@...`` CAO entry into that pattern:
-        only a conventional server name that is actually configured for this
-        profile (or CAO's built-in orchestration server) may grant MCP access.
-        ``@builtin`` is a CAO vocabulary marker, not an MCP server reference.
-        Unknown or malformed entries remain denied by the enclosing dontAsk
-        policy instead of widening it.
+        a CAO entry is expanded against the server names actually configured for
+        this profile (plus CAO's built-in orchestration server) by the shared
+        ``tool_mapping.granted_mcp_servers`` rule, and only a resulting CONCRETE
+        name that is also a conventional server identifier may grant MCP access.
+        So ``@plugin-*`` — which ``docs/agent-plugins.md`` documents and which
+        this site used to deny by requiring an exact literal — grants
+        ``MCPTool(plugin-tools__*)`` when that server is configured and nothing at
+        all when it is not. The pattern itself never reaches Grok's permission
+        language, and ``@builtin`` is CAO vocabulary rather than an MCP server
+        reference. Unknown or malformed entries remain denied by the enclosing
+        dontAsk policy instead of widening it.
+
+        The matching rule is shared with OpenCode's ``agent.<id>.tools`` grant in
+        ``services/install_service.py`` on purpose: two hand-written matchers are
+        how the documented glob came to work on neither.
         """
         configured = {"cao-mcp-server"}
         if isinstance(mcp_servers, dict):
             configured.update(name for name in mcp_servers if isinstance(name, str))
 
-        return sorted(
-            {
-                name
-                for tool_ref in allowed_tools
-                if isinstance(tool_ref, str)
-                and tool_ref.startswith("@")
-                and (name := tool_ref[1:]) != "builtin"
-                and _MCP_SERVER_REF.fullmatch(name)
-                and name in configured
-            }
-        )
+        return [
+            name
+            for name in granted_mcp_servers(allowed_tools, configured)
+            if _MCP_SERVER_REF.fullmatch(name)
+        ]
 
     @staticmethod
     def _atomic_write_private(path: Path, content: str) -> None:
