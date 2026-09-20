@@ -603,3 +603,127 @@ class TestTheProfileItselfIsUnchangedOnDisk:
         # state alone — not from anything the first call wrote down.
         again = with_plugin_mcp(_profile_stub(), "claude_code")
         assert (again.mcpServers or {}).keys() == (profile.mcpServers or {}).keys()
+
+
+class TestCopilotCarriesAnHttpPluginServer:
+    """Copilot's ``type`` vocabulary is not the specification's, at the real artifact.
+
+    Found by self-audit on #584, in the same class as review 5222539218's item 5
+    (Kimi) and review 3's ``GROK_URL_TRANSPORTS``: ``_map_entry`` emits the
+    Agent Plugins / MCP spelling verbatim, and a provider whose own config format
+    names the same transport differently receives a value it does not use.
+
+    Copilot's documented vocabulary is ``local``/``stdio``, ``http`` and ``sse``
+    (`Adding MCP servers for GitHub Copilot CLI
+    <https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers>`_).
+    Two consequences, and only the second is a defect:
+
+    * ``stdio`` needs **no** translation. The vendor documents ``Local`` and
+      ``STDIO`` as working the same way and recommends ``stdio`` precisely for
+      cross-client portability, so the common case was never broken. An earlier
+      draft of this finding claimed otherwise; the documentation does not support
+      that and the claim is withdrawn.
+    * ``streamable-http`` **is** foreign. Copilot names that transport ``http``,
+      so a schema-valid remote plugin server reached ``--additional-mcp-config``
+      with a ``type`` Copilot has no case for.
+
+    The matrix fixture above is stdio, so it cannot see this: it never takes the
+    url branch. That is the same blind spot that hid the Grok and Kimi defects.
+    """
+
+    def test_a_streamable_http_plugin_server_reaches_copilot_as_http(
+        self, store, skills_dir, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "cli_agent_orchestrator.agent_plugins.projection.SKILLS_DIR", skills_dir
+        )
+        monkeypatch.setattr("cli_agent_orchestrator.utils.skills.SKILLS_DIR", skills_dir)
+        monkeypatch.setattr(
+            "cli_agent_orchestrator.agent_plugins.store.AGENT_PLUGINS_DIR", tmp_path
+        )
+
+        http_doc = json.dumps(
+            {
+                "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+                "mcpServers": {
+                    PLUGIN_SERVER: {
+                        "type": "streamable-http",
+                        "url": "https://mcp.example.invalid/x",
+                    }
+                },
+            }
+        )
+        source = build_plugin(
+            tmp_path / "copilot-http-src",
+            "copilothttpdonor",
+            skills=["donor-skill"],
+            mcp_text=http_doc,
+        )
+        install(
+            PluginSource(kind="path", location=str(source)),
+            store=store,
+            skills_dir=skills_dir,
+            refresh_agents=False,
+        )
+        monkeypatch.setattr(
+            "cli_agent_orchestrator.agent_plugins.mcp_delivery.InstalledPluginStore",
+            lambda *a, **k: store,
+        )
+
+        from cli_agent_orchestrator.providers import copilot_cli as mod
+
+        monkeypatch.setattr(mod, "load_agent_profile", lambda _name: _profile_stub())
+        provider = mod.CopilotCliProvider("tid-copilot-http", "sess", "win", "worker")
+
+        servers = json.loads(provider._build_runtime_mcp_config())["mcpServers"]
+
+        assert PLUGIN_SERVER in servers, (
+            f"copilot wrote {sorted(servers)} — the remote plugin server never "
+            f"reached --additional-mcp-config"
+        )
+        entry = servers[PLUGIN_SERVER]
+        assert entry.get("type") == "http", (
+            f"copilot received type={entry.get('type')!r}; its documented "
+            f"vocabulary is local/stdio, http, sse — 'streamable-http' is not a "
+            f"value it has a case for"
+        )
+        assert entry.get("url") == "https://mcp.example.invalid/x", entry
+
+    def test_a_stdio_plugin_server_keeps_the_portable_spelling(self, installed_plugin, monkeypatch):
+        """``stdio`` must be passed through, NOT rewritten to ``local``.
+
+        The vendor documents the two as equivalent and recommends ``stdio`` for
+        configurations shared with VS Code, the cloud agent, and other MCP
+        clients. Rewriting it would trade a portable spelling for a Copilot-only
+        one and gain nothing, so this pins the pass-through as deliberate rather
+        than as an oversight of the ``streamable-http`` fix.
+        """
+        from cli_agent_orchestrator.providers import copilot_cli as mod
+
+        monkeypatch.setattr(mod, "load_agent_profile", lambda _name: _profile_stub())
+        provider = mod.CopilotCliProvider("tid-copilot-stdio", "sess", "win", "worker")
+
+        servers = json.loads(provider._build_runtime_mcp_config())["mcpServers"]
+
+        assert PLUGIN_SERVER in servers, sorted(servers)
+        assert servers[PLUGIN_SERVER].get("type") == "stdio", servers[PLUGIN_SERVER]
+
+    def test_cao_own_server_is_not_given_a_transport_it_never_had(
+        self, installed_plugin, monkeypatch
+    ):
+        """CAO's in-session entry carries no ``type`` and must keep carrying none.
+
+        It works today precisely because Copilot infers a command-based server
+        from ``command``. A translation pass that invented a ``type`` for a
+        type-less entry would be a behaviour change beyond this finding — the
+        same boundary ``KIMI_TRANSPORTS`` draws.
+        """
+        from cli_agent_orchestrator.providers import copilot_cli as mod
+
+        monkeypatch.setattr(mod, "load_agent_profile", lambda _name: _profile_stub())
+        provider = mod.CopilotCliProvider("tid-copilot-own", "sess", "win", "worker")
+
+        servers = json.loads(provider._build_runtime_mcp_config())["mcpServers"]
+
+        assert "cao-mcp-server" in servers
+        assert "type" not in servers["cao-mcp-server"], servers["cao-mcp-server"]
