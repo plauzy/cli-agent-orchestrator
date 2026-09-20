@@ -197,17 +197,22 @@ def projection_owner(
     anything: is this entry plugin-owned content that belongs to
     ``cao plugin remove``, or the user's own skill?
 
-    **Both** conditions are required, and requiring both is the point:
+    Two independent routes to "owned", and the asymmetry between them is the
+    point:
 
-    1. an install record still claims the name, so there is a plugin to name in
-       the refusal, and
-    2. what is on disk is provably something the projection engine placed —
-       :func:`_is_managed_projection`: a symlink resolving into the plugin store,
-       a copy whose marker digest still verifies, or a copy byte-identical to the
-       plugin's own source.
+    1. **A readable claim plus structural proof.** An install record still claims
+       the name, *and* what is on disk is provably something the projection engine
+       placed — :func:`_is_managed_projection`: a symlink resolving into the plugin
+       store, a copy whose marker digest still verifies, or a copy byte-identical
+       to the plugin's own source.
+    2. **Conclusive structure alone**, when no readable record claims the name —
+       :func:`_structural_owner`. A symlink resolving into the plugin store, or a
+       verified marker, cannot be content the user authored, and either one also
+       *names* the owning plugin from its store-relative path, so a refusal is
+       still actionable without a record to read.
 
-    A name claim alone deliberately does not qualify. The poisoned state
-    ``test_claim_transfer`` describes — the record still claiming a name whose
+    A name claim alone deliberately does not qualify, in either route. The poisoned
+    state ``test_claim_transfer`` describes — the record still claiming a name whose
     directory is now the user's, after a release that failed — would otherwise
     leave the user with a skill they could neither remove nor explain. That is the
     same rule the sweep applies before deleting; stating it once means the CLI and
@@ -224,37 +229,102 @@ def projection_owner(
     two are one line apart in prose and a reader would otherwise credit the sweep's
     tests as this function's.
 
-    **This function's answer is only as reliable as record READABILITY, and a claim
-    it cannot see does not exist as far as it is concerned.**
-    :meth:`InstalledPluginStore.list_installed` logs and skips a record whose JSON
-    will not parse — deliberate, because ``cao plugin list`` and every rebuild must
-    not fail over one corrupt record — so an unparseable record hides its claim, this
-    returns ``None``, and the caller proceeds to delete: ``cao skills remove`` removes
-    a genuine projection while reporting success. The blast radius is bounded (the
-    plugin's own bytes under the plugin store are untouched, so a later
-    :func:`rebuild_projection` restores the entry) but the operator is told the removal
-    succeeded.
-
-    That is a KNOWN DEFECT under separate review, pinned by
-    ``TestBranchUnreadableRecordKnownDefect`` rather than fixed here: changing it means
-    changing ``list_installed``'s skip-and-continue policy, which consumers unrelated
-    to this predicate depend on, and it is not this function's to decide. Note for
-    whoever does fix it that the two conditions above are **not symmetric** — a
-    symlink resolving into the plugin store cannot be the user's own skill and is
-    conclusive on its own, whereas a copy's marker digest is weaker evidence — so the
-    rule may end up nearer ``(claim AND structure) OR structure-conclusive-alone``
-    than the single ``and`` written here.
+    **Route 2 exists because record readability used to be load-bearing, and was
+    not allowed to be.** :meth:`InstalledPluginStore.list_installed` logs and skips
+    a record whose JSON will not parse — deliberate, and *unchanged*, because
+    ``cao plugin list`` and every rebuild must not fail over one corrupt record. But
+    while ownership was derived from that call alone, an unparseable record hid its
+    claim, this returned ``None``, and ``cao skills remove`` deleted a genuine
+    projection and exited 0 reporting success (issue #797). The fix is confined to
+    this predicate: it asks the filesystem a second, independent question rather
+    than making the store stricter for consumers that have nothing to do with
+    removal.
     """
     store = store or InstalledPluginStore()
+    path = _skills_dir(skills_dir) / skill_name
     claimed = _previous_projection(store.list_installed()).get(skill_name)
     if not claimed:
-        return None
+        # No *readable* record claims the name, which is not the same fact as no
+        # plugin owning it. Ask the disk directly.
+        return _structural_owner(path, store)
 
-    path = _skills_dir(skills_dir) / skill_name
     source = _recorded_source(store, {skill_name: claimed}, skill_name)
     if not _is_managed_projection(path, store, source=source):
         return None
     return claimed
+
+
+def _structural_owner(path: Path, store: InstalledPluginStore) -> Optional[str]:
+    """Name the plugin that owns ``path`` from the on-disk evidence alone.
+
+    Used when no readable install record claims the name. Only evidence that is
+    **conclusive by itself** counts, because there is no claim here to corroborate
+    it and the answer authorises a refusal rather than a delete:
+
+    * a symlink whose target resolves inside the plugin store *and still exists* —
+      the projection engine is the only thing that creates those, so it cannot be
+      the user's own skill. Requiring the target to exist keeps a dangling
+      projection (a store mutated out of band) removable by the operator, which is
+      what the dangling sweep would do anyway;
+    * a directory carrying a marker that :func:`_verified_marker` accepts — bound
+      to this path's name, sourced inside the plugin store, and with a content
+      digest that still matches, so an edited copy is not covered.
+
+    The adoption rule from :func:`_is_managed_projection` is deliberately **not**
+    reachable here: it needs a ``source``, which needs a plugin name, which is
+    exactly what a missing record denies us. An unmarked copy therefore stays
+    removable, as it was before.
+
+    The owning plugin name is the first path segment under the plugin store root,
+    which is the store's own layout (``<plugins_dir>/<plugin>/skills/<skill>``) and
+    needs no record to read. Returns ``None`` when the evidence is absent or the
+    segment is not a plugin directory.
+    """
+    if path.is_symlink():
+        try:
+            resolved = os.path.realpath(path)
+        except OSError:  # pragma: no cover - exotic FS failure
+            return None
+        if not _within(resolved, store.plugins_dir) or not os.path.exists(resolved):
+            return None
+        return _plugin_name_for_store_path(resolved, store)
+
+    if not path.is_dir():
+        # A regular file, socket or device. CAO never projects one of these.
+        return None
+
+    marker = _verified_marker(path, store)
+    if marker is None:
+        return None
+    source = marker.get("source")
+    if not isinstance(source, str):  # pragma: no cover - _verified_marker already checked
+        return None
+    return _plugin_name_for_store_path(os.path.realpath(source), store)
+
+
+def _plugin_name_for_store_path(candidate: str, store: InstalledPluginStore) -> Optional[str]:
+    """The installed plugin directory ``candidate`` lies under, if any.
+
+    ``candidate`` must already be a realpath known to be inside the store (see
+    :func:`_within`); this only splits off the owning directory name and confirms
+    it really is a plugin root. Dot-prefixed segments are rejected because the
+    store keeps its own bookkeeping inside ``plugins_dir`` — ``.state`` holds the
+    records, and a failed force-update can leave a ``.<name>.replaced.<pid>``
+    tree — and neither is a plugin an operator could pass to ``cao plugin remove``.
+    """
+    root_real = os.path.realpath(store.plugins_dir)
+    try:
+        relative = os.path.relpath(candidate, root_real)
+    except ValueError:  # pragma: no cover - different drives, Windows only
+        return None
+    first = relative.split(os.sep)[0]
+    if not first or first.startswith(".") or first == os.pardir:
+        return None
+    try:
+        root = store.plugin_root(first)
+    except ValueError:  # pragma: no cover - guarded by the checks above
+        return None
+    return first if root.is_dir() else None
 
 
 def rebuild_projection(

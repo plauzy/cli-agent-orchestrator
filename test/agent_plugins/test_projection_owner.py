@@ -17,12 +17,13 @@ the bytes are still on disk rather than only that the exit code was non-zero.
 Every test here was seen to FAIL against a mutation that breaks the branch it
 covers, before being seen to pass — the mutation is named in each docstring.
 
-**One class is not a guarantee.** :class:`TestBranchUnreadableRecordKnownDefect`
-pins a KNOWN DEFECT under separate review — an unreadable install record hides its
-claim, so a plugin's projection is deleted and the command reports success. Its
-assertions describe wrong behaviour on purpose, so that it cannot regress silently,
-and a fix must rewrite them rather than keep them green. Read that class's docstring
-before treating anything in it as intended.
+**Record readability is not part of the contract.**
+:class:`TestBranchUnreadableRecordRefusesRemoval` covers the case where the install
+record will not parse, so no claim is visible, while the on-disk entry still proves
+itself CAO's. These assert REFUSAL: a corrupt state file must not become a licence
+to delete a plugin's projection. That class previously pinned the opposite as a known
+defect (issue #797); the assertions were inverted when the defect was fixed, so a
+reader who remembers the old prose should re-read them rather than the memory.
 """
 
 from __future__ import annotations
@@ -221,71 +222,71 @@ class TestBranchClaimWithoutProof:
         assert _owner(world) is None
 
 
-class TestBranchUnreadableRecordKnownDefect:
-    """KNOWN DEFECT, pinned here and under separate review. Not a desired guarantee.
+class TestBranchUnreadableRecordRefusesRemoval:
+    """Branch 4 — the record will not parse, and the disk proves ownership anyway.
 
-    Everything in this class asserts behaviour that is **wrong**: an unparseable
-    install record hides its plugin's claim, so :func:`projection_owner` answers
-    ``None`` for a genuine projection and ``cao skills remove`` deletes it while
-    reporting success. A single corrupt byte in ``<state_dir>/<plugin>.json`` suffices.
-    Measured against unmutated code in both projection modes.
+    ``InstalledPluginStore.list_installed`` logs and SKIPS a record whose JSON will
+    not parse, deliberately, so that ``cao plugin list`` and every rebuild survive
+    one corrupt file. That policy is unchanged and other consumers still depend on
+    it. What changed is that :func:`projection_owner` no longer takes a missing claim
+    as the end of the enquiry: it asks the filesystem independently, and structurally
+    conclusive evidence refuses the removal on its own.
 
-    **A future fix MUST CHANGE these tests. They are not a contract.** They exist only
-    so the defect cannot regress *silently* — a wrong behaviour nobody wrote down is
-    indistinguishable from a right one, and this one is invisible from the outside
-    because the command exits 0 and prints "removed successfully".
+    This class used to pin the opposite as a known defect (issue #797) — a single
+    corrupt byte in ``<state_dir>/<plugin>.json`` made ``cao skills remove`` delete a
+    genuine projection and exit 0 reporting success. The reviewer rejected that
+    decision, so the assertions here are inverted from the ones that shipped with R7.
 
-    Not fixed here deliberately. ``InstalledPluginStore.list_installed`` logs and skips
-    an unparseable record so ``cao plugin list`` and every rebuild survive one corrupt
-    file; changing that is a design decision affecting consumers with nothing to do
-    with this predicate, and it deserves its own failing-test-first cycle rather than
-    being bolted onto R7.
-
-    Why the fall-through happens, recorded for whoever fixes it: the both-conditions
-    rule means losing the record loses the protection entirely, and the two conditions
-    are **not symmetric**. Requiring structure was justified by the poisoned state — a
-    record claiming a name whose bytes are the user's — which says nothing about the
-    inverse, where structure proves ownership while the record is unreadable. A symlink
-    resolving into the plugin store cannot be the user's own skill, so it is conclusive
-    alone; a copy's marker digest is weaker evidence and is the harder half. The
-    eventual rule is therefore likely nearer ``(claim AND structure) OR
-    structure-conclusive-by-itself`` than the single ``and`` in place today.
-
-    The blast radius is bounded, which is why this is recorded rather than treated as
-    data loss: only the projection is deleted, the plugin's own bytes under the plugin
-    store survive, and a later :func:`rebuild_projection` restores the entry.
+    The evidence is asymmetric, which is why a missing claim can be overridden but a
+    missing *structure* cannot. A symlink resolving into the plugin store, or a copy
+    whose marker digest still verifies against a source inside the plugin store,
+    cannot be content the user authored — only the projection engine puts those
+    there, and either one also NAMES the owning plugin, from the store-relative path,
+    without consulting a record. A bare claim over a directory the user owns remains
+    insufficient in the other direction: see
+    :class:`TestBranchClaimWithoutProof`, and the control at the end of this class.
     """
 
-    def test_known_defect_an_unparseable_record_hides_the_claim(self, world):
-        """KNOWN DEFECT under separate review: the claim becomes invisible.
+    def test_an_unparseable_record_does_not_hide_structural_ownership(self, world):
+        """RED vehicle: deriving ownership from the records alone.
 
-        Asserts the wrong-but-current answer so that a change is detectable. RED
-        vehicle: refusing on structural proof alone, ignoring the claim — which is the
-        shape a fix would take, so this fires exactly when one is attempted.
+        Against the pre-fix code this returned ``None``. The assertion on
+        ``current_projection`` is what makes the test non-vacuous — it proves the
+        claim really is invisible, so a ``"donor"`` answer can only have come from
+        the structural path.
         """
         projected = _install_donor(world)
+        if not projected.is_symlink():
+            pytest.skip("symlink projection unavailable in this environment")
         record = world["store"].state_dir / "donor.json"
         assert record.is_file(), "precondition: the record exists before corruption"
 
         record.write_text("{ not valid json", encoding="utf-8")
 
         assert current_projection(world["store"]) == {}, "the claim is invisible once unparseable"
-        assert projected.exists() or projected.is_symlink(), "the projection is still on disk"
-        # WRONG, and pinned on purpose: this projection is plugin-owned.
-        assert _owner(world) is None
+        assert _owner(world) == "donor"
 
-    def test_known_defect_the_removal_is_not_refused_when_the_record_is_unreadable(self, world):
-        """KNOWN DEFECT under separate review: a plugin's projection is deleted.
+    def test_copy_mode_ownership_survives_an_unparseable_record(self, world, copy_mode):
+        """Same mutation, the mode where a wrong answer costs real bytes.
 
-        The operator-visible half. ``cao skills remove`` should refuse here; instead it
-        exits 0 with "removed successfully" having deleted content the plugin still
-        owns. The first two assertions below describe the defect, not the intent — a
-        fix will invert them, and this test must then be rewritten rather than kept
-        green.
+        Deleting a symlink costs the link; ``rmtree`` on a copy-mode projection
+        removes content from the skill store. The verified marker is the evidence
+        here, and it names the plugin from its own recorded source path.
+        """
+        projected = _install_donor(world)
+        assert projected.is_dir() and not projected.is_symlink()
+        assert (projected / MARKER_FILENAME).is_file(), "precondition: the marker was written"
 
-        The final assertion is the one that bounds the severity, and it should keep
-        passing under any fix: the plugin's own bytes are never touched, so the loss is
-        a projection that a rebuild can restore.
+        (world["store"].state_dir / "donor.json").write_text("{ not valid json", encoding="utf-8")
+
+        assert current_projection(world["store"]) == {}
+        assert _owner(world) == "donor"
+
+    def test_the_removal_is_refused_when_the_record_is_unreadable(self, world):
+        """The operator-visible half: ``cao skills remove`` must refuse, not report success.
+
+        Content first, exit code second, for the reason
+        :class:`TestARefusalPreservesTheContent` explains: the property is the bytes.
         """
         projected = _install_donor(world)
         (world["store"].state_dir / "donor.json").write_text("{ not valid json", encoding="utf-8")
@@ -293,13 +294,48 @@ class TestBranchUnreadableRecordKnownDefect:
 
         result = CliRunner().invoke(cli, ["skills", "remove", "shared-skill"])
 
-        # WRONG on both counts, pinned so the wrongness is visible and testable.
+        assert (
+            projected.exists() or projected.is_symlink()
+        ), "the projection was deleted because one corrupt state file hid the claim"
+        assert result.exit_code != 0, result.output
+        assert "cao plugin remove donor" in result.output
+        assert (plugin_source / "SKILL.md").is_file()
+
+    def test_a_user_owned_skill_is_still_removable_while_a_record_is_corrupt(self, world):
+        """Control: the fix must not make a corrupt record freeze unrelated names.
+
+        Over-claiming is the safe direction but it is not free — an operator who can
+        no longer remove their own skills has a different outage.
+        """
+        _install_donor(world)
+        (world["store"].state_dir / "donor.json").write_text("{ not valid json", encoding="utf-8")
+        mine = _write_user_skill(world["skills_dir"] / "mine-alone", "mine-alone")
+
+        result = CliRunner().invoke(cli, ["skills", "remove", "mine-alone"])
+
         assert result.exit_code == 0, result.output
-        assert not (projected.exists() or projected.is_symlink())
-        assert (plugin_source / "SKILL.md").is_file(), (
-            "the plugin's own bytes must survive, which is what bounds this to a "
-            "recoverable projection loss rather than real data loss"
-        )
+        assert not mine.exists()
+
+    def test_a_user_directory_at_a_claimed_name_is_still_removable(self, world):
+        """Control: structure decides, so the poisoned state stays removable.
+
+        The record claims ``shared-skill`` AND is unreadable AND the directory is the
+        user's. Neither half of the evidence holds, so the removal must go through —
+        an implementation that refused on a corrupt record alone would fail here.
+        """
+        projected = _install_donor(world)
+        if projected.is_symlink():
+            projected.unlink()
+        else:
+            shutil.rmtree(projected)
+        _write_user_skill(projected, "shared-skill")
+        (world["store"].state_dir / "donor.json").write_text("{ not valid json", encoding="utf-8")
+
+        assert _owner(world) is None
+        result = CliRunner().invoke(cli, ["skills", "remove", "shared-skill"])
+
+        assert result.exit_code == 0, result.output
+        assert not projected.exists()
 
 
 class TestARefusalPreservesTheContent:
