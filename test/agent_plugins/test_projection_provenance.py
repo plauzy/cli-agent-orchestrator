@@ -26,6 +26,7 @@ forged-marker tests.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -38,7 +39,7 @@ from cli_agent_orchestrator.agent_plugins.projection import (
     rebuild_projection,
 )
 
-from .conftest import build_plugin
+from .conftest import build_plugin, write_skill
 
 SKILL = "donor-skill"
 
@@ -366,6 +367,153 @@ class TestAMarkerIsBoundToItsDirectory:
         # Still the user's copy: a replacement would have re-marked it for betaplug.
         payload = json.loads((relocated / MARKER_FILENAME).read_text(encoding="utf-8"))
         assert payload["skill"] == SKILL and payload["plugin"] == "donor"
+
+
+class TestTheMarkerBindsToTheLogicalSkillName:
+    """Reported by independent review: a renaming ``skills/<name>`` symlink.
+
+    §4.1 permits ``skills/<name>`` to itself be a symlink whose target resolves
+    inside the plugin root, and ``_validate_skill_tree`` deliberately does not
+    reject that shape (``test_skill_symlink_inside_the_root_is_permitted``). So
+    ``skills/inspection -> ../shared/implementation`` is a *permitted* package, and
+    it installs cleanly in copy mode.
+
+    ``_write_marker`` recorded ``realpath(source)``, whose basename is the symlink
+    TARGET's name — ``implementation`` — while the projected skill is
+    ``inspection``. ``_verified_marker`` binds a marker to the directory holding it
+    by requiring that basename to equal ``path.name``, so **CAO rejected its own
+    unchanged marker.**
+
+    The adoption rule cannot paper over it where it matters: ``uninstall`` removes
+    the package *before* the sweep runs, so there is no source left to compare
+    bytes against. The removal therefore reported success with
+    ``projection.sweep_skipped_unmanaged`` while the skill stayed in the shared
+    catalog — visible to every provider, owned by nothing.
+
+    The name binding itself is not the bug and is not relaxed; it is what stops a
+    marker being a bearer token (:class:`TestAMarkerIsBoundToItsDirectory`). What
+    changed is that the marker now records the LOGICAL projected path, so the
+    binding compares the right two names.
+
+    Two different target basenames, because a fix that special-cased one string
+    would pass with one. The same-basename control is the regression guard.
+    """
+
+    @staticmethod
+    def _renaming_plugin(root: Path, plugin: str, skill: str, target: str) -> Path:
+        """A package whose ``skills/<skill>`` is a symlink to ``shared/<target>``.
+
+        The SKILL.md frontmatter name is ``skill``, matching the LINK's name —
+        which is what ``validate_skill_folder`` requires and what makes this a
+        valid package rather than a contrived one.
+        """
+        build_plugin(root, plugin, skills=[], with_mcp=False)
+        real = write_skill(root / "shared" / target, skill, f"Skill {skill}.")
+        links = root / "skills"
+        links.mkdir(parents=True, exist_ok=True)
+        (links / skill).symlink_to(os.path.relpath(real, links), target_is_directory=True)
+        return root
+
+    def _install_renaming(self, world, *, skill: str, target: str, plugin: str = "renamer"):
+        source = self._renaming_plugin(
+            world["tmp_path"] / f"src-{plugin}-{target}", plugin, skill, target
+        )
+        outcome = install(
+            PluginSource(kind="path", location=str(source)),
+            store=world["store"],
+            skills_dir=world["skills_dir"],
+            refresh_agents=False,
+        )
+        assert outcome.installed, [f.message for f in outcome.report.findings]
+        record = world["store"].get(plugin)
+        assert record is not None and skill in record.projected_skill_names, (
+            f"precondition: the permitted renaming package must project '{skill}'. "
+            f"findings={[f.message for f in outcome.report.findings]}"
+        )
+        return source
+
+    @pytest.mark.parametrize("target", ["implementation", "impl-v2"])
+    def test_the_marker_verifies_for_a_renaming_symlink(self, world, target):
+        """RED vehicle: recording ``realpath(source)`` in the marker.
+
+        Asserted on the persisted artifact and on the predicate, not on a helper
+        return value: the marker on disk must name the logical skill, and
+        ``_verified_marker`` must then accept it.
+        """
+        skill = "inspection"
+        self._install_renaming(world, skill=skill, target=target)
+        projected = world["skills_dir"] / skill
+        marker = projected / MARKER_FILENAME
+        assert marker.is_file(), "precondition: copy mode wrote a marker"
+
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        assert os.path.basename(payload["source"]) == skill, payload["source"]
+        assert payload["skill"] == skill
+        assert (
+            projection_module._verified_marker(projected, world["store"]) is not None
+        ), "CAO rejected its own unchanged marker"
+
+    @pytest.mark.parametrize("target", ["implementation", "impl-v2"])
+    def test_removing_the_plugin_removes_the_skill_from_the_catalog(self, world, target):
+        """The end-to-end consequence, which is the thing that actually mattered.
+
+        Not "the marker string changed": after ``cao plugin remove`` the skill must
+        be GONE from the catalog every provider reads. The package is deleted before
+        the sweep, so the marker is the only evidence left and a rejected marker
+        strands the copy in the shared skill store forever.
+        """
+        from cli_agent_orchestrator.utils.skills import list_skills
+
+        skill = "inspection"
+        self._install_renaming(world, skill=skill, target=target)
+        projected = world["skills_dir"] / skill
+        assert skill in {s.name for s in list_skills()}, "precondition: it is in the catalog"
+
+        outcome = _remove(world, "renamer")
+
+        codes = [f.code for f in outcome.projection_findings]
+        assert not projected.exists(), codes
+        assert skill not in {s.name for s in list_skills()}, codes
+        assert "projection.sweep_skipped_unmanaged" not in codes, codes
+
+    def test_a_same_basename_projection_still_removes_correctly(self, world):
+        """The reviewer's control: the ordinary shape must not regress.
+
+        This passed before the fix and must keep passing — it is the only thing
+        distinguishing "the binding now compares the right names" from "the binding
+        was deleted".
+        """
+        from cli_agent_orchestrator.utils.skills import list_skills
+
+        _install(world)
+        projected = world["skills_dir"] / SKILL
+        assert (projected / MARKER_FILENAME).is_file()
+        assert SKILL in {s.name for s in list_skills()}
+
+        outcome = _remove(world)
+
+        codes = [f.code for f in outcome.projection_findings]
+        assert not projected.exists(), codes
+        assert SKILL not in {s.name for s in list_skills()}, codes
+        assert "projection.sweep_skipped_unmanaged" not in codes, codes
+
+    def test_a_marker_whose_recorded_source_names_another_skill_is_still_refused(self, world):
+        """The binding is still a binding: only the LOGICAL name may satisfy it.
+
+        Without this, "record the logical name" could be implemented by dropping the
+        source check altogether, which would restore the bearer-token hole
+        :class:`TestAMarkerIsBoundToItsDirectory` closed.
+        """
+        _install(world)
+        projected = world["skills_dir"] / SKILL
+        marker = projected / MARKER_FILENAME
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        payload["source"] = str(world["store"].plugin_root("donor") / "skills" / "somebody-else")
+        marker.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+        payload["digest"] = projection_module._tree_digest(projected)
+        marker.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+
+        assert projection_module._verified_marker(projected, world["store"]) is None
 
 
 class TestTheAdoptionRuleUpgradesPreMarkerCopies:

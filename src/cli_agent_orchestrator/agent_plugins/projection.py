@@ -935,11 +935,25 @@ def _write_marker(link_path: Path, plugin_name: str, skill_name: str, source: Pa
         "format": MARKER_FORMAT,
         "plugin": plugin_name,
         "skill": skill_name,
-        # Resolved, because `_verified_marker` containment-checks it against a
-        # realpath'd plugin store. Recording the unresolved path made every marker
-        # fail to verify on any host whose CAO home has a symlink component --
-        # macOS `/tmp` -> `/private/tmp`, or a symlinked `$HOME`.
-        "source": os.path.realpath(source),
+        # The LOGICAL projected path: the resolved *parent* plus the projected
+        # skill's own name. Not `realpath(source)`.
+        #
+        # §4.1 permits `skills/<name>` to itself be a symlink resolving inside the
+        # plugin root, so `skills/inspection -> ../shared/implementation` is a valid
+        # package. Resolving the whole path recorded basename `implementation` while
+        # the projected skill is `inspection`, and `_verified_marker` binds a marker
+        # to its directory by requiring that basename to match -- so CAO rejected
+        # its own unchanged marker, and uninstall stranded the copy in the shared
+        # skill store with `projection.sweep_skipped_unmanaged`.
+        #
+        # The parent is still resolved, which is the whole reason resolution was
+        # introduced: `_verified_marker` containment-checks this against a realpath'd
+        # plugin store, and recording an unresolved path made every marker fail to
+        # verify on any host whose CAO home has a symlink component -- macOS `/tmp`
+        # -> `/private/tmp`, or a symlinked `$HOME`. Resolving the parent answers
+        # containment exactly as well, because a final-component symlink cannot move
+        # a path out of its own directory.
+        "source": os.path.join(os.path.realpath(source.parent), skill_name),
         "digest": digest,
     }
     try:
@@ -958,9 +972,10 @@ def _verified_marker(
     Four checks, all required:
 
     1. ``format`` is one CAO wrote.
-    2. ``source`` lies inside the plugin store — a marker naming somewhere else
-       was not written by a projection. Compared after ``realpath`` on both sides,
-       or a symlink component anywhere in the CAO home breaks every marker.
+    2. ``source``'s **parent directory** lies inside the plugin store — a marker
+       naming somewhere else was not written by a projection. Compared after
+       ``realpath`` on both sides, or a symlink component anywhere in the CAO home
+       breaks every marker.
     3. **The marker is bound to the directory holding it**: both the recorded
        ``skill`` and the last segment of ``source`` must equal ``path.name``.
        Without this a marker is a bearer token — copying a marked projection to
@@ -970,6 +985,14 @@ def _verified_marker(
     4. The recomputed digest equals the recorded one, which is what makes an
        in-place edit visible: without it a marker would be a name claim again,
        exactly the thing this review rejected.
+
+    Checks 2 and 3 are split across the parent and the last segment on purpose, and
+    that split is load-bearing. Realpath'ing the whole recorded path re-follows a
+    permitted renaming ``skills/<name>`` symlink (§4.1) and yields the *target's*
+    basename, so ``skills/inspection -> ../shared/implementation`` made check 3
+    reject CAO's own unchanged marker. Resolving only the parent answers containment
+    just as well — a final-component symlink cannot move a path out of its own
+    directory — while leaving the binding to compare the logical names.
 
     ``plugin`` is read but deliberately **not** matched against the caller's
     expectation: a legitimate winner transition hands a name from one plugin to
@@ -988,10 +1011,16 @@ def _verified_marker(
     source = loaded.get("source")
     if not isinstance(source, str):
         return None
-    source_real = os.path.realpath(source)
-    if not _within(source_real, store.plugins_dir):
+    # Containment is asked of the PARENT directory, and the basename is compared
+    # LEXICALLY. Realpath'ing the whole recorded path would re-follow a permitted
+    # renaming `skills/<name>` symlink and hand back the target's basename, which is
+    # the defect this pair of checks used to have. A final-component symlink cannot
+    # move a path out of its own directory, so resolving the parent answers
+    # containment exactly as well -- and still defeats a `..` escape, whose parent
+    # resolves outside the store.
+    if not _within(os.path.realpath(os.path.dirname(source)), store.plugins_dir):
         return None
-    if loaded.get("skill") != path.name or os.path.basename(source_real) != path.name:
+    if loaded.get("skill") != path.name or os.path.basename(source) != path.name:
         return None
     recorded = loaded.get("digest")
     if not isinstance(recorded, str) or recorded != _tree_digest(path, cache):
