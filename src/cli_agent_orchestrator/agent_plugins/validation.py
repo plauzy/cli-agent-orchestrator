@@ -39,7 +39,7 @@ import stat
 from functools import lru_cache
 from importlib import resources
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
 from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
@@ -722,6 +722,13 @@ def _discover_skills(root_dir: Path) -> Tuple[List[DiscoveredSkill], List[Findin
     return discovered, findings
 
 
+#: One directory whose subtree still has to be validated: where it is, its canonical
+#: path, the ``skills/<name>/...`` path to report findings under, and the set of
+#: canonical directories that are OPEN on the route that reached it. That last field
+#: is the cycle detector: a directory symlink resolving to any of them closes a loop.
+_PendingTree = Tuple[Path, Path, str, FrozenSet[Path]]
+
+
 def _validate_skill_tree(root_dir: Path, skill_dir: Path, rel: str) -> Optional[Finding]:
     """Validate everything a copy would recursively touch. §4.1, review 4 item 2.
 
@@ -731,86 +738,193 @@ def _validate_skill_tree(root_dir: Path, skill_dir: Path, rel: str) -> Optional[
     validation said the skill was fine. This closes that gap by walking the tree
     the copy will walk, before anything is copied.
 
+    Why one ``os.walk`` is not enough
+    ---------------------------------
+    ``os.walk(..., followlinks=False)`` inspects a directory symlink and then
+    never looks *inside* it, so a single walk validated the link and nothing
+    under it. ``skills/inspection/assets -> ../../shared`` is contained and
+    therefore permitted, but ``shared/evil -> /etc/passwd`` sits in a subtree no
+    walk ever entered -- and ``copytree(..., symlinks=False)`` dereferences the
+    whole chain, so the external bytes reached the live skill store with zero
+    findings. Each permitted directory symlink's target is therefore validated as
+    its own tree, before anything can dereference its descendants.
+
     Deliberately applied to NESTED entries only. ``os.walk`` always descends the
     directory it is given, even with ``followlinks=False``, and §4.1 explicitly
     permits ``skills/<name>`` to itself be a symlink whose target resolves inside
     the root (``test_skill_symlink_inside_the_root_is_permitted``). Rejecting the
     walk root would break that permitted shape.
 
+    Termination is a requirement, not a hope. Iterative with an explicit worklist
+    rather than recursive, so a package nesting contained directory symlinks
+    thousands deep answers with a finding instead of ``RecursionError``; a loop is
+    caught by the open-route set carried in each :data:`_PendingTree`; and
+    ``validated`` bounds the total work when several links reach the same
+    directory (a diamond, which is emphatically *not* a loop).
+
     Returns the FIRST problem rather than a list: the skill is skipped either way,
     and one clear reason is more actionable than an inventory of a tree the
     operator cannot see.
     """
-    walked: List[Path] = []
-    for current, dirnames, filenames in os.walk(skill_dir, followlinks=False):
+    # Canonicalized with the SAME containment predicate every other check uses --
+    # `_discover_skills` has already accepted this path, so `None` here is an
+    # unreachable belt-and-braces guard rather than an expected outcome.
+    skill_real = resolve_within_root(root_dir, skill_dir)
+    if skill_real is None:  # pragma: no cover - _discover_skills rejected it already
+        return Finding(
+            severity=Severity.SKIPPED,
+            code="skill.escapes_root",
+            spec_ref="§4.1",
+            message=f"Skill '{skill_dir.name}' resolves outside the plugin root; skipped",
+            path=rel,
+        )
+
+    pending: List[_PendingTree] = [(skill_dir, skill_real, rel, frozenset())]
+    validated: Set[Path] = set()
+
+    while pending:
+        base, base_real, base_rel, open_dirs = pending.pop()
+        if base_real in validated:
+            continue
+        validated.add(base_real)
+
+        finding, discovered = _scan_tree(
+            root_dir, skill_dir.name, base, base_real, base_rel, open_dirs
+        )
+        if finding is not None:
+            return finding
+        pending.extend(discovered)
+
+    return None
+
+
+def _scan_tree(
+    root_dir: Path,
+    skill_name: str,
+    base: Path,
+    base_real: Path,
+    base_rel: str,
+    open_dirs: FrozenSet[Path],
+) -> Tuple[Optional[Finding], List[_PendingTree]]:
+    """Walk one tree without following links, and report the links worth following.
+
+    Returns the first problem found, or ``None`` plus the contained directory
+    symlink targets whose own subtrees still need the same treatment.
+
+    Entries are sorted so that a package with more than one problem always gets
+    the same finding reported, whatever order the filesystem enumerates in.
+    """
+    discovered: List[_PendingTree] = []
+
+    for current, dirnames, filenames in os.walk(base, followlinks=False):
         current_path = Path(current)
-        walked.append(current_path.resolve())
-        for entry in list(dirnames) + list(filenames):
+        rel_parts = current_path.relative_to(base).parts
+        # `followlinks=False` means every component `os.walk` descended is a real
+        # directory, so the canonical path of `current` is `base_real` plus those
+        # components. No extra realpath call, and no symlink can hide inside it.
+        route = open_dirs | _chain(base_real, rel_parts)
+
+        for entry in sorted(dirnames) + sorted(filenames):
             candidate = current_path / entry
-            entry_rel = f"{rel}/{candidate.relative_to(skill_dir).as_posix()}"
+            entry_rel = f"{base_rel}/{candidate.relative_to(base).as_posix()}"
             try:
                 stat_result = os.lstat(candidate)
             except OSError as exc:
-                return Finding(
-                    severity=Severity.SKIPPED,
-                    code="skill.unreadable_entry",
-                    spec_ref="§4.1",
-                    message=f"Skill '{skill_dir.name}' entry could not be inspected: {exc}",
-                    path=entry_rel,
+                return (
+                    Finding(
+                        severity=Severity.SKIPPED,
+                        code="skill.unreadable_entry",
+                        spec_ref="§4.1",
+                        message=f"Skill '{skill_name}' entry could not be inspected: {exc}",
+                        path=entry_rel,
+                    ),
+                    [],
                 )
 
             if stat.S_ISLNK(stat_result.st_mode):
                 resolved = resolve_within_root(root_dir, candidate)
                 if resolved is None:
-                    return Finding(
-                        severity=Severity.SKIPPED,
-                        code="skill.link_escapes_root",
-                        spec_ref="§4.1",
-                        message=(
-                            f"Skill '{skill_dir.name}' contains a symlink resolving outside "
-                            f"the plugin root; skipped. Copy-mode projection would have "
-                            f"dereferenced it and copied external content in."
+                    return (
+                        Finding(
+                            severity=Severity.SKIPPED,
+                            code="skill.link_escapes_root",
+                            spec_ref="§4.1",
+                            message=(
+                                f"Skill '{skill_name}' contains a symlink resolving outside "
+                                f"the plugin root; skipped. Copy-mode projection would have "
+                                f"dereferenced it and copied external content in."
+                            ),
+                            path=entry_rel,
                         ),
-                        path=entry_rel,
+                        [],
                     )
                 if not resolved.exists():
-                    return Finding(
-                        severity=Severity.SKIPPED,
-                        code="skill.link_dangling",
-                        spec_ref="§4.1",
-                        message=(
-                            f"Skill '{skill_dir.name}' contains a symlink whose target does "
-                            f"not exist; skipped. Copying it would fail partway through."
+                    return (
+                        Finding(
+                            severity=Severity.SKIPPED,
+                            code="skill.link_dangling",
+                            spec_ref="§4.1",
+                            message=(
+                                f"Skill '{skill_name}' contains a symlink whose target does "
+                                f"not exist; skipped. Copying it would fail partway through."
+                            ),
+                            path=entry_rel,
                         ),
-                        path=entry_rel,
+                        [],
                     )
-                if resolved.is_dir() and (resolved in walked or resolved == skill_dir.resolve()):
-                    return Finding(
-                        severity=Severity.SKIPPED,
-                        code="skill.link_cycle",
-                        spec_ref="§4.1",
-                        message=(
-                            f"Skill '{skill_dir.name}' contains a directory symlink pointing "
-                            f"at itself or an ancestor; skipped. Anything that recurses "
-                            f"through it would not terminate."
-                        ),
-                        path=entry_rel,
-                    )
+                if resolved.is_dir():
+                    # Checked BEFORE the `validated` memo: a loop is a property of
+                    # the route taken, and a directory already validated by some
+                    # other route can still be the one this route closes back onto.
+                    if resolved in route:
+                        return (
+                            Finding(
+                                severity=Severity.SKIPPED,
+                                code="skill.link_cycle",
+                                spec_ref="§4.1",
+                                message=(
+                                    f"Skill '{skill_name}' contains a directory symlink "
+                                    f"pointing at itself or an ancestor; skipped. Anything "
+                                    f"that recurses through it would not terminate."
+                                ),
+                                path=entry_rel,
+                            ),
+                            [],
+                        )
+                    discovered.append((resolved, resolved, entry_rel, route))
                 continue
 
             if not (stat.S_ISREG(stat_result.st_mode) or stat.S_ISDIR(stat_result.st_mode)):
-                return Finding(
-                    severity=Severity.SKIPPED,
-                    code="skill.special_entry",
-                    spec_ref="§4.1",
-                    message=(
-                        f"Skill '{skill_dir.name}' contains an entry that is neither a "
-                        f"regular file, directory, nor symlink; skipped. Reading a FIFO or "
-                        f"device can block indefinitely."
+                return (
+                    Finding(
+                        severity=Severity.SKIPPED,
+                        code="skill.special_entry",
+                        spec_ref="§4.1",
+                        message=(
+                            f"Skill '{skill_name}' contains an entry that is neither a "
+                            f"regular file, directory, nor symlink; skipped. Reading a FIFO or "
+                            f"device can block indefinitely."
+                        ),
+                        path=entry_rel,
                     ),
-                    path=entry_rel,
+                    [],
                 )
-    return None
+
+    return None, discovered
+
+
+def _chain(base_real: Path, rel_parts: Tuple[str, ...]) -> FrozenSet[Path]:
+    """``base_real`` and every canonical directory between it and ``rel_parts``.
+
+    These are the directories a walk currently has open, which is exactly the set a
+    directory symlink must not resolve into.
+    """
+    chain = {base_real}
+    node = base_real
+    for part in rel_parts:
+        node = node / part
+        chain.add(node)
+    return frozenset(chain)
 
 
 def _map_mcp(root_dir: Path, manifest: PluginManifest) -> Tuple[bool, tuple, List[Finding]]:
