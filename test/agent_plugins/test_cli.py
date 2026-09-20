@@ -172,6 +172,14 @@ class TestAdd:
 
 
 class TestSourceKindDetection:
+    """Syntactic classification only.
+
+    ``_looks_like_git`` answers "is this repository-shaped", not "can CAO clone
+    it": an unsupported ``git+`` transport is git-shaped here and refused by
+    ``_make_source``, which is where the two sides are reconciled. See
+    ``test_git_source_forms.py`` for that invariant.
+    """
+
     @pytest.mark.parametrize(
         "location",
         [
@@ -188,6 +196,19 @@ class TestSourceKindDetection:
     @pytest.mark.parametrize("location", ["./local", "/abs/path", "relative/dir", "."])
     def test_path_shaped_sources(self, location):
         assert not _looks_like_git(location)
+
+    def test_an_unsupported_git_plus_form_is_refused_at_the_cli(self, cli_env, tmp_path):
+        """The operator-visible artifact: a message naming the forms that work.
+
+        Not a git stderr line. ``git+file://`` reached ``git clone`` unchanged
+        before this, and died as ``remote helper 'git+file' aborted session``.
+        """
+        result = run(cli_env, "add", f"git+file://{tmp_path / 'repo.git'}")
+
+        assert result.exit_code != 0
+        assert "git+https://" in result.output
+        assert "git+ssh://" in result.output
+        assert "aborted session" not in result.output
 
 
 class TestList:

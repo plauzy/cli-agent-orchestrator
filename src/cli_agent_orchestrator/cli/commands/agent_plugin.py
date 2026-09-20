@@ -18,11 +18,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 import click
 
 from cli_agent_orchestrator.agent_plugins.gate import agent_plugins_surface_enabled
+from cli_agent_orchestrator.agent_plugins.git_source import git_clone_target
 from cli_agent_orchestrator.agent_plugins.installer import (
     PluginInstallError,
     affected_sessions,
@@ -60,6 +61,12 @@ def _looks_like_git(location: str) -> bool:
     Deliberately syntactic: a URL scheme, an ``scp``-style SSH target, or a
     ``.git`` suffix. Anything else is a local path, which keeps a directory
     literally named ``github.com`` from being cloned instead of copied.
+
+    A ``git+`` location is git-shaped here even when CAO refuses it. Answering
+    "no" would be worse than refusing: the source would fall through to the path
+    resolver and the operator would be told their ``git+file://...`` URL is a
+    directory that does not exist. ``_make_source`` refuses it instead, with a
+    message that names the forms that work.
     """
     candidate = location.strip()
     if candidate.startswith(("http://", "https://", "git://", "ssh://", "git+")):
@@ -70,8 +77,24 @@ def _looks_like_git(location: str) -> bool:
 
 
 def _make_source(location: str, ref: Optional[str], subdir: Optional[str]) -> PluginSource:
+    """Classify a source string, refusing a ``git+`` form the resolver cannot clone.
+
+    The refusal happens at classification, not at clone time, and it comes from
+    the same :func:`git_clone_target` the resolver calls — so "detected as git"
+    can no longer claim a form that dies in the subprocess.
+
+    Raises:
+        UnsupportedGitSourceError: ``location`` is an unsupported ``git+`` form.
+    """
+    kind: Literal["path", "git"] = "git" if _looks_like_git(location) else "path"
+    if kind == "git":
+        # The return value is discarded: the resolver re-derives it from the same
+        # function. Recording the normalized string on the PluginSource instead
+        # would rewrite what the operator typed into the install record's own
+        # provenance, and a replayed record must show the source as given.
+        git_clone_target(location)
     return PluginSource(
-        kind="git" if _looks_like_git(location) else "path",
+        kind=kind,
         location=location,
         ref=ref,
         subdir=subdir,

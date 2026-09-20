@@ -36,6 +36,7 @@ from pathlib import Path
 from tempfile import mkdtemp
 from typing import Dict, List, Optional, Tuple
 
+from cli_agent_orchestrator.agent_plugins.git_source import UnsupportedGitSourceError
 from cli_agent_orchestrator.agent_plugins.models import (
     AffectedSession,
     Finding,
@@ -133,6 +134,12 @@ def install(
     try:
         try:
             resolved = resolve(source, staging)
+        except UnsupportedGitSourceError as exc:
+            # A validation verdict about the source string, not an unreachable
+            # source — but from an installer caller's perspective both mean
+            # "nothing was published", so it reports through the same error with
+            # the refusal's own message rather than a git stderr line.
+            raise PluginInstallError(str(exc)) from exc
         except ResolverError as exc:
             raise PluginInstallError(str(exc)) from exc
 

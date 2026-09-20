@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from cli_agent_orchestrator.agent_plugins.containment import resolve_within_root
+from cli_agent_orchestrator.agent_plugins.git_source import git_clone_target
 from cli_agent_orchestrator.agent_plugins.models import PluginSource
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,9 @@ def resolve(source: PluginSource, dest: Path) -> ResolvedSource:
         ResolverError: If the source is unreachable — an invalid local path, a
             failed git operation, or a ``subdir`` that does not exist or escapes
             the staged tree. The installed set is never touched on this path.
+        UnsupportedGitSourceError: If a git location uses a ``git+`` form CAO
+            refuses (see :mod:`cli_agent_orchestrator.agent_plugins.git_source`).
+            A validation verdict, reached before any git subprocess runs.
     """
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
@@ -121,10 +125,23 @@ def _resolve_path(source: PluginSource, dest: Path) -> tuple[Path, None]:
 
 
 def _resolve_git(source: PluginSource, dest: Path) -> tuple[Path, Optional[str]]:
-    """Shallow-clone a repository into staging and record the resolved commit."""
+    """Shallow-clone a repository into staging and record the resolved commit.
+
+    Raises:
+        UnsupportedGitSourceError: For a ``git+`` form CAO refuses. Raised here
+            rather than only at the CLI so the HTTP surface — which builds a
+            ``PluginSource`` of its own — cannot reach ``git clone`` with a
+            transport git does not speak.
+    """
     location = source.location.strip()
     if not location:
         raise ResolverError("Plugin source git URL is empty")
+
+    # The single seam shared with source-kind detection. Normalizing HERE, before
+    # the argv is built, is what makes "classified as git" and "clonable" the
+    # same question: a refused form raises before any subprocess starts, and the
+    # commit-pin fallback below inherits the normalized location for free.
+    location = git_clone_target(location)
 
     staged = dest / _STAGE_DIRNAME
     args: List[str] = [

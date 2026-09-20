@@ -112,6 +112,28 @@ cao plugin remove my-plugin --purge-data
 scripting. `cao plugin add` and `cao plugin validate` exit non-zero when a
 plugin is not loadable.
 
+### Accepted git source spellings
+
+A git source is cloned with the transport you name, so it must be one git
+speaks: `https://`, `ssh://`, `git://`, `file://`, or an `scp`-style
+`git@host:owner/repo.git`.
+
+The `pip`/`uv` requirement spelling is accepted for the two forms that map
+cleanly onto a transport, and rewritten before the clone:
+
+| You type | CAO clones |
+| --- | --- |
+| `git+https://host/path` | `https://host/path` |
+| `git+ssh://host/path` | `ssh://host/path` |
+
+Every other `git+` form — `git+file://`, `git+git://`, `git+http://`, or a bare
+`git+something` — is **refused** with a message naming the two supported forms.
+Git would otherwise read `git+file` as the name of a remote helper and fail with
+`fatal: remote helper 'git+file' aborted session`. The prefix is not stripped
+across the board on purpose: doing so would silently turn `git+file://` into an
+accepted read of a local filesystem path. Use a plain path or a `file://` URL
+for a local repository.
+
 The same operations are available over the HTTP API — `GET/POST /plugins`,
 `POST /plugins/validate`, `DELETE /plugins/{name}` — and in the web UI's
 **Plugins** tab.
