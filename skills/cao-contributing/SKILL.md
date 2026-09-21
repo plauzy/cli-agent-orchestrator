@@ -6,8 +6,8 @@ description: Contribute changes to the CAO (CLI Agent Orchestrator) codebase —
   "add a test and verify coverage", or when making any code change intended to land on a
   branch/PR. Covers uv-based build/test/lint, the ci.yml jobs and their pass/fail
   semantics, and the golden rules that stop a green-locally / red-in-CI surprise. Not for
-  authoring agent skills (cao-skill-creator), building providers/plugins/MCP-apps, or
-  operating running sessions.
+  authoring agent skills, building providers/plugins/MCP-apps, or operating running
+  sessions.
 ---
 
 # Contributing to CAO
@@ -141,7 +141,8 @@ noise. `test/test_cao_contributing_skill_accuracy.py` fails if this table drifts
 
 ## Not what you want?
 
-- Authoring a *new agent skill* (SKILL.md, frontmatter, evals) → use **cao-skill-creator**.
+- Authoring a *new agent skill* (`SKILL.md`, frontmatter, evals) → no shipped skill covers this
+  yet; follow the [Agent Skills specification](https://agentskills.io/specification) directly.
 - Building a provider / plugin / MCP-apps view → **cao-provider** / **cao-plugin** /
   **cao-mcp-apps**.
 - Launching or steering running agent sessions → **cao-session-management**.

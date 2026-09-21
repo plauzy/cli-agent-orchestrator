@@ -33,6 +33,18 @@ INTENTIONALLY_UNDOCUMENTED: dict[str, str] = {
     "Dependency Review": "advisory-only, PR-scoped; no local equivalent to run",
 }
 
+# Shipped skills whose names do not start with ``cao-``. The reference matcher
+# below is anchored to the ``cao-`` prefix plus this allowlist rather than to
+# ``**bold**`` generally, because the gate-map table is full of bold prose
+# (``**Yes**``) that would otherwise be read as skill names.
+NON_CAO_SKILL_NAMES = frozenset({"agui-author", "mcp-apps-builder"})
+
+# Floor for the reference guard below. A pattern that stops matching would make
+# the existence check vacuous instead of failing, so the count is asserted
+# separately. Review on #448 flagged exactly this hazard in the ``examples/``
+# parametrize, which collects zero tests if its findall returns nothing.
+MINIMUM_SKILL_REFERENCES = 3
+
 
 def _ci_job_names() -> set[str]:
     spec = yaml.safe_load(CI_WORKFLOW.read_text())
@@ -43,6 +55,35 @@ def _ci_job_names() -> set[str]:
         name = re.sub(r"\s*\(\$\{\{.*?\}\}\)", "", name).strip()
         names.add(name)
     return names
+
+
+def _real_skill_names() -> set[str]:
+    """Directories under ``skills/`` that actually contain a ``SKILL.md``.
+
+    Mirrors the Agent Plugins discovery rule: one skill per immediate child
+    directory holding a ``SKILL.md``, no deeper recursion.
+    """
+    skills_dir = REPO_ROOT / "skills"
+    return {p.name for p in skills_dir.iterdir() if (p / "SKILL.md").is_file()}
+
+
+def _referenced_skill_names() -> set[str]:
+    """Skill names the skill text points at, in bold or backticks.
+
+    Anchored to the ``cao-`` prefix plus ``NON_CAO_SKILL_NAMES``. A looser
+    matcher over ``**...**`` would capture gate-map prose and fail spuriously;
+    the cost of this precision is that a future non-``cao-`` skill must be added
+    to the allowlist, which is a visible maintenance point rather than a silent
+    miss.
+    """
+    text = _skill_text()
+    found = set(re.findall(r"\*\*(cao-[a-z0-9-]+)\*\*|`(cao-[a-z0-9-]+)`", text))
+    names = {m for pair in found for m in pair if m}
+    for extra in NON_CAO_SKILL_NAMES:
+        if re.search(rf"\*\*{re.escape(extra)}\*\*|`{re.escape(extra)}`", text):
+            names.add(extra)
+    # The skill documents itself; that is not a route to verify.
+    return names - {"cao-contributing"}
 
 
 def _skill_text() -> str:
@@ -75,6 +116,34 @@ class TestTheGateMapMatchesCi:
             c for c in claimed if not any(c.startswith(r) or r.startswith(c) for r in real)
         )
         assert not phantom, f"The skill documents jobs that no longer exist in ci.yml: {phantom}"
+
+
+class TestReferencedSkillsExist:
+    """A skill that routes agents elsewhere must not name a skill that is absent.
+
+    #448 shipped a route to ``cao-skill-creator``, which never existed in
+    ``skills/``. A dangling route is worse in a packaged skill than in ordinary
+    prose: the frontmatter ``description`` is the text an agent matches on when
+    deciding whether to load the skill, so a phantom name both fails to route
+    and widens the activation surface.
+    """
+
+    def test_the_reference_guard_has_something_to_check(self):
+        found = _referenced_skill_names()
+        assert len(found) >= MINIMUM_SKILL_REFERENCES, (
+            f"Expected at least {MINIMUM_SKILL_REFERENCES} skill references in "
+            f"{SKILL.relative_to(REPO_ROOT)}, found {sorted(found)}. If the routing "
+            "section was reworded, lower this floor deliberately -- do not let the "
+            "existence check below silently verify nothing."
+        )
+
+    def test_every_referenced_skill_exists(self):
+        missing = sorted(_referenced_skill_names() - _real_skill_names())
+        assert not missing, (
+            f"{SKILL.relative_to(REPO_ROOT)} references skills that do not exist: "
+            f"{missing}. Real skills: {sorted(_real_skill_names())}. Either point the "
+            "reference at a skill that exists, drop it, or add the skill."
+        )
 
 
 class TestQuotedCommandsAreReal:
