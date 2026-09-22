@@ -49,6 +49,9 @@ properties are asserted here that prose review kept missing:
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -83,6 +86,15 @@ NON_CAO_SKILL_NAMES = frozenset({"agui-author", "mcp-apps-builder"})
 # the existence check vacuous instead of failing, so the count is asserted
 # separately. Review on #448 flagged exactly this hazard in the ``examples/``
 # parametrize, which collects zero tests if its findall returns nothing.
+#
+# Why a literal rather than a value derived from ci.yml, as the verdict floor is:
+# there is no ground truth to derive from here. The number of skills this one
+# should route to is an editorial decision, not a fact about the repo, so a
+# derived floor would either be circular (count what the file happens to say) or
+# wrong (every shipped skill is not a valid route). The slack is therefore stated
+# instead of hidden: the routing section currently names FOUR real skills
+# (cao-mcp-apps, cao-plugin, cao-provider, cao-session-management), so this floor
+# tolerates losing exactly one before it fires.
 MINIMUM_SKILL_REFERENCES = 3
 
 # The ``examples/`` path matcher is a SECOND, independent parametrize site with
@@ -202,15 +214,25 @@ def _gate_map_job_rows() -> dict[str, str]:
 def _claimed_blocking(verdict_cell: str) -> bool | None:
     """The JOB-level verdict a ``Blocking?`` cell claims, or None if unreadable.
 
-    The FIRST verdict token wins, because a cell may carry the job verdict plus a
-    step-level caveat: Code Quality reads ``black/isort **yes**; **mypy is
-    non-blocking**`` and the job is blocking. Returning None rather than guessing
-    keeps an unreadable cell a test failure instead of a silent pass.
+    An explicit bolded ``**Yes**``/``**No**`` is the job verdict wherever it
+    appears in the cell; the bare phrase "non-blocking" only decides the verdict
+    when no bolded token is present. That makes this ORDER-INDEPENDENT, which the
+    previous first-token-wins version was not: review on #448 pointed out that
+    rewording Code Quality's cell from ``black/isort **yes**; **mypy is
+    non-blocking**`` to "mypy non-blocking; otherwise **yes**" would have flipped
+    a blocking job to tolerated with no test noticing. Both orderings now read as
+    blocking, and ``TestTheBlockingDerivationItself`` pins that.
+
+    Two contradictory bolded verdicts in one cell return None rather than picking
+    one, so an ambiguous cell is a loud failure instead of a coin flip.
     """
-    for match in re.finditer(r"non-blocking|\*\*(yes|no)\*\*", verdict_cell, re.IGNORECASE):
-        if match.group(0).lower() == "non-blocking":
-            return False
-        return match.group(1).lower() == "yes"
+    verdicts = {m.lower() for m in re.findall(r"\*\*(yes|no)\*\*", verdict_cell, re.IGNORECASE)}
+    if len(verdicts) > 1:
+        return None
+    if verdicts:
+        return verdicts.pop() == "yes"
+    if re.search(r"non-blocking", verdict_cell, re.IGNORECASE):
+        return False
     return None
 
 
@@ -379,6 +401,37 @@ class TestTheGateMapBlockingVerdicts:
         )
 
 
+class TestTheVerdictCellParser:
+    """Pins ``_claimed_blocking`` against rewordings, not just today's wording.
+
+    The cell text is prose a human edits. Review on #448 showed the previous
+    first-token-wins parser would read "mypy non-blocking; otherwise **yes**" as
+    a TOLERATED job, silently inverting the verdict for Code Quality while every
+    test stayed green. Order-independence is the property; these are the cases.
+    """
+
+    @pytest.mark.parametrize(
+        "cell,expected",
+        [
+            ("**Yes**", True),
+            ("**No**", False),
+            # Both orderings of the real Code Quality cell must read as blocking.
+            ("black/isort **yes**; **mypy is non-blocking**", True),
+            ("mypy non-blocking; otherwise **yes**", True),
+            # The Dependency Review row's shape: a verdict plus a scope caveat.
+            ("**Yes** — CI-only; skipped on forks", True),
+            # No bolded token at all: the phrase decides.
+            ("non-blocking", False),
+            # Unreadable rather than guessed.
+            ("", None),
+            ("probably?", None),
+            ("**Yes** and also **No**", None),
+        ],
+    )
+    def test_the_cell_is_read_the_same_regardless_of_token_order(self, cell, expected):
+        assert _claimed_blocking(cell) is expected
+
+
 class TestTheBlockingDerivationItself:
     """Pins ``_job_is_blocking`` directly, because ci.yml cannot exercise it.
 
@@ -423,9 +476,19 @@ class TestTheBlockingDerivationItself:
             for step in (job.get("steps") or [])
             if _truthy_continue_on_error(step.get("continue-on-error"))
         ]
-        assert len(tolerated) >= 2, (
-            "Expected ci.yml to carry several step-level continue-on-error steps "
-            f"(mypy plus the artifact uploads); found {tolerated}."
+        assert len(tolerated) >= 4, (
+            "Expected ci.yml to carry at least the four step-level "
+            "continue-on-error steps verified here -- mypy in Code Quality plus "
+            "three artifact uploads (AG-UI demo, AG-UI construct demos, Agent "
+            f"Plugins dog-food) -- but found {len(tolerated)}: {tolerated}. A "
+            "DECREASE is the direction that matters: it means the case "
+            "test_step_level_tolerance_does_not_make_the_job_tolerated models may "
+            "no longer exist in this repo. An increase is fine; raise this floor."
+        )
+        assert any("mypy" in str(step_name) for _job, step_name in tolerated), (
+            "mypy's step-level tolerance is the specific case the modelling above "
+            f"describes and the skill documents; it is not among {tolerated}. A "
+            "count alone would pass on three unrelated artifact uploads."
         )
         assert all(
             _job_is_blocking(_ci_jobs_by_name()[job_name]) for job_name, _ in tolerated
@@ -510,26 +573,147 @@ class TestQuotedCommandsAreReal:
         )
 
 
+def _run_recipe_shape(recipe_body: str, stub_exit: int) -> dict[str, object]:
+    """Execute a recipe shape and report what a contributor would observe.
+
+    The ``uv run pytest ...`` call -- and only that -- is swapped for a recording
+    stub with a chosen exit status, so what runs is the documented text's own
+    shape (subshell, trap, ordering, cleanup) rather than a paraphrase of it.
+
+    Returns the status the recipe *reported*, whether the throwaway directory
+    still existed immediately after the recipe finished, and the ``HOME`` /
+    ``CAO_HOME_DIR`` the child process really saw.
+    """
+    bash = shutil.which("bash")
+    if bash is None:  # pragma: no cover - both CI legs have bash
+        pytest.skip("bash is required to execute the documented recipe")
+    with tempfile.TemporaryDirectory() as scratch:
+        probe = Path(scratch) / "probe"
+        stub = Path(scratch) / "stub"
+        stub.write_text(
+            "#!/bin/sh\n"
+            f'printf "%s\\n%s\\n" "$HOME" "${{CAO_HOME_DIR-<unset>}}" > "{probe}"\n'
+            f"exit {stub_exit}\n"
+        )
+        stub.chmod(0o755)
+        # Stop at shell punctuation: a greedy \S+ swallows a trailing ';' or ')',
+        # which silently turns `pytest x.py; rm -rf $TMPH` into `stub rm -rf
+        # $TMPH` -- the stub receiving rm as ARGUMENTS and no cleanup running.
+        # That made a negative control pass for the wrong reason, which is the
+        # exact defect class this file exists to prevent.
+        executable = re.sub(r"uv run pytest\s+[\w./\-]+", f'"{stub}"', recipe_body)
+        assert str(stub) in executable, (
+            "The pytest invocation was not substituted, so this would execute the "
+            f"real suite instead of the stub. Recipe:\n{recipe_body}"
+        )
+        harness = (
+            # An ordinary shell with no errexit -- the condition under which the
+            # status bug appears at all.
+            "set +e\n"
+            f"{executable}\n"
+            # Still inside the harness process, so a trap registered OUTSIDE the
+            # subshell has not fired yet. This distinguishes "cleaned up" from
+            # "will be cleaned up whenever the shell happens to exit", which is
+            # the difference between a recipe that is safe interactively and one
+            # that only looks safe inside a script.
+            'RECORDED_HOME=$(head -1 "' + str(probe) + '" 2>/dev/null)\n'
+            'if [ -n "$RECORDED_HOME" ] && [ -d "$RECORDED_HOME" ]; '
+            'then echo "LEAK=1"; else echo "LEAK=0"; fi\n'
+        )
+        proc = subprocess.run([bash, "-c", harness], capture_output=True, text=True)
+        recorded = probe.read_text().splitlines() if probe.exists() else []
+        reported = re.search(r"exit=(-?\d+)", proc.stdout)
+        leak = re.search(r"LEAK=(\d)", proc.stdout)
+        return {
+            "reported_status": int(reported.group(1)) if reported else None,
+            "leaked": leak.group(1) == "1" if leak else None,
+            "child_home": recorded[0] if recorded else None,
+            "child_cao_home": recorded[1] if len(recorded) > 1 else None,
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+        }
+
+
+def _recipe_is_trustworthy(result: dict[str, object], expected_status: int) -> bool:
+    """All three properties at once: right status, cleaned up, really isolated."""
+    home, cao = result["child_home"], result["child_cao_home"]
+    return bool(
+        result["reported_status"] == expected_status
+        and result["leaked"] is False
+        and home
+        and cao
+        and cao != "<unset>"
+        and str(cao).startswith(str(home))
+    )
+
+
+# Recipe shapes that are WRONG, each in a way that a string check over the
+# Markdown fence cannot see. These are the negative controls: review of #448
+# showed the previous guards still passed after moving the ``CAO_HOME_DIR``
+# assignment below the invocation, or hoisting the trap out of the subshell, so
+# "the guard exists" had to be replaced with "the guard distinguishes these".
+BROKEN_RECIPE_SHAPES: dict[str, str] = {
+    "cleanup with ';' reports rm's status instead of the test's": (
+        'TMPH=$(mktemp -d); HOME="$TMPH" CAO_HOME_DIR="$TMPH/cao" '
+        'uv run pytest test/path/to/test_x.py; rm -rf "$TMPH"\n'
+        'echo "exit=$?"\n'
+    ),
+    "cleanup with '&&' leaks the directory on the failing run": (
+        'TMPH=$(mktemp -d); HOME="$TMPH" CAO_HOME_DIR="$TMPH/cao" '
+        'uv run pytest test/path/to/test_x.py && rm -rf "$TMPH"\n'
+        'echo "exit=$?"\n'
+    ),
+    "the override below the invocation is not in its environment": (
+        "TMPH=$(mktemp -d)\n"
+        "( trap 'rm -rf \"$TMPH\"' EXIT\n"
+        '  HOME="$TMPH" uv run pytest test/path/to/test_x.py\n'
+        '  CAO_HOME_DIR="$TMPH/cao" )\n'
+        'echo "exit=$?"\n'
+    ),
+    "a trap outside the subshell defers cleanup to shell exit": (
+        "TMPH=$(mktemp -d)\n"
+        "trap 'rm -rf \"$TMPH\"' EXIT\n"
+        '( HOME="$TMPH" CAO_HOME_DIR="$TMPH/cao" uv run pytest test/path/to/test_x.py )\n'
+        'echo "exit=$?"\n'
+    ),
+    "overriding HOME alone leaves CAO's state where it was": (
+        "TMPH=$(mktemp -d)\n"
+        "( trap 'rm -rf \"$TMPH\"' EXIT\n"
+        '  HOME="$TMPH" uv run pytest test/path/to/test_x.py )\n'
+        'echo "exit=$?"\n'
+    ),
+}
+
+
 class TestTheIsolatedHomeRecipeReallyIsolates:
     """The recipe tells contributors to prove a test is clean-runner-safe.
 
     It is the one snippet in the skill whose whole purpose is to produce a
     trustworthy pass/fail signal, so a recipe that reports the wrong answer is
-    worse than no recipe: it manufactures the confidence it was supposed to
-    test for. Two ways it could, both verified against the real code rather
-    than assumed:
+    worse than no recipe: it manufactures the confidence it was supposed to test
+    for. Three ways it can, all three now EXECUTED rather than pattern-matched:
 
     * Overriding ``HOME`` alone does not relocate CAO's state. ``constants.py``
-      prefers an exported ``CAO_HOME_DIR`` and derives ``DB_DIR`` and every
-      other state path from it, so a contributor who already exports an
-      absolute (or cwd-relative) value keeps using the initialised store the
-      recipe is meant to exclude -- concealing exactly the missing-table
-      failure it exists to surface. A tilde-relative value does follow ``HOME``,
-      which is why this reads as working when spot-checked.
-    * Cleaning up with ``;`` discards the test's exit status and yields the
-      status of ``rm``. An agent or script checking the status reads a failing
-      run as a pass. ``&&`` is not the fix -- it leaks the temporary directory
-      on failure, which is the case you most want cleaned up.
+      prefers an exported ``CAO_HOME_DIR`` and derives ``DB_DIR`` and every other
+      state path from it, so a contributor who already exports an absolute (or
+      cwd-relative) value keeps using the initialised store the recipe is meant
+      to exclude -- concealing exactly the missing-table failure it exists to
+      surface. A tilde-relative value does follow ``HOME``, which is why this
+      reads as working when spot-checked.
+    * Cleaning up with ``;`` discards the test's status and yields ``rm``'s, so a
+      failing run reports success. ``&&`` fixes the status but leaks the
+      directory on exactly the failures you wanted isolated.
+    * A trap registered outside the subshell defers cleanup to shell exit, which
+      looks identical inside a script and leaks for the rest of the session
+      interactively.
+
+    Why this class runs a subprocess when the rest of the file is strictly
+    read-only: review demonstrated that the string-matching version passed after
+    edits that broke the recipe -- moving the assignment below the invocation,
+    hoisting the trap. A guard whose subject is a token cannot see either. The
+    harness is still hermetic (bash plus two temp files; no network, DB, server,
+    or real ``HOME``), and ``BROKEN_RECIPE_SHAPES`` pins that it actually
+    distinguishes the broken shapes from the documented one.
     """
 
     def test_the_env_var_the_recipe_overrides_is_the_one_constants_reads(self):
@@ -541,41 +725,56 @@ class TestTheIsolatedHomeRecipeReallyIsolates:
             "update the recipe and this guard together."
         )
 
-    def test_it_overrides_cao_home_dir_as_well_as_home(self):
+    def test_it_overrides_cao_home_dir_under_the_throwaway_directory(self):
+        """Fast localiser for the common regression; behaviour is checked below."""
         recipe = _isolated_home_recipe()
-        assert "CAO_HOME_DIR=" in recipe, (
-            "The isolated-HOME recipe sets HOME but not CAO_HOME_DIR, so a "
-            "contributor exporting an absolute CAO_HOME_DIR keeps the real "
-            f"database. Recipe:\n{recipe}"
+        assert re.search(r"CAO_HOME_DIR=\"?\$\{?TMPH\}?", recipe), (
+            "The recipe must set CAO_HOME_DIR to a path under the mktemp directory, "
+            "or CAO's state stays outside the throwaway home. Recipe:\n" + recipe
         )
 
-    def test_the_override_points_inside_the_throwaway_directory(self):
-        """An override that is not under the temp dir isolates nothing."""
-        recipe = _isolated_home_recipe()
-        assigned = re.search(r"CAO_HOME_DIR=\"?([^\s\"]+)", recipe)
-        assert assigned, f"Could not read the CAO_HOME_DIR value from:\n{recipe}"
-        value = assigned.group(1)
-        assert "$TMPH" in value, (
-            f"CAO_HOME_DIR is set to {value!r}, which is not under the mktemp "
-            "directory, so CAO's state still lives outside the throwaway home."
+    @pytest.mark.parametrize("stub_exit", [0, 1, 2])
+    def test_the_recipe_reports_the_real_test_status(self, stub_exit: int):
+        result = _run_recipe_shape(_isolated_home_recipe(), stub_exit)
+        assert result["reported_status"] == stub_exit, (
+            f"A test exiting {stub_exit} was reported as "
+            f"{result['reported_status']!r} by the documented recipe. A caller "
+            f"checking the status would misread this run.\n{result['stdout']}"
         )
 
-    def test_cleanup_preserves_the_test_exit_status(self):
-        recipe = _isolated_home_recipe()
-        assert "trap " in recipe, (
-            "The recipe must clean up via a trap in a subshell so the pytest exit "
-            "status survives. Verified empirically: with `; rm -rf` a pytest exit "
-            "of 1 and of 2 both surfaced as 0; with the trap form, 1, 2 and 0 each "
-            f"surfaced unchanged and no temp dir leaked. Recipe:\n{recipe}"
+    def test_the_recipe_cleans_up_before_it_returns(self):
+        result = _run_recipe_shape(_isolated_home_recipe(), 1)
+        assert result["leaked"] is False, (
+            "The throwaway directory still existed after the recipe finished, so "
+            f"cleanup is deferred to shell exit.\n{result['stdout']}"
         )
-        offending = [
-            line
-            for line in recipe.splitlines()
-            if re.search(r"pytest.*;\s*rm\s+-rf", line) or re.search(r"&&\s*rm\s+-rf", line)
-        ]
-        assert not offending, (
-            "Cleanup is chained to the pytest command in a way that either "
-            f"discards its status (';') or leaks the temp dir on failure ('&&'): {offending}"
+
+    def test_the_child_process_really_ran_isolated(self):
+        result = _run_recipe_shape(_isolated_home_recipe(), 0)
+        home, cao = result["child_home"], result["child_cao_home"]
+        assert home and home != str(
+            Path.home()
+        ), f"The child ran with HOME={home!r}, which is not a throwaway directory."
+        assert cao and cao != "<unset>", (
+            "The child saw no CAO_HOME_DIR, so CAO would resolve its state from "
+            f"the ambient environment.\n{result['stdout']}"
+        )
+        assert str(cao).startswith(str(home)), (
+            f"CAO_HOME_DIR={cao!r} is not under HOME={home!r}, so state lives "
+            "outside the directory that gets cleaned up."
+        )
+
+    def test_the_documented_shape_is_trustworthy(self):
+        assert _recipe_is_trustworthy(_run_recipe_shape(_isolated_home_recipe(), 1), 1)
+
+    @pytest.mark.parametrize("label", sorted(BROKEN_RECIPE_SHAPES), ids=lambda label: label[:40])
+    def test_each_broken_shape_is_detected(self, label: str):
+        """Non-vacuity: prove the checks above can actually fail."""
+        result = _run_recipe_shape(BROKEN_RECIPE_SHAPES[label], 1)
+        assert not _recipe_is_trustworthy(result, 1), (
+            f"A recipe that is broken -- {label} -- was judged trustworthy. The "
+            "guards above cannot detect this regression, so they do not protect "
+            f"the property they claim to.\nobserved: {result}"
         )
 
 
