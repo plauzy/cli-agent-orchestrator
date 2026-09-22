@@ -80,6 +80,7 @@ noise. `test/test_cao_contributing_skill_accuracy.py` fails if this table drifts
 | **Web UI Build** | frontend build | **Yes** |
 | **AI-DLC Portfolio Example** | example project builds | **Yes** |
 | **Security Scan** | Trivy | **Yes** |
+| **Dependency Review** | `actions/dependency-review-action` over the PR's dependency delta: `fail-on-severity: high` plus denied licences `GPL-3.0`/`AGPL-3.0` | **Yes** — CI-only; there is nothing to run locally, and it is skipped on forks (`if: github.repository == 'awslabs/cli-agent-orchestrator'`), so a green run on your fork has not exercised it |
 
 > **The `-m "not e2e"` on the CI command replaces your local `addopts` — it does not
 > compose with it.** So a local run that *also* deselects `integration` is a strict subset
@@ -120,10 +121,22 @@ noise. `test/test_cao_contributing_skill_accuracy.py` fails if this table drifts
   `sqlite3.OperationalError: no such table: terminals`. Mock the store/DB seam explicitly;
   when a test exercises a service function, check what that function calls *today* — a
   rebase can introduce a new unmocked DB write into a path your test already covered.
-  Verify by running with an isolated `HOME`:
+  Verify by running under a throwaway `HOME` **and** a throwaway `CAO_HOME_DIR` —
+  `HOME` alone is not enough, because `constants.py` prefers an exported
+  `CAO_HOME_DIR` and derives the database and every other state path from it, so an
+  absolute value you already export keeps the initialised store this is meant to
+  exclude:
   ```bash
-  TMPH=$(mktemp -d); HOME="$TMPH" uv run pytest test/path/to/test_x.py; rm -rf "$TMPH"
+  TMPH=$(mktemp -d)
+  ( trap 'rm -rf "$TMPH"' EXIT              # cleans up on every path, status intact
+    HOME="$TMPH" CAO_HOME_DIR="$TMPH/cao" \
+      uv run pytest test/path/to/test_x.py )
+  echo "exit=$?"                            # pytest's status, not rm's
   ```
+  Keep the trap-in-a-subshell shape. Cleaning up with `; rm -rf "$TMPH"` returns
+  `rm`'s status instead of pytest's, so a failing run reports success; switching to
+  `&&` fixes the status but leaks the temp directory on exactly the failures you
+  wanted isolated.
 - **Local green and CI green are different claims, in both directions.** A local suite can
   hide real failures (see above) *and* invent ones CI never sees (macOS-only, missing
   optional binaries). When they disagree, CI is authoritative — read the job log rather

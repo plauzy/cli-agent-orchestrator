@@ -4,22 +4,34 @@ A skill that describes the CI gate map in prose drifts the moment a job is
 renamed, added, or has its command changed -- and a stale skill is worse than no
 skill, because an agent will act on it confidently. That is not hypothetical:
 review on #448 caught three factual drifts (a wrong ``--cov`` target, a moved
-recorder path, and a gate map that named only six of the twelve ``ci.yml`` jobs
+recorder path, and a gate map that named only six of the thirteen ``ci.yml`` jobs
 it is required to cover) that accumulated in the 46 days the PR sat open.
 
-That last count was reported three different ways -- "six", "five", and "four
-newly documented jobs plus one non-job step row" -- and all three are real
+The size of that last gap was reported three different ways -- "six", "five", and
+"four newly documented jobs plus one non-job step row" -- and all three are real
 measurements of different things, which is why the derivation is written down
-rather than the number alone. Re-derive it as the skill text at the commit that
-introduced the gate map (``ec433f38``) against
-``_ci_job_names() - INTENTIONALLY_UNDOCUMENTED``: **six** jobs were absent. Five
-were added in ``95a08178`` (alongside one ``step:`` row, which is not a job, so a
-row count sees five and a job count sees five); the sixth, Agent Plugins
-dog-food, landed separately in ``1d35d872``. Counting only ``95a08178``'s job
-rows and treating the split ``CAO MCP Apps E2E`` row as pre-existing gives four.
+rather than the number alone. Re-derive it from the gate map at the commit that
+introduced it (``ec433f38``) against ``_ci_job_names()``, using this test's own
+"documented" test, namely that the job name appears anywhere in the skill:
+
+* **Seven** of the thirteen jobs were absent. The six named were Unit Tests, Code
+  Quality, AG-UI demo, CAO MCP Apps, Web UI Build -- all five as table rows --
+  plus Security Scan, which appeared only in prose.
+* ``95a08178`` closed **five** of the seven. It added six job rows, but one of
+  them, Security Scan, was already named, so the newly-documented count is five
+  where the new-row count is six (seven counting the ``step:`` row, which
+  describes a step inside an already-listed job rather than a job of its own).
+  Discounting Security Scan and treating the split ``CAO MCP Apps E2E`` row as a
+  restatement of an existing one gives the **four** reported elsewhere.
+* ``1d35d872`` closed the sixth, Agent Plugins dog-food.
+* The seventh was ``Dependency Review``, which this file had wrongly *exempted*
+  rather than documented (see ``INTENTIONALLY_UNDOCUMENTED``). With the exemption
+  removed and the row added, every ``ci.yml`` job is documented and no exemption
+  remains -- so the count that matters now is zero, and it is enforced rather
+  than asserted in a docstring.
 
 These tests read ``.github/workflows/ci.yml`` and fail if the skill no longer
-matches it, so the next rename is caught by CI rather than by a reviewer. Two
+matches it, so the next rename is caught by CI rather than by a reviewer. Three
 properties are asserted here that prose review kept missing:
 
 * Every gate-map row's **Blocking?** verdict, against that job's real job-level
@@ -29,6 +41,9 @@ properties are asserted here that prose review kept missing:
 * A non-vacuity floor under every matcher whose result feeds a ``parametrize``.
   Those run at collection time, so a matcher that stops matching collects zero
   tests and reports success instead of failing.
+* That the isolated-``HOME`` recipe actually isolates, and actually reports the
+  test's exit status. It is the one snippet whose output a reader treats as
+  evidence, so a recipe that lies is worse than none.
 """
 
 from __future__ import annotations
@@ -46,9 +61,17 @@ SKILL = REPO_ROOT / "skills" / "cao-contributing" / "SKILL.md"
 # Jobs deliberately left out of the skill's gate map, with the reason. Anything
 # not listed here MUST appear in the map -- that is what makes the test a gate
 # rather than a suggestion.
-INTENTIONALLY_UNDOCUMENTED: dict[str, str] = {
-    "Dependency Review": "advisory-only, PR-scoped; no local equivalent to run",
-}
+#
+# Deliberately EMPTY, and that is the point: the one entry this ever held --
+# ``Dependency Review``, exempted as "advisory-only, PR-scoped; no local
+# equivalent to run" -- was simply false about ci.yml. ``jobs.dependency-review``
+# carries no job-level or step-level ``continue-on-error`` and is configured with
+# ``fail-on-severity: high`` plus ``deny-licenses``, so it fails the PR on a
+# qualifying finding. An exemption is a hole in the gate by construction, so the
+# bar for adding one is "ci.yml genuinely does not gate on it", not "there is
+# nothing to run locally". Having no local equivalent is a reason to DOCUMENT a
+# job, not to hide it.
+INTENTIONALLY_UNDOCUMENTED: dict[str, str] = {}
 
 # Shipped skills whose names do not start with ``cao-``. The reference matcher
 # below is anchored to the ``cao-`` prefix plus this allowlist rather than to
@@ -222,6 +245,22 @@ def _referenced_skill_names() -> set[str]:
 
 def _referenced_example_paths() -> list[str]:
     return re.findall(EXAMPLE_PATH_PATTERN, _skill_text())
+
+
+def _isolated_home_recipe() -> str:
+    """The fenced ``bash`` block that runs a test under a throwaway ``HOME``.
+
+    Located by its ``mktemp -d``, and asserted unique: if a second isolation
+    recipe is ever added, the guards below would silently check only one of
+    them, which is the same vacuity hazard the parametrize floors exist for.
+    """
+    blocks = re.findall(r"```bash\n(.*?)```", _skill_text(), re.DOTALL)
+    matching = [b for b in blocks if "mktemp -d" in b]
+    assert len(matching) == 1, (
+        f"Expected exactly one mktemp-based isolation recipe, found {len(matching)}. "
+        "Update this helper deliberately rather than checking an arbitrary one."
+    )
+    return matching[0]
 
 
 def _unit_tests_pytest_command() -> str:
@@ -468,6 +507,75 @@ class TestQuotedCommandsAreReal:
             f"{SKILL.relative_to(REPO_ROOT)} does not mention. Without them the skill "
             'implies -m "not e2e" is the whole story and that every integration test '
             "runs in CI; the Kiro provider integration test does not."
+        )
+
+
+class TestTheIsolatedHomeRecipeReallyIsolates:
+    """The recipe tells contributors to prove a test is clean-runner-safe.
+
+    It is the one snippet in the skill whose whole purpose is to produce a
+    trustworthy pass/fail signal, so a recipe that reports the wrong answer is
+    worse than no recipe: it manufactures the confidence it was supposed to
+    test for. Two ways it could, both verified against the real code rather
+    than assumed:
+
+    * Overriding ``HOME`` alone does not relocate CAO's state. ``constants.py``
+      prefers an exported ``CAO_HOME_DIR`` and derives ``DB_DIR`` and every
+      other state path from it, so a contributor who already exports an
+      absolute (or cwd-relative) value keeps using the initialised store the
+      recipe is meant to exclude -- concealing exactly the missing-table
+      failure it exists to surface. A tilde-relative value does follow ``HOME``,
+      which is why this reads as working when spot-checked.
+    * Cleaning up with ``;`` discards the test's exit status and yields the
+      status of ``rm``. An agent or script checking the status reads a failing
+      run as a pass. ``&&`` is not the fix -- it leaks the temporary directory
+      on failure, which is the case you most want cleaned up.
+    """
+
+    def test_the_env_var_the_recipe_overrides_is_the_one_constants_reads(self):
+        """Anchor the guard to the code, not to a remembered variable name."""
+        source = (REPO_ROOT / "src" / "cli_agent_orchestrator" / "constants.py").read_text()
+        assert 'os.environ.get("CAO_HOME_DIR"' in source, (
+            "constants.py no longer reads CAO_HOME_DIR from the environment. The "
+            "isolated-HOME recipe overrides that variable; if the override moved, "
+            "update the recipe and this guard together."
+        )
+
+    def test_it_overrides_cao_home_dir_as_well_as_home(self):
+        recipe = _isolated_home_recipe()
+        assert "CAO_HOME_DIR=" in recipe, (
+            "The isolated-HOME recipe sets HOME but not CAO_HOME_DIR, so a "
+            "contributor exporting an absolute CAO_HOME_DIR keeps the real "
+            f"database. Recipe:\n{recipe}"
+        )
+
+    def test_the_override_points_inside_the_throwaway_directory(self):
+        """An override that is not under the temp dir isolates nothing."""
+        recipe = _isolated_home_recipe()
+        assigned = re.search(r"CAO_HOME_DIR=\"?([^\s\"]+)", recipe)
+        assert assigned, f"Could not read the CAO_HOME_DIR value from:\n{recipe}"
+        value = assigned.group(1)
+        assert "$TMPH" in value, (
+            f"CAO_HOME_DIR is set to {value!r}, which is not under the mktemp "
+            "directory, so CAO's state still lives outside the throwaway home."
+        )
+
+    def test_cleanup_preserves_the_test_exit_status(self):
+        recipe = _isolated_home_recipe()
+        assert "trap " in recipe, (
+            "The recipe must clean up via a trap in a subshell so the pytest exit "
+            "status survives. Verified empirically: with `; rm -rf` a pytest exit "
+            "of 1 and of 2 both surfaced as 0; with the trap form, 1, 2 and 0 each "
+            f"surfaced unchanged and no temp dir leaked. Recipe:\n{recipe}"
+        )
+        offending = [
+            line
+            for line in recipe.splitlines()
+            if re.search(r"pytest.*;\s*rm\s+-rf", line) or re.search(r"&&\s*rm\s+-rf", line)
+        ]
+        assert not offending, (
+            "Cleanup is chained to the pytest command in a way that either "
+            f"discards its status (';') or leaks the temp dir on failure ('&&'): {offending}"
         )
 
 
