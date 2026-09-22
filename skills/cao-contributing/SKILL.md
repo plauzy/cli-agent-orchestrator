@@ -51,8 +51,13 @@ uv run mypy src/                    # type check (see the mypy note below)
 ```
 
 Write tests **RED-first**: add a test that reproduces the bug/behavior and fails, then
-implement until it passes. New features and bug fixes ship with tests; patch coverage is
-expected to stay at 100% for changed lines.
+implement until it passes. New features and bug fixes ship with tests.
+
+Keeping patch coverage at 100% for changed lines is a **team convention, not a gate**.
+Nothing fails your build over it: the repo has no `codecov.yml`, so there is no configured
+status check or target, and the Unit Tests job uploads coverage with
+`fail_ci_if_error: false` — even a broken upload is tolerated. Treat the Codecov comment as
+a review signal to justify, not a red gate to chase.
 
 ## The CI gate map (`.github/workflows/ci.yml`)
 
@@ -62,7 +67,7 @@ noise. `test/test_cao_contributing_skill_accuracy.py` fails if this table drifts
 
 | Job | Runs | Blocking? |
 |-----|------|-----------|
-| **Unit Tests** (3.10 / 3.11 / 3.12) | `uv run pytest test/ -m "not e2e" --cov=src/cli_agent_orchestrator --cov-report=term-missing` | **Yes** |
+| **Unit Tests** (3.10 / 3.11 / 3.12) | `uv run pytest test/ examples/workflow/tests/ --ignore=test/providers/test_kiro_cli_integration.py --ignore=test/e2e -m "not e2e" --cov=src/cli_agent_orchestrator --cov-report=term-missing` | **Yes** |
 | ↳ step: **Validate Markdown links** | `uv run python scripts/validate_markdown_links.py` — every relative link in every tracked `.md`, including `skills/` | **Yes** |
 | **Code Quality** | black `--check`, isort `--check-only`, then `uv run mypy src/` | black/isort **yes**; **mypy is non-blocking** (`continue-on-error: true`) |
 | **AG-UI demo (shift-left recording)** | boots a `CAO_AGUI_ENABLED` server, drives the viewer, records a GIF artifact | **Yes** |
@@ -76,10 +81,16 @@ noise. `test/test_cao_contributing_skill_accuracy.py` fails if this table drifts
 | **AI-DLC Portfolio Example** | example project builds | **Yes** |
 | **Security Scan** | Trivy | **Yes** |
 
-> **The `-m "not e2e"` on the CI command overrides your local `addopts`.** CI deselects
-> *only* `e2e`, so **integration tests run in CI**. If your local config also deselects
-> `integration`, your local run is a strict subset of CI's and can be green while CI is
-> red. Compare deselected counts, not just pass counts.
+> **The `-m "not e2e"` on the CI command replaces your local `addopts` — it does not
+> compose with it.** So a local run that *also* deselects `integration` is a strict subset
+> of CI's selection and can be green while CI is red. Compare deselected counts, not just
+> pass counts.
+>
+> **CI's selection is narrower than the marker alone implies.** The same command passes
+> `--ignore=test/providers/test_kiro_cli_integration.py` and `--ignore=test/e2e`, and
+> `--ignore` wins over `-m`: that Kiro provider test needs an authenticated external CLI
+> and **never runs in CI**. So *most* `integration`-marked tests do run in CI — but not
+> that one, and nothing in CI covers it. If you change it, you have to run it yourself.
 
 > **mypy is intentionally non-blocking.** The repo has **known, pre-existing, repo-wide
 > mypy errors** (historically in `services/agent_scaffold.py`, `cli/commands/profile.py`,
@@ -98,8 +109,11 @@ noise. `test/test_cao_contributing_skill_accuracy.py` fails if this table drifts
 
 - **The full `uv run pytest test/` is flaky locally** — it needs a running server, tmux,
   and real CLI binaries, and can hit a flaky OTel/gRPC abort. Run **targeted test files**
-  while iterating and **trust CI** (the Unit Tests job) for the full suite; get
-  authoritative missing-coverage lines from that job's `term-missing` output ∩ your diff.
+  while iterating and lean on CI (the Unit Tests job) for breadth; get authoritative
+  missing-coverage lines from that job's `term-missing` output ∩ your diff. **CI is not the
+  full suite, though** — it excludes `test/e2e` and the Kiro provider integration test by
+  path (see the callout above), so those two are only ever covered by someone running them
+  deliberately.
 - **A test that touches CAO's own state can pass only on your machine.** If a code path
   reaches the real database, config dir, or a live session, it will be green on a
   developer box that has an initialised CAO install and red on a clean runner with
