@@ -124,6 +124,7 @@ from cli_agent_orchestrator.security.auth import (
     get_authorization_servers,
     get_current_scopes,
     is_auth_enabled,
+    is_idp_configured,
     require_any_scope,
 )
 from cli_agent_orchestrator.services import (
@@ -1564,11 +1565,20 @@ async def oauth_protected_resource_metadata():
     Advertises the resource audience, the authorization server(s), the supported
     scopes (``cao:read``/``cao:write``/``cao:admin``), and the supported bearer
     methods so OAuth clients can discover how to obtain access. Returns HTTP 404
-    when auth is disabled (default-off), so the localhost-only posture is
-    byte-for-byte unchanged.
+    when no IdP is configured: default-off keeps its previous response
+    byte-for-byte (status and detail), and local-token mode
+    (``CAO_AUTH_LOCAL_TOKEN`` alone) answers 404 with a detail naming what is
+    missing, since there is no authorization server to advertise.
     """
-    if not is_auth_enabled():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="auth disabled")
+    if not is_idp_configured():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                "auth disabled"
+                if not is_auth_enabled()
+                else "no OAuth authorization server configured"
+            ),
+        )
 
     audience = (
         os.getenv("CAO_AUTH_AUDIENCE", "").strip()
@@ -1786,7 +1796,8 @@ async def agui_stream(
     _require_agui_enabled()
 
     # Auth: query-parameter token (EventSource can't set headers). Default-off
-    # (no AUTH0_DOMAIN / CAO_AUTH_JWKS_URI) grants the full scope set.
+    # (no AUTH0_DOMAIN / CAO_AUTH_JWKS_URI / CAO_AUTH_LOCAL_TOKEN) grants the
+    # full scope set.
     if is_auth_enabled():
         if not access_token:
             raise HTTPException(
@@ -2296,6 +2307,7 @@ def _resolve_template_name(template: str) -> str:
 async def search_agent_profiles_endpoint(
     q: str = Query(description="Free-text capability keywords, e.g. 'monitor sqs'"),
     limit: int = Query(default=PROFILE_SEARCH_DEFAULT_LIMIT, ge=1, le=100),
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
 ) -> List[Dict]:
     """Rank installed agent profiles against ``q``.
 
@@ -2743,7 +2755,9 @@ async def get_agent_profile_source_endpoint(
 
 
 @app.get("/agents/providers")
-async def list_providers_endpoint() -> List[Dict]:
+async def list_providers_endpoint(
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+) -> List[Dict]:
     """List available providers with installation status."""
     import shutil
 
@@ -2797,7 +2811,9 @@ class AgentDirsUpdate(BaseModel):
 
 
 @app.get("/settings/memory")
-async def get_memory_settings_endpoint() -> Dict:
+async def get_memory_settings_endpoint(
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict:
     """Return whether the memory subsystem is enabled (for UI feature discovery).
 
     ``settings_readable`` is additive: False means the two flags above are
@@ -2847,7 +2863,9 @@ async def set_agent_dirs_endpoint(
 
 
 @app.get("/settings/skill-dirs")
-async def get_skill_dirs_endpoint() -> Dict:
+async def get_skill_dirs_endpoint(
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict:
     """Get the global skill store path and user-added extra skill directories."""
     from cli_agent_orchestrator.constants import SKILLS_DIR
     from cli_agent_orchestrator.services.settings_service import get_extra_skill_dirs
@@ -3621,7 +3639,10 @@ async def create_terminal_in_session(
 
 
 @app.get("/sessions/{session_name}/terminals")
-async def list_terminals_in_session(session_name: str) -> List[Dict]:
+async def list_terminals_in_session(
+    session_name: str,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+) -> List[Dict]:
     """List a session's terminals, oldest first.
 
     The order is significant and part of this endpoint's contract: **index 0 is
@@ -3837,7 +3858,10 @@ async def get_terminal_memory_context(
 
 
 @app.get("/terminals/{terminal_id}/working-directory", response_model=WorkingDirectoryResponse)
-async def get_terminal_working_directory(terminal_id: TerminalId) -> WorkingDirectoryResponse:
+async def get_terminal_working_directory(
+    terminal_id: TerminalId,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+) -> WorkingDirectoryResponse:
     """Get the current working directory of a terminal's pane."""
     try:
         working_directory = terminal_service.get_working_directory(terminal_id)
@@ -5511,8 +5535,9 @@ async def get_workflow_run_endpoint(
     here is not. It therefore carries the same read-or-better gate as
     ``/diagnostics``, ``/events`` and ``/compare``: a FULL-route gate, not a
     per-field split, because a field split would still return ``output_json`` to
-    an unscoped caller. Default-off is unchanged — with ``CAO_AUTH_ENABLED``
-    unset the dependency returns the full scope set and enforces nothing.
+    an unscoped caller. Default-off is unchanged — with no IdP and no
+    ``CAO_AUTH_LOCAL_TOKEN`` configured the dependency returns the full scope set
+    and enforces nothing.
     Consequence for #505: its CLI/MCP status/result clients read this route (plus
     ``/events`` and ``/compare``) and must present a token carrying
     ``cao:read``/``cao:write``/``cao:admin`` once auth is enabled.
@@ -5536,8 +5561,9 @@ async def get_workflow_run_endpoint(
        ``{{steps.<id>.output.<field>}}`` templating read them back. So with capture
        at its default OFF, this route still returns step output and error verbatim.
     2. The ONLY protection is the scope dependency above, and it is INERT in the
-       default deployment: with ``CAO_AUTH_ENABLED`` unset, ``require_any_scope``
-       returns the full scope set and enforces nothing. A local CAO server therefore
+       default deployment: with no IdP and no ``CAO_AUTH_LOCAL_TOKEN`` configured,
+       ``require_any_scope`` returns the full scope set and enforces nothing. A
+       local CAO server therefore
        serves step output and error text to any caller that can reach the port.
 
     Deliberately documented rather than further gated: stripping the fields removes
@@ -7200,10 +7226,12 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
       request ``Host`` or in the trusted set (CWE-1385 cross-site WebSocket
       hijacking guard);
     * when the HTTP auth layer is enabled (``AUTH0_DOMAIN`` /
-      ``CAO_AUTH_JWKS_URI`` set — see :func:`is_auth_enabled`), the handshake
-      must carry a valid bearer token granting ``cao:write`` or ``cao:admin``.
-      Keystroke injection is RCE; ``cao:read`` is not enough. HTTP
-      ``POST /terminals/{id}/input`` already requires write.
+      ``CAO_AUTH_JWKS_URI`` set, or a standalone ``CAO_AUTH_LOCAL_TOKEN`` — see
+      :func:`is_auth_enabled`), the handshake must carry a valid bearer token
+      granting ``cao:write`` or ``cao:admin``. Keystroke injection is RCE;
+      ``cao:read`` is not enough. HTTP ``POST /terminals/{id}/input`` already
+      requires write. In local-token mode the bearer must equal the configured
+      token, which carries the full scope set.
 
     Token scheme: browsers cannot set request headers on a WebSocket
     handshake, so the token is accepted from either ``Authorization: Bearer
@@ -7225,12 +7253,17 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
     # A literal ``*`` in the allowlist disables the IP check (Codespaces /
     # devcontainers / remote setups where the WS client originates from an
     # IP the operator cannot enumerate ahead of time).
+    #
+    # A missing peer address fails CLOSED. The pinned uvicorn never produces
+    # one on this path: it populates ``client`` for every TCP connection, and
+    # its proxy-headers middleware rewrites the peer to a ``(host, port)``
+    # tuple even for empty or garbage forwarded values, never to ``None``. So
+    # ``None`` means some other ASGI server or middleware left the peer unset,
+    # and an unattributable peer is precisely the one this allowlist must not
+    # admit by accident. Operators who genuinely cannot enumerate peers have
+    # the ``*`` opt-out above.
     client_host = websocket.client.host if websocket.client else None
-    if (
-        "*" not in WS_ALLOWED_CLIENTS
-        and client_host is not None
-        and client_host not in WS_ALLOWED_CLIENTS
-    ):
+    if "*" not in WS_ALLOWED_CLIENTS and client_host not in WS_ALLOWED_CLIENTS:
         await websocket.close(code=4003, reason="WebSocket access is restricted to allowed clients")
         return
 
@@ -8466,9 +8499,11 @@ def main():
     # literal ``*`` is honoured and disables the check (matches the
     # existing CAO_WS_ALLOWED_CLIENTS="*" semantics).
     forwarded_ips = "*" if "*" in TRUSTED_FORWARDER_IPS else ",".join(TRUSTED_FORWARDER_IPS)
-    # Credential query params (``?access_token=``) are scrubbed from uvicorn's
-    # access log by ``install_access_log_redaction()``, installed in the app
-    # lifespan so both ``cao-server`` and ``uvicorn ...:app`` are covered.
+    # Credential query params (``?access_token=``, the WebSocket ``?token=``) are
+    # scrubbed from uvicorn's request logs -- ``uvicorn.access`` for HTTP and
+    # ``uvicorn.error`` for WebSocket handshakes -- by
+    # ``install_access_log_redaction()``, installed in the app lifespan so both
+    # ``cao-server`` and ``uvicorn ...:app`` are covered.
     uvicorn.run(
         app,
         host=host,
