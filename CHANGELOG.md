@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `terminal.spawn_mode: "pane"` puts every terminal `assign` / `handoff` creates
+  into one tmux window as a pane, re-tiled after each spawn, so a supervisor
+  watches the whole fleet at once instead of cycling through a window per agent.
+  The window is named by `terminal.pane_window` (default `cao-agents`) and the
+  first pane terminal in a session creates it; when tmux has no room for another
+  pane, that terminal falls back to a window of its own. Default is unchanged
+  (`window`), and window mode addresses terminals exactly as before (#74, #73)
 - **`CAO_AUTH_LOCAL_TOKEN` now works on its own** (#706). Setting it with no IdP
   configured switches the auth layer on in a local-token mode: every scope-gated
   route, the PTY WebSocket handshake and the AG-UI stream must present exactly that
