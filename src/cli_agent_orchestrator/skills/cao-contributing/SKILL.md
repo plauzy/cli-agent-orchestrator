@@ -27,7 +27,8 @@ CI actually enforces.
    and `test_skill_packaging_parity.py` both quote that form) — run them as
    `uv run python scripts/<name>.py`, which satisfies both.
 2. **Verify the *actual* CI run after every push — never declare "done" on local tests
-   alone.** Poll it: `gh run list --branch <branch> --workflow CI` then
+   alone.** Poll it: `gh pr checks <number>` for every workflow on the PR, or
+   `gh run list --branch <branch> --workflow CI` for `ci.yml` alone, then
    `gh run view <id>` / `gh run view <id> --log-failed`.
 3. **When a required check fails unexpectedly, diff EVERYTHING your commit changed —
    including CI/workflow/config files** (`.github/workflows/*.yml`, `pyproject.toml`,
@@ -106,6 +107,28 @@ noise. `test/test_cao_contributing_skill_accuracy.py` fails if this table drifts
 >   job's step, silently turning mypy into a hard gate and failing the build for
 >   unrelated, pre-existing errors.
 
+### Other workflows that gate a PR
+
+`ci.yml` is not the only workflow on a pull request. These run alongside it, and none sets
+job-level `continue-on-error`, so every check they run is blocking. The same accuracy test
+pins this table to the workflow files.
+
+| Workflow | Checks on the PR | Runs on | Blocking? |
+|----------|------------------|---------|-----------|
+| **Secret Scan** (`secret-scan.yml`) | `gitleaks`, `gitleaks config tests` | every PR to `main` | **Yes** — the config tests run locally as `uv run pytest test/test_gitleaks_config.py`; the scan itself is `gitleaks detect --config .gitleaks.toml` over the PR's commits |
+| **cargo-deny** (`cargo-deny.yml`) | `cargo-deny (advisories, licenses, bans, sources)` | every PR to `main` | **Yes** — locally, `cargo deny --manifest-path tui/Cargo.toml --locked check` (global flags before the subcommand, as the action passes them) |
+| **Test Antigravity CLI Provider** (`test-antigravity-cli-provider.yml`) | `Unit Tests`, `Code Quality` | only PRs touching that provider, its unit test or fixtures, `pyproject.toml`, or the workflow | **Yes** |
+| **Test Claude Code Provider** (`test-claude-code-provider.yml`) | `Unit Tests`, `Code Quality` | only PRs touching that provider, its unit test, `pyproject.toml`, or the workflow | **Yes** |
+| **Test Codex CLI Provider** (`test-codex-provider.yml`) | `Unit Tests`, `Code Quality` | only PRs touching that provider, its unit test or fixtures, `pyproject.toml`, or the workflow | **Yes** |
+| **Test Kiro CLI Provider** (`test-kiro-cli-provider.yml`) | `Unit Tests`, `Code Quality` | only PRs touching that provider, its unit test or fixtures, `pyproject.toml`, or the workflow | **Yes** |
+| **Docs site** (`gh-pages.yml`) | `build` | only PRs touching `docusaurus/**` or the workflow | **Yes** — `deploy` is push-only and never runs on a PR |
+
+> **Two checks can share a name.** Each provider workflow has its own `Unit Tests` and
+> `Code Quality`, so a PR that touches `pyproject.toml` shows those names more than once.
+> Read the workflow name next to a failing check before assuming it is the CI one —
+> `gh pr checks <number>` lists every workflow, whereas `gh run list --workflow CI` sees
+> only `ci.yml`.
+
 ## Testing gotchas
 
 - **The full `uv run pytest test/` is flaky locally** — it needs a running server, tmux,
@@ -128,15 +151,19 @@ noise. `test/test_cao_contributing_skill_accuracy.py` fails if this table drifts
   exclude:
   ```bash
   TMPH=$(mktemp -d)
-  ( trap 'rm -rf "$TMPH"' EXIT              # cleans up on every path, status intact
+  ( trap 'rm -rf "$TMPH"' EXIT              # cleans up on every path
     HOME="$TMPH" CAO_HOME_DIR="$TMPH/cao" \
-      uv run pytest test/path/to/test_x.py )
-  echo "exit=$?"                            # pytest's status, not rm's
+      uv run pytest test/path/to/test_x.py
+    rc=$?                                   # not `status`: read-only in zsh
+    echo "exit=$rc"                         # pytest's status, not rm's
+    exit "$rc" )                            # ...and the block returns it too
   ```
-  Keep the trap-in-a-subshell shape. Cleaning up with `; rm -rf "$TMPH"` returns
-  `rm`'s status instead of pytest's, so a failing run reports success; switching to
-  `&&` fixes the status but leaks the temp directory on exactly the failures you
-  wanted isolated.
+  Keep the trap-in-a-subshell shape, and keep the diagnostic *inside* it. Cleaning up
+  with `; rm -rf "$TMPH"` returns `rm`'s status instead of pytest's, so a failing run
+  reports success; switching to `&&` fixes the status but leaks the temp directory on
+  exactly the failures you wanted isolated. A trailing `echo "exit=$?"` *after* the
+  subshell prints the right number but is itself the block's last command, so the block
+  returns 0 and a script or agent checking `$?` still reads a failing run as a pass.
 - **Local green and CI green are different claims, in both directions.** A local suite can
   hide real failures (see above) *and* invent ones CI never sees (macOS-only, missing
   optional binaries). When they disagree, CI is authoritative — read the job log rather

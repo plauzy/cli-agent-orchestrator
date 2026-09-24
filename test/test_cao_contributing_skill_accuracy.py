@@ -330,12 +330,12 @@ class TestTheGateMapMatchesCi:
         finds nothing in either case.
         """
         real = _ci_job_names()
-        # Only the FIRST column of a table row names a job -- later columns hold
-        # the blocking verdict, which is also bolded.
-        claimed = {
-            _canonical_job_name(m.strip())
-            for m in re.findall(r"^\|\s*\*\*(.+?)\*\*", _skill_text(), re.MULTILINE)
-        }
+        # Only the FIRST column of a ci.yml gate-map row names a job -- later
+        # columns hold the blocking verdict, which is also bolded. Scoped to the
+        # three-cell ci.yml table: the four-cell "Other workflows" table names
+        # workflows, not ci.yml jobs, and TestOtherPrGatingWorkflowsAreDocumented
+        # holds it to the same exact-name standard against its own files.
+        claimed = set(_gate_map_job_rows())
         phantom = sorted(claimed - real)
         assert not phantom, (
             f"The skill documents jobs that no longer exist in ci.yml: {phantom}. "
@@ -573,7 +573,7 @@ class TestQuotedCommandsAreReal:
         )
 
 
-def _run_recipe_shape(recipe_body: str, stub_exit: int) -> dict[str, object]:
+def _run_recipe_shape(recipe_body: str, stub_exit: int, shell: str = "bash") -> dict[str, object]:
     """Execute a recipe shape and report what a contributor would observe.
 
     The ``uv run pytest ...`` call -- and only that -- is swapped for a recording
@@ -584,9 +584,9 @@ def _run_recipe_shape(recipe_body: str, stub_exit: int) -> dict[str, object]:
     still existed immediately after the recipe finished, and the ``HOME`` /
     ``CAO_HOME_DIR`` the child process really saw.
     """
-    bash = shutil.which("bash")
-    if bash is None:  # pragma: no cover - both CI legs have bash
-        pytest.skip("bash is required to execute the documented recipe")
+    interpreter = shutil.which(shell)
+    if interpreter is None:
+        pytest.skip(f"{shell} is required to execute the documented recipe")
     with tempfile.TemporaryDirectory() as scratch:
         probe = Path(scratch) / "probe"
         stub = Path(scratch) / "stub"
@@ -611,6 +611,11 @@ def _run_recipe_shape(recipe_body: str, stub_exit: int) -> dict[str, object]:
             # status bug appears at all.
             "set +e\n"
             f"{executable}\n"
+            # The status the recipe BLOCK returns to whatever runs it -- a script,
+            # an agent, `&&`. Captured on the very next line, before anything else
+            # overwrites $?. This is distinct from the number the recipe PRINTS:
+            # a trailing `echo "exit=$?"` prints the right value and still returns 0.
+            "RECIPE_STATUS=$?\n"
             # Still inside the harness process, so a trap registered OUTSIDE the
             # subshell has not fired yet. This distinguishes "cleaned up" from
             # "will be cleaned up whenever the shell happens to exit", which is
@@ -619,13 +624,18 @@ def _run_recipe_shape(recipe_body: str, stub_exit: int) -> dict[str, object]:
             'RECORDED_HOME=$(head -1 "' + str(probe) + '" 2>/dev/null)\n'
             'if [ -n "$RECORDED_HOME" ] && [ -d "$RECORDED_HOME" ]; '
             'then echo "LEAK=1"; else echo "LEAK=0"; fi\n'
+            # Exit with the recipe's status so proc.returncode reports it. Without
+            # this the harness's own last command (the LEAK echo) sets the
+            # returncode, which is always 0 -- the same masking bug being tested for.
+            'exit "$RECIPE_STATUS"\n'
         )
-        proc = subprocess.run([bash, "-c", harness], capture_output=True, text=True)
+        proc = subprocess.run([interpreter, "-c", harness], capture_output=True, text=True)
         recorded = probe.read_text().splitlines() if probe.exists() else []
         reported = re.search(r"exit=(-?\d+)", proc.stdout)
         leak = re.search(r"LEAK=(\d)", proc.stdout)
         return {
             "reported_status": int(reported.group(1)) if reported else None,
+            "returned_status": proc.returncode,
             "leaked": leak.group(1) == "1" if leak else None,
             "child_home": recorded[0] if recorded else None,
             "child_cao_home": recorded[1] if len(recorded) > 1 else None,
@@ -635,10 +645,11 @@ def _run_recipe_shape(recipe_body: str, stub_exit: int) -> dict[str, object]:
 
 
 def _recipe_is_trustworthy(result: dict[str, object], expected_status: int) -> bool:
-    """All three properties at once: right status, cleaned up, really isolated."""
+    """All properties at once: right printed AND returned status, cleaned up, isolated."""
     home, cao = result["child_home"], result["child_cao_home"]
     return bool(
         result["reported_status"] == expected_status
+        and result["returned_status"] == expected_status
         and result["leaked"] is False
         and home
         and cao
@@ -653,6 +664,15 @@ def _recipe_is_trustworthy(result: dict[str, object], expected_status: int) -> b
 # assignment below the invocation, or hoisting the trap out of the subshell, so
 # "the guard exists" had to be replaced with "the guard distinguishes these".
 BROKEN_RECIPE_SHAPES: dict[str, str] = {
+    # The shape this skill itself documented at 88bc5722. It prints the right
+    # number, so a guard that only parses stdout passes it -- which is exactly
+    # what happened until review ran the block and checked its return code.
+    "a diagnostic after the subshell prints the status but returns 0": (
+        "TMPH=$(mktemp -d)\n"
+        "( trap 'rm -rf \"$TMPH\"' EXIT\n"
+        '  HOME="$TMPH" CAO_HOME_DIR="$TMPH/cao" uv run pytest test/path/to/test_x.py )\n'
+        'echo "exit=$?"\n'
+    ),
     "cleanup with ';' reports rm's status instead of the test's": (
         'TMPH=$(mktemp -d); HOME="$TMPH" CAO_HOME_DIR="$TMPH/cao" '
         'uv run pytest test/path/to/test_x.py; rm -rf "$TMPH"\n'
@@ -742,6 +762,32 @@ class TestTheIsolatedHomeRecipeReallyIsolates:
             f"checking the status would misread this run.\n{result['stdout']}"
         )
 
+    @pytest.mark.parametrize("stub_exit", [0, 1, 2])
+    def test_the_recipe_block_returns_the_real_test_status(self, stub_exit: int):
+        """What an automated caller actually receives, not what gets printed."""
+        result = _run_recipe_shape(_isolated_home_recipe(), stub_exit)
+        assert result["returned_status"] == stub_exit, (
+            f"A test exiting {stub_exit} made the documented recipe block return "
+            f"{result['returned_status']!r}. A script or agent checking $? would "
+            f"misread this run even though the printed diagnostic is right.\n"
+            f"{result['stdout']}"
+        )
+
+    @pytest.mark.parametrize("stub_exit", [0, 1, 2])
+    def test_the_recipe_also_works_when_pasted_into_zsh(self, stub_exit: int):
+        """macOS's default shell. The fence says bash; contributors paste into zsh.
+
+        zsh reserves ``status`` as a read-only alias of ``$?``, so a recipe that
+        saves the exit code as ``status=$?`` errors there and returns the error's
+        code instead of the test's. That shipped briefly in this PR and was caught
+        only by running the recipe interactively. Skipped where zsh is absent.
+        """
+        result = _run_recipe_shape(_isolated_home_recipe(), stub_exit, shell="zsh")
+        assert _recipe_is_trustworthy(result, stub_exit), (
+            f"Under zsh the documented recipe is not trustworthy for exit {stub_exit}."
+            f"\nobserved: {result}"
+        )
+
     def test_the_recipe_cleans_up_before_it_returns(self):
         result = _run_recipe_shape(_isolated_home_recipe(), 1)
         assert result["leaked"] is False, (
@@ -815,6 +861,151 @@ class TestMypyToleranceClaim:
         assert all(_truthy_continue_on_error(s.get("continue-on-error")) for s in mypy_steps), (
             "mypy is now BLOCKING in CI. The skill's guidance to ignore pre-existing "
             "mypy errors is actively harmful until it is rewritten."
+        )
+
+
+# --- Workflows other than ci.yml that gate a pull request ----------------------
+#
+# Review of #448 found the gate map silently incomplete: ``Secret Scan`` had been
+# split out of ci.yml into its own workflow (#457), so a table pinned to ci.yml
+# alone could never notice it was missing, and neither could cargo-deny or the
+# path-filtered provider workflows. These guards derive the set from every
+# workflow file that triggers on ``pull_request`` instead of from a list, so a
+# new PR-gating workflow fails here until the skill documents it.
+
+WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
+# Never a PR check: ``if: github.event_name == 'push'`` jobs (Docs site deploy).
+_PUSH_ONLY_JOB = re.compile(r"github\.event_name\s*==\s*'push'")
+# Sentinel for "no pull_request trigger": None already means a trigger with no body.
+_NO_PR = object()
+
+
+def _pull_request_trigger(spec: dict) -> object:
+    """The ``pull_request`` trigger config, or ``_NO_PR`` when there is none.
+
+    PyYAML reads the bare key ``on`` as boolean True, so both spellings are
+    checked; a trigger written as ``pull_request:`` with no body is ``None``,
+    which is still a trigger and must not be confused with "absent".
+    """
+    on = spec.get(True, spec.get("on"))
+    if isinstance(on, str):
+        return None if on == "pull_request" else _NO_PR
+    if isinstance(on, list):
+        return None if "pull_request" in on else _NO_PR
+    if isinstance(on, dict) and "pull_request" in on:
+        return on["pull_request"]
+    return _NO_PR
+
+
+def _pr_gating_workflows() -> dict[str, dict]:
+    """Workflow display name -> spec, for every non-ci.yml workflow run on PRs."""
+    found: dict[str, dict] = {}
+    for path in sorted(WORKFLOWS_DIR.glob("*.y*ml")):
+        if path.resolve() == CI_WORKFLOW.resolve():
+            continue
+        spec = yaml.safe_load(path.read_text()) or {}
+        trigger = _pull_request_trigger(spec)
+        if trigger is _NO_PR:
+            continue
+        found[spec.get("name") or path.stem] = {"spec": spec, "trigger": trigger, "file": path.name}
+    return found
+
+
+def _pr_check_names(spec: dict) -> set[str]:
+    """Job display names that can actually appear as checks on a PR."""
+    names = set()
+    for job_id, job in (spec.get("jobs") or {}).items():
+        job = job or {}
+        if _PUSH_ONLY_JOB.search(str(job.get("if") or "")):
+            continue
+        names.add(_canonical_job_name(job.get("name") or job_id))
+    return names
+
+
+def _other_workflow_rows() -> dict[str, tuple[str, str, str, str]]:
+    """Workflow name -> (file cell, checks cell, runs-on cell, verdict cell).
+
+    Four-cell rows only, which is what keeps this table out of the three-cell
+    ci.yml job parser above -- and keeps that parser's phantom-job guard strict.
+    """
+    rows: dict[str, tuple[str, str, str, str]] = {}
+    for line in _skill_text().splitlines():
+        line = line.strip()
+        if not line.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if len(cells) != 4 or cells[0] == "Workflow" or set(cells[0]) <= set("-: "):
+            continue
+        bold = re.match(r"\*\*(.+?)\*\*\s*(?:\(`([^`]+)`\))?", cells[0])
+        if bold:
+            rows[bold.group(1)] = (bold.group(2) or "", cells[1], cells[2], cells[3])
+    return rows
+
+
+class TestOtherPrGatingWorkflowsAreDocumented:
+    def test_the_guard_has_something_to_check(self):
+        """Non-vacuity: at least Secret Scan, cargo-deny and one path-filtered one."""
+        found = _pr_gating_workflows()
+        assert {"Secret Scan", "cargo-deny"} <= set(found), sorted(found)
+        assert any(
+            isinstance(w["trigger"], dict) and w["trigger"].get("paths") for w in found.values()
+        )
+
+    def test_every_pr_gating_workflow_has_a_row(self):
+        missing = sorted(set(_pr_gating_workflows()) - set(_other_workflow_rows()))
+        assert not missing, (
+            f"These workflows run on pull requests but are absent from the skill's "
+            f"'Other workflows that gate a PR' table: {missing}. A contributor using "
+            "the skill to read a red PR would not know they exist."
+        )
+
+    def test_no_phantom_workflows_are_documented(self):
+        phantom = sorted(set(_other_workflow_rows()) - set(_pr_gating_workflows()))
+        assert not phantom, f"The skill documents PR-gating workflows that do not exist: {phantom}"
+
+    @pytest.mark.parametrize("workflow", sorted(_pr_gating_workflows()))
+    def test_the_file_named_is_the_real_file(self, workflow: str):
+        file_cell = _other_workflow_rows()[workflow][0]
+        assert file_cell == _pr_gating_workflows()[workflow]["file"], (
+            f"{workflow!r} is defined in {_pr_gating_workflows()[workflow]['file']}, "
+            f"but the skill names {file_cell!r}."
+        )
+
+    @pytest.mark.parametrize("workflow", sorted(_pr_gating_workflows()))
+    def test_the_listed_checks_are_exactly_the_pr_checks(self, workflow: str):
+        """Exact set: a push-only job listed, or a real check omitted, both fail."""
+        claimed = set(re.findall(r"`([^`]+)`", _other_workflow_rows()[workflow][1]))
+        actual = _pr_check_names(_pr_gating_workflows()[workflow]["spec"])
+        assert claimed == actual, (
+            f"{workflow!r}: the skill lists checks {sorted(claimed)}, but on a PR the "
+            f"workflow runs {sorted(actual)}."
+        )
+
+    @pytest.mark.parametrize("workflow", sorted(_pr_gating_workflows()))
+    def test_the_path_filter_claim_matches_the_trigger(self, workflow: str):
+        trigger = _pr_gating_workflows()[workflow]["trigger"]
+        filtered = isinstance(trigger, dict) and bool(trigger.get("paths"))
+        runs_on = _other_workflow_rows()[workflow][2].lower()
+        claims_filtered = runs_on.startswith("only")
+        assert claims_filtered == filtered, (
+            f"{workflow!r} is {'path-filtered' if filtered else 'run on every PR'}, "
+            f"but the skill says it runs on: {runs_on!r}."
+        )
+
+    @pytest.mark.parametrize("workflow", sorted(_pr_gating_workflows()))
+    def test_the_verdict_matches_job_level_continue_on_error(self, workflow: str):
+        spec = _pr_gating_workflows()[workflow]["spec"]
+        pr_jobs = [
+            job or {}
+            for job_id, job in (spec.get("jobs") or {}).items()
+            if _canonical_job_name((job or {}).get("name") or job_id) in _pr_check_names(spec)
+        ]
+        actual = all(_job_is_blocking(job) for job in pr_jobs)
+        claimed = _claimed_blocking(_other_workflow_rows()[workflow][3])
+        assert claimed is not None, f"{workflow!r}: the Blocking? cell is unreadable."
+        assert claimed == actual, (
+            f"{workflow!r}: the skill says blocking={claimed}, but the workflow's "
+            f"PR jobs give blocking={actual}."
         )
 
 
