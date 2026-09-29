@@ -47,6 +47,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **OpenCode agents whose display name contains spaces never reported COMPLETED.**
+  The completion marker read the agent name as one `\S+` token, so a marker such
+  as `▣  Sisyphus - Ultraworker · Big Pickle · 3.1s` never matched and every
+  handoff to that agent ran out its timeout. The name now runs to the first `·`
+  on the same line. It stops at a newline so that a reply line starting with `▣`
+  cannot begin a match and cut the lines before it out of the extracted reply
+  (#806, #816)
+
 - **a custom role in `settings.json` now outranks the built-in role of the same
   name.** The resolver consulted the built-ins first, so when CAO shipped a
   built-in `workflow_scout` an operator's saved `workflow_scout` policy was
