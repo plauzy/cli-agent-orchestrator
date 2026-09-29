@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- built-in `workflow_scout` role (`@builtin`, `fs_read`, `execute_bash`,
+  `@cao-mcp-server`). The shipped scout profile previously resolved through
+  the unknown-role fallback to unrestricted `["*"]`. It now resolves to this
+  allowlist. `execute_bash` is still a full shell, so withholding `fs_write`
+  and `web_fetch` is a category restriction, not a sandbox. (#746)
 - `terminal.pane_layout` chooses how a pane-mode window is arranged after each
   spawn: `tiled` (default, unchanged behaviour), `even-vertical`,
   `even-horizontal`, or `none` to leave tmux's own splitting alone. The split
@@ -42,6 +47,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **a custom role in `settings.json` now outranks the built-in role of the same
+  name.** The resolver consulted the built-ins first, so when CAO shipped a
+  built-in `workflow_scout` an operator's saved `workflow_scout` policy was
+  silently replaced by the built-in's list: resolution and delegated child policy
+  gained `execute_bash` and lost the listing or web-fetch tools the saved policy
+  granted, while `settings.json` read back unchanged. Settings roles are now
+  consulted first for every name, so a saved `supervisor`, `developer` or
+  `reviewer` also takes effect where it was previously ignored. A settings role
+  that shadows a built-in is logged by name (never its contents). (#746)
 - **a PTY WebSocket handshake with no peer address skipped the client-IP allowlist.**
   `/terminals/{id}/ws` checked `client_host not in WS_ALLOWED_CLIENTS` only when a
   peer address was present, so a `None` peer passed instead of failing closed. Not
@@ -227,6 +241,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `list_outcomes` clamps `limit` to 200 client-side; the service already clamped
   silently, so `limit=500` keeps working rather than becoming a 422.
+
+### Security
+
+- **an unknown `role` no longer falls open to unrestricted `["*"]`.** Omitting
+  `role` still uses developer defaults. A typo or a role that is not defined
+  now raises `ValueError` on install, launch, and delegation, so providers no
+  longer skip native deny flags. **Breaking:** profiles that previously
+  launched because an undefined role fell open to `["*"]` now fail closed.
+  Define the role under `agents.roles` (or the legacy flat `roles` key), or
+  omit `role` for developer defaults. An explicit `allowedTools` list still
+  wins and does not raise. (#746)
 
 
 ## [2.5.0] - 2026-08-28
