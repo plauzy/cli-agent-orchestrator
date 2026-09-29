@@ -107,7 +107,7 @@ No `role` is needed — `allowedTools` is the full specification of what tools t
 | `fs_list` | Search/list files | `Glob`, `Grep` | `list`, `grep` |
 | `fs_*` | All filesystem ops | All of the above | All of the above |
 | `web_fetch` | Fetch URLs / search the web | `WebFetch`, `WebSearch` | (not mapped) |
-| `@builtin` | Provider built-in capabilities | (internal) | (internal) |
+| `@builtin` | Selector naming the provider's own built-in tool set; **grants nothing by itself** on any provider. Kept in the role defaults for readability; list `fs_*`/`execute_bash` explicitly for the access you want | (no-op) | (no-op) |
 | `@cao-mcp-server` | CAO orchestration tools | `handoff`, `assign`, `send_message`, plus Hermes prompt answers via `answer_user_prompt` | Same |
 | `discovery` | Sibling discovery/metadata (`list_siblings`, `update_metadata`) | Same | Same |
 | `*` | Everything (unrestricted) | All tools | All tools |
@@ -207,7 +207,7 @@ CAO defines a universal tool vocabulary (`execute_bash`, `fs_read`, `fs_write`, 
 | `fs_list` | `Glob`, `Grep` | `list`, `grep` | `Grep`, `Glob` |
 | `web_fetch` | `WebFetch`, `WebSearch` | (not mapped) | `WebFetch`, `WebSearch` + disabled web search |
 
-**Providers that accept CAO vocabulary directly** — Kiro CLI accepts `allowedTools` in the agent JSON at install time, using the same vocabulary as CAO. No translation needed. Kimi CLI, MiniMax Code, and Codex use system prompt instructions to enforce restrictions. CAO passes the `allowedTools` list directly without translation — so no `TOOL_MAPPING` entry exists for them, and none is needed.
+**Providers that accept CAO vocabulary directly** — Kiro CLI accepts `allowedTools` in the agent JSON at install time, using the same vocabulary as CAO. No translation needed, but note that Kiro treats `allowedTools` as the set of tools that run *without an approval prompt*, not as a restriction, and CAO launches Kiro with `--trust-all-tools`, so the list has no restricting effect at runtime (see the table below). Kimi CLI, MiniMax Code, and Codex use system prompt instructions to enforce restrictions. CAO passes the `allowedTools` list directly without translation — so no `TOOL_MAPPING` entry exists for them, and none is needed.
 
 #### MCP-side enforcement for tools that launch an agent
 
@@ -272,12 +272,13 @@ As described in [How Tool Restrictions Are Enforced](#how-tool-restrictions-are-
 | Provider | Enforcement | How it works |
 |----------|------------|-------------|
 | **Claude Code** | Hard | `--disallowedTools` flags block specific tools |
-| **Kiro CLI** | Hard | `allowedTools` in agent JSON at install time |
+| **Kiro CLI** | None (default profiles) | Launched `--trust-all-tools` on every profile; `allowedTools` in the agent JSON only suppresses approval prompts and `tools` is `["*"]` unless the profile sets its own `tools` list, so the CAO policy is not applied at runtime |
 | **Copilot CLI** | Hard | `--deny-tool` flags override `--allow-all` |
-| **OpenCode CLI** | Hard | `permission:` YAML frontmatter enforced natively at install time |
+| **OpenCode CLI** | Hard | `permission:` YAML frontmatter enforced natively at install time; launch-time `--allowed-tools` and role overrides select the installed agent and do not change its permissions |
 | **Grok Build CLI** | Native (mapped families) | Restricted profiles use deny-by-default `--permission-mode dontAsk` with explicit native/MCP allows and defense-in-depth denies; native subagents are disabled |
 | **Kimi CLI** | Soft | Security system prompt only |
 | **MiniMax Code** | Soft | Security bootstrap prompt only |
+| **OMP** | Soft | Security system prompt only |
 | **Codex** | Soft | Security system prompt only |
 | **Antigravity CLI** | Soft | Security system prompt only |
 | **Hermes** | Profile-defined | CAO launches default `hermes` or the optional `hermesProfile` wrapper declared by the CAO profile; restrict tools in that Hermes profile |
@@ -300,6 +301,10 @@ claude --dangerously-skip-permissions --disallowedTools Bash --disallowedTools E
 ```json
 { "allowedTools": ["@cao-mcp-server", "fs_read", "fs_list"] }
 ```
+In Kiro this list only names tools that run without an approval prompt; `tools`
+(written as `["*"]` unless the profile sets it) decides availability, and CAO
+passes `--trust-all-tools`, so nothing is restricted at runtime. To actually
+limit a Kiro agent, set `tools` in the profile.
 
 **Copilot CLI** — Adds `--deny-tool` flags that override `--allow-all`:
 ```bash
@@ -374,9 +379,9 @@ Each agent is restricted based on its own profile, not its parent's permissions.
 
 1. **Use `role: supervisor` for orchestrators.** They only need MCP tools + file reading for context.
 2. **Don't use `--yolo` in production.** It grants unrestricted access and skips all safety prompts.
-3. **Prefer hard-enforcement providers** (Claude Code, Kiro CLI, Copilot CLI) for sensitive workloads.
+3. **Prefer hard-enforcement providers** (Claude Code, Copilot CLI, Grok Build CLI, OpenCode CLI) for sensitive workloads. Kiro CLI, the default provider, does not apply the CAO tool policy at runtime.
 4. **Review the confirmation prompt.** It shows exactly what tools are allowed and blocked before you proceed.
-5. **Kimi CLI, MiniMax Code, and Codex use soft enforcement** — use these only for non-critical tasks.
+5. **Prompt-only providers (Kimi CLI, MiniMax Code, Codex, Antigravity CLI, OMP; see the table) use soft enforcement** — use these only for non-critical tasks.
 
 ## Known Limitations
 
@@ -384,7 +389,7 @@ Each agent is restricted based on its own profile, not its parent's permissions.
 
 2. **`@cao-mcp-server` is server-level, not per-tool control.** Grok restricted profiles translate it to an allow rule for the configured CAO MCP server; other providers generally treat it as an intent marker. No provider currently blocks individual MCP tools: once the server is available, its `handoff`, `assign`, `send_message`, and `answer_user_prompt` tools are all exposed. **CAO enforces the server-level grant on its own side for `assign`, `handoff` and `assign_elastic`** (see [MCP-side enforcement](#mcp-side-enforcement-for-tools-that-launch-an-agent) above), so a profile without `@cao-mcp-server` cannot use them even where the provider still exposes them. `send_message` and `answer_user_prompt` are not gated this way. `answer_user_prompt` is exposed by the MCP server, but its structured prompt-navigation behavior is currently implemented for Hermes workers that report `waiting_user_answer`; other providers may only receive ordinary text input until they implement equivalent prompt states. Future versions may support `@cao-mcp-server:send_message` syntax for per-tool MCP control.
 
-3. **Soft enforcement is best-effort.** Kimi CLI, MiniMax Code, and Codex rely on prompt instructions to restrict tools. The agent may ignore these restrictions. Do not rely on soft enforcement for security-critical workloads.
+3. **Soft enforcement is best-effort.** The prompt-only providers in the table above (Kimi CLI, MiniMax Code, Codex, Antigravity CLI, OMP) rely on prompt instructions to restrict tools. The agent may ignore these restrictions. Do not rely on soft enforcement for security-critical workloads.
 
 ## Example Profiles
 

@@ -72,6 +72,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   OAuth discovery document, the static profile schema/template metadata and the
   AG-UI stream, which carries its own credential.
 
+- **`@builtin` in an `allowedTools` list enabled `bash`, `edit` and `write` on
+  OpenCode.** The OpenCode permission translator expanded the selector into the
+  four standard categories, while `utils/tool_mapping.py` treats every
+  `@`-prefixed entry as a non-grant for the providers it translates. The shipped
+  `reviewer` role lists `@builtin`, so an OpenCode reviewer was not read-only.
+  The selector now grants nothing on OpenCode either; run `cao install` again
+  for existing OpenCode agents, since the `permission:` block is written at
+  install time. A profile whose `allowedTools` listed **only** `@builtin`
+  previously got `read`/`grep`/`glob` (and the write and bash tools) on
+  OpenCode and now gets none of them: add `fs_read`, `fs_list` and the rest
+  explicitly, as the shipped roles already do (#824)
+
 - **enabling `CAO_MEMORY_API_URL` rejected memory keys that work without it.**
   The `/internal/memory/store` and `/forget` routes validated the wire `key` as
   the strict `MemoryKey` (`^[a-z0-9-]{1,60}$`), while the MCP tools have always
@@ -105,6 +117,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   import executed its import-time `DB_DIR.mkdir()` in agents — and failed outright
   wherever the data dir is unreadable. The import is now lazy.
 
+- **Grok's launch line inlined the whole `--rules` text ahead of the
+  permission flags.** A profile plus skill catalog of several KB pushed the
+  line past the tty's 4096-byte limit. The cut landed inside the quoted text,
+  so the shell hung on an unclosed quote and Grok never started (an init
+  timeout, not an unrestricted run), but the `--permission-mode`/`--allow`/
+  `--deny` flags were the part of the line behind the text. The rules now live
+  in a 0600 `rules.md` inside the terminal's private `GROK_HOME`, referenced
+  from the line with `"$(cat …)"` (as the Codex provider already does for its
+  instructions), the line no longer grows with the profile, and the permission
+  flags precede it (#824)
+
+- **The launch confirmation showed a Blocked list on providers that cannot
+  enforce one.** `cao launch` printed `Allowed:`/`Blocked:` for every provider
+  and `--auto-approve` said restrictions were "still enforced", while Hermes
+  (`--yolo --accept-hooks`) and Cursor CLI (`--force`) apply no restriction at
+  all and were missing from the server's soft-enforcement set, so a restricted
+  supervisor on them ran unrestricted with nothing telling the operator. One
+  table (`utils/enforcement.py`) now classifies every provider as native,
+  prompt-only or none; the confirmation prints an `Enforcement:` line and a
+  warning on prompt-only and none providers, the empty deny list on untranslated
+  providers no longer reads as `(none)`, the server warning covers Hermes and
+  Cursor, and a test keeps the SECURITY.md and docs tables equal to the code
+  (SECURITY.md gains the seven missing rows, the docs table gains OMP). Kiro
+  CLI, the default provider, moves from "Hard" to "None": it is launched with
+  `--trust-all-tools` on every profile, and the `allowedTools` CAO writes into
+  the agent JSON only suppresses approval prompts in Kiro; `tools` decides
+  availability and is `["*"]` unless the profile sets it. Applying the CAO
+  policy to Kiro at launch, and refusing restricted roles on providers that
+  cannot enforce them, are separate decisions. OpenCode is the one native provider whose policy is the INSTALLED agent's: the gate now says `native at install time` and that launch overrides do not change it, instead of `Blocked: (none)` beside a native promise; the third copy of the "providers with native tool denial" list (docs/cursor-cli.md) and the prompt-only provider prose in docs/tool-restrictions.md now agree with the table, and the Kiro e2e case that asserted blocking now asserts the opposite directly (a restricted Kiro supervisor can run bash), so an environmental failure cannot pass as the expected result; on the author's machine the case has not yet produced a result (kiro-cli 2.24.1 timed out waiting for its agent prompt), so the classification rests on the launch flags and Kiro's documentation, not on an observed run (#824)
 - **The local API bearer was sent to other nodes.** `handoff`/`assign` with a
   `target_host`, `delete_terminal` with a `target_host`, `get_handoff_result`
   with a `target_host`, and a remote worker's `send_message` back to its
