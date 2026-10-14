@@ -4461,8 +4461,18 @@ def capture_terminal_snapshot(terminal_id: str) -> Optional[Dict]:
             strip_escapes=True,
             full_history=True,
         )
+        # Scrollback is raw terminal history and can hold anything the agent
+        # printed, so both sidecars are published 0600 through the atomic
+        # writer: a symlink planted at either path is replaced, not followed.
+        # The UNLOCKED variant on purpose: every terminal gets its own sidecar
+        # names, and the locked writer keeps one lock file per target in
+        # LOCK_DIR forever, so it would grow by two files per teardown with
+        # nothing to reap them. Unique temp + os.replace is enough here: two
+        # concurrent teardowns of the same id cannot tear a file.
+        from cli_agent_orchestrator.utils.atomic_file import unlocked_atomic_write
+
         scrollback_path = TERMINAL_LOG_DIR / f"{terminal_id}.scrollback"
-        scrollback_path.write_text(scrollback, encoding="utf-8")
+        unlocked_atomic_write(scrollback_path, scrollback, mode=0o600)
 
         import json as _json
 
@@ -4477,7 +4487,7 @@ def capture_terminal_snapshot(terminal_id: str) -> Optional[Dict]:
             "caller_id": metadata.get("caller_id"),
         }
         snapshot_path = TERMINAL_LOG_DIR / f"{terminal_id}.snapshot.json"
-        snapshot_path.write_text(_json.dumps(snapshot, indent=2), encoding="utf-8")
+        unlocked_atomic_write(snapshot_path, _json.dumps(snapshot, indent=2), mode=0o600)
     except Exception as e:
         logger.warning(f"Failed to snapshot terminal {terminal_id}: {e}")
 
