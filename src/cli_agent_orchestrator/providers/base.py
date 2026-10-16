@@ -247,6 +247,9 @@ class BaseProvider(ABC):
     # rendered viewport without being safe as delivery evidence.
     supports_stale_processing_capture: bool = False
 
+    # Uses the stale-processing probe/commit contract; active dialogs must stay waiting.
+    supports_stale_waiting_capture: bool = False
+
     # Opt-in for the mid-burst PROCESSING probe (StatusMonitor._midburst_processing_probe).
     # Set True ONLY alongside a probe_processing_from_screen() override that is
     # side-effect free. The probe runs on a HALF-DRAWN frame, off the two edges
