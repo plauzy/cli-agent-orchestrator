@@ -124,6 +124,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Corrective workflow re-prompts now reuse the attempt's rendered prompt, so
+  workflow inputs and earlier step outputs stay filled in when structured output
+  is missing or invalid (#966).
 - `claude_code` workers running with Claude Code's `prefersReducedMotion` setting
   are no longer reported as completed while they work. That setting draws the
   spinner with a static `●`, which both status paths read as a finished response,
