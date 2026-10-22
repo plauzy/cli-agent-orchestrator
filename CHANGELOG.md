@@ -24,8 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Breaking / migration:** a fresh script run now executes a private copy of the approved source.
   Modules beside the spec are not importable and `__file__` names the copy; this matches resume.
-- **Breaking / migration:** while approval is enabled, fresh agent steps in script runs refuse reserved
-  ephemeral profile names until #827 binds their definitions.
+- **Breaking / migration:** reserved ephemeral names are refused as fresh script-run agent steps
+  while approval is enforced: they have no installed definition for the launch guard to digest.
 - **Breaking / migration:** non-Git roots now bind the directory's canonical path into `plan_id`.
   Moving or renaming such a directory requires a new approval; Git-repository plan identifiers are
   unchanged.
@@ -160,6 +160,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Concurrent blocking script starts with the same run id now return a conflict
+  for the loser without changing the winning run's journal or live record.
+- Script runs under approval enforcement now stop before spawning if their run row
+  cannot be recorded. A known script run with a missing row supplies no memory
+  and logs a warning, whether enforcement is on or off. Its launch guard also
+  refuses fresh agent launches while approval is enforced.
 - Kiro CLI agent specs installed by CAO now carry `includeMcpJson`, the name Kiro CLI documents, instead of the retired `useLegacyMcpJson` alias, which Kiro rejected as a duplicate field whenever another writer added the canonical key (#1026). The profile field keeps its `useLegacyMcpJson` spelling and is now actually forwarded into the spec; previously it was accepted and ignored.
 - Corrective workflow re-prompts now reuse the attempt's rendered prompt, so
   workflow inputs and earlier step outputs stay filled in when structured output
@@ -704,8 +710,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   root outside Git is now an approvable plan instead of `plan_identity_unavailable`. Approvals granted
   for a plan fingerprinted against a different directory must be granted again.
 
-- A script run refuses to launch further agent steps (HTTP 409, `kind: plan_inputs_changed`) when an
-  agent profile or the memory-enabled setting changed after the run's approval check (#699).
+- While approval is enforced, a script run refuses to launch further agent steps (HTTP 409,
+  `kind: plan_inputs_changed`) when an agent profile or the memory-enabled setting changes after
+  the admission snapshot. That snapshot is captured before the approval check (#699).
 
 - `cao workflow get` / `update` / `delete` validate and percent-encode workflow names;
   `cao workflow validate --json` returns the `{ok: false, ...}` envelope on failure; `cao workflow
