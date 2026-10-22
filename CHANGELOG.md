@@ -163,6 +163,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Vault configuration validation no longer queries the database. `VaultConfig` validators are
+  pure, so a `memory.vault` document with a project mapping validates on a fresh `CAO_HOME_DIR`
+  that has never run `init_db()`, and `cao config list` shows it without a database. Project
+  aliases are still canonicalised, and alias-equivalent mappings still refused, on the loading
+  path (`get_vault_config`) that owns a database; a guard test keeps every vault validator free
+  of `clients.database` (#644).
 - `cao-server` now refuses to start when another `cao-server` already owns the
   same `CAO_HOME_DIR`, whatever port either uses. The server takes an exclusive
   `flock` on `server.lock` in the data directory before the database, recovery
