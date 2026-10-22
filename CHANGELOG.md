@@ -163,6 +163,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Vault scan now re-reads a note whose size, mtime or ctime changed across the read window up to
+  three times with a short backoff, as ADR-006 specifies, instead of skipping it on the first
+  torn read. A note saved by Obsidian during a reconcile is indexed from the clean re-read; a
+  note still changing after the bound is recorded as `unstable_skipped` with the attempt count in
+  the finding detail and its prior row is left intact (#644).
 - Vault configuration validation no longer queries the database. `VaultConfig` validators are
   pure, so a `memory.vault` document with a project mapping validates on a fresh `CAO_HOME_DIR`
   that has never run `init_db()`, and `cao config list` shows it without a database. Project
