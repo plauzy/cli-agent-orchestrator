@@ -70,10 +70,20 @@ jobs:
             --ignore=test/e2e \
             -m "not e2e" \
             --cov=src/cli_agent_orchestrator \
+            --cov-branch \
             --cov-report=xml \
             --cov-fail-under=80 \
             --cov-report=term-missing \
             -v
+        # --cov-branch (#1005) also makes --cov-fail-under read the BLENDED
+        # line+branch figure rather than line coverage. Whether that reads harder
+        # or softer than line-only depends on whether branch % is below or above
+        # line % that run (today: 89.28 branch vs 93.10 line, so blended is a
+        # harder bar at 80 -- not an invariant, just the current numbers). The
+        # authoritative, separately-floored line metric is the ratchet's
+        # (.coverage-baseline.json, python.floor_pct = 87.0) in the cao-mcp-apps
+        # job below. If the blend lands under 80 on a first run, lower THIS
+        # number -- do not drop the branch data, and do not touch the line floor.
 
       - name: Validate Markdown links
         run: uv run python scripts/validate_markdown_links.py
@@ -286,13 +296,16 @@ jobs:
         run: uv run pytest test/test_http_only_boundary.py -q
 
       - name: Backend coverage (for the ratchet floor)
-        # Produces coverage.json (python floor) consumed by coverage:ratchet.
+        # Produces coverage.json (python line + branch floors) consumed by
+        # coverage:ratchet. --cov-branch adds num_branches/covered_branches to
+        # totals; the ratchet floors line and branch SEPARATELY (#1005).
         run: |
           uv run pytest test/ examples/workflow/tests/ \
             --ignore=test/providers/test_kiro_cli_integration.py \
             --ignore=test/e2e \
             -m "not e2e" \
             --cov=src/cli_agent_orchestrator \
+            --cov-branch \
             --cov-report=json \
             --cov-fail-under=80 \
             -q
