@@ -163,6 +163,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `cao-server` now refuses to start when another `cao-server` already owns the
+  same `CAO_HOME_DIR`, whatever port either uses. The server takes an exclusive
+  `flock` on `server.lock` in the data directory before the database, recovery
+  sweeps, terminal registry, status monitor or port bind, holds it for the
+  process lifetime, and the second instance exits non-zero naming the owning
+  PID, port and start time. Previously the port was the only guard, and a
+  second server on another port silently marked the first server's in-flight
+  launches as interrupted, double-delivered inbox messages on the herdr
+  backend, and could tear down the first server's tmux panes. Two servers on
+  one data directory are unsupported; use a separate `CAO_HOME_DIR` and
+  `--port` per server (#406, #709).
 - Concurrent blocking script starts with the same run id now return a conflict
   for the loser without changing the winning run's journal or live record.
 - Script runs under approval enforcement now stop before spawning if their run row
