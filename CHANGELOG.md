@@ -903,6 +903,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Vault `secret_gate: "warn"` no longer forwards raw secret matches to a model** (#644 AC10).
+  Under `warn` a secret-bearing note is still indexed and recallable, but every match is replaced by
+  `[REDACTED:<pattern_name>]` at the single vault read chokepoint, so automatic injection, explicit
+  recall, related-key expansion and BM25 ranking all see the marker, never the bytes. Raw bytes pass
+  only when the note's frontmatter carries a per-finding acceptance bound to the pattern name and the
+  SHA-256 of the matched span (`cao.secret_ok: [{pattern, sha256}]`); a boolean or pattern-only entry
+  quarantines the note. `cao memory vault scan --fingerprints` prints the values an acceptance needs;
+  `cao memory vault status` reports honoured acceptances (`secret_acceptances`, `secret_accepted`) and
+  inert ones (`secret_acceptance_unmatched`). Fingerprints come from one acceptance-free pass, so
+  they never change with what is accepted; a credential two patterns match, such as
+  `NAME_TOKEN=value`, prints two fingerprints and needs both accepted before the value is served
+  raw. The config-load warning for `warn` with `inject: true` is retired because the pairing no
+  longer carries exposure. Redaction runs over the body exactly as the scan read it, leading
+  `# Heading` included, and the heading is dropped only afterwards for display; because
+  `bearer_token` and `secret_assignment` match across a line break, a heading ending in a key word
+  with the value beneath it is one match, and where the marker replaces that line break the rest of
+  the value's line goes with the heading, so recall can show less of the note than it holds.
+  `reject` is unchanged.
+  **Migration:** operators who relied on `warn` passing raw bytes to agents must add a per-finding
+  acceptance to each note for each span they want served raw; until then those spans are redacted.
+
 - **Child allowlists are bounded by the creator's delegation ceiling.** A
   terminal's `allowedTools` limited what it could call, not what it could
   create: a restricted agent could `assign` or `handoff` to a profile holding
