@@ -141,6 +141,15 @@ class Terminal(BaseModel):
         ),
     )
     allowed_tools: Optional[List[str]] = Field(None, description="Allowed CAO tools")
+    delegate_tools: Optional[List[str]] = Field(
+        None,
+        description=(
+            "Delegation ceiling: the most this terminal may grant to children it "
+            "creates via assign/handoff/workflow steps. Resolved from the profile's "
+            "delegateTools (or the role default) and capped by the creator's own "
+            "ceiling at creation time. None for rows written before the column existed."
+        ),
+    )
     engine: Optional[KiroEngine] = Field(None, description="Resolved Kiro engine")
     shell_command: Optional[str] = Field(
         None, description="Shell process name captured before kiro launch"
@@ -164,6 +173,16 @@ class Terminal(BaseModel):
         description=(
             "CAO-owned durable deferred-initialization failure metadata. "
             "Separate from consumer metadata so clients cannot overwrite lifecycle truth."
+        ),
+    )
+    memory_manager: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "Outcome of the memory_manager sidecar a POST /sessions request asked for "
+            "(memory_manager=true): {state: 'scheduled' | 'refused', detail}. 'refused' "
+            "means the sidecar's tools exceed this primary's recorded delegation ceiling "
+            "and it was not launched; detail carries the refusal text. Response-only, "
+            "never persisted; None when no sidecar was requested."
         ),
     )
     initial_delivery: Optional[Dict[str, Any]] = Field(
