@@ -262,6 +262,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and logs a warning, whether enforcement is on or off. Its launch guard also
   refuses fresh agent launches while approval is enforced.
 - Kiro CLI agent specs installed by CAO now carry `includeMcpJson`, the name Kiro CLI documents, instead of the retired `useLegacyMcpJson` alias, which Kiro rejected as a duplicate field whenever another writer added the canonical key (#1026). The profile field keeps its `useLegacyMcpJson` spelling and is now actually forwarded into the spec; previously it was accepted and ignored.
+- `cao session send` no longer prints the previous turn's answer, and no longer
+  waits out its timeout on a turn that finished (#735). `POST /terminals/{id}/input`
+  now returns the `dispatch_boundary` of the turn it started, and
+  `GET /terminals/{id}` reports `status_generation` (the output generation the
+  status was earned at) and `output_generation` (the current counter). The CLI
+  refuses a status earned at or before the boundary; once output has landed
+  without the status being re-earned it gives the stamp 8 s to move, then warns
+  on stderr and finishes on the frame as before. A cao-server restart during the
+  wait is detected and warned about instead of waiting out the timeout. Both
+  fields are additive: `success` is unchanged, and an older server gets the
+  previous behaviour.
 - **Security:** a task's text could be executed by the worker's login shell. If `codex`
   exited during startup (for example on a network timeout while reading the account),
   its `› Error: ...` line read as an idle composer, the exit-to-shell check was switched

@@ -76,6 +76,7 @@ from cli_agent_orchestrator.constants import (
     PIPE_LIVENESS_TAIL_LINES,
     SESSION_PREFIX,
     TERMINAL_LOG_DIR,
+    TURN_START_CONFIRM_SECONDS,
 )
 from cli_agent_orchestrator.models.agent_profile import AgentProfile
 from cli_agent_orchestrator.models.inbox import OrchestrationType
@@ -2898,7 +2899,9 @@ async def _surface_deferred_init_failure(
 # never started and NO exception raised — the supervisor then waits on a
 # callback that can never arrive. Confirm the worker actually began processing
 # and re-submit if it did not.
-_DEFERRED_SUBMIT_CONFIRM_TIMEOUT = 8.0  # per-attempt wait for the PROCESSING edge
+_DEFERRED_SUBMIT_CONFIRM_TIMEOUT = (
+    TURN_START_CONFIRM_SECONDS  # per-attempt wait for the PROCESSING edge
+)
 _DEFERRED_SUBMIT_MAX_RESUBMITS = 3
 # Statuses proving the worker accepted the task (left the ready IDLE state).
 # WAITING_USER_ANSWER counts: the worker consumed the input and is now asking.
@@ -3820,8 +3823,33 @@ def get_terminal(terminal_id: str) -> Dict:
         # unlike StatusMonitor's in-memory latch.
         if deferred_failure is not None:
             status = TerminalStatus.ERROR.value
+            # A durable failure marker is not earned from terminal output, so it
+            # carries no generation; a client must not be able to read it as
+            # evidence for the send it just made. ERROR is honoured by the CLI
+            # gate whatever the generations say, so the counter is not needed.
+            status_generation: Optional[int] = None
+            output_generation: Optional[int] = None
         else:
-            observed_status = status_monitor.get_status(terminal_id)
+            # Read the status and the generation it was earned at as one pair
+            # (status_observation), not two separate lock acquisitions -- a
+            # detector applying this turn's PROCESSING between two separate
+            # reads would otherwise pair the previous turn's COMPLETED with
+            # the new turn's generation, defeating the #735 gate it feeds.
+            observation = status_monitor.status_observation(terminal_id)
+            observed_status = observation.status
+            status_generation = observation.output_generation
+            # The current counter, read AFTER the observation so it is never
+            # older than the stamp it is reported with. It lets a client tell
+            # "nothing has landed since my send" from "output landed but the
+            # status was never re-earned" -- the latch does not re-stamp
+            # COMPLETED -> COMPLETED or the COMPLETED -> IDLE -> COMPLETED
+            # round trip, so a fast turn can finish with the stamp still at
+            # the previous turn's value, and a client that refused that reading
+            # unconditionally waited out its whole timeout (#735 review, P2-2).
+            # None exactly when the stamp is None (event-inbox backends).
+            output_generation = (
+                None if status_generation is None else status_monitor.output_generation(terminal_id)
+            )
             # External deferred initialization has a short two-phase window:
             # the provider can render ERROR before the background init task has
             # durably written ``deferred_init_failure``. Publishing that
@@ -3862,6 +3890,8 @@ def get_terminal(terminal_id: str) -> Dict:
             "initial_delivery": metadata.get("initial_delivery"),
             "session_incarnation_id": metadata.get("session_incarnation_id"),
             "status": status,
+            "status_generation": status_generation,
+            "output_generation": output_generation,
             "last_active": metadata["last_active"],
         }
 
