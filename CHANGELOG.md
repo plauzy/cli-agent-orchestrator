@@ -233,6 +233,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   test enumerates every create call site and fails on one that neither defers init nor derives
   its budget. `GET /health` now reports the server's `provider_init_timeout` so an operator can
   check that a client on another host sees the same value (#710).
+- Inbox delivery no longer types a queued message into an open user-answer dialog (#896). With
+  `CAO_EAGER_INBOX_DELIVERY=true`, a message for a Claude Code terminal sitting in
+  WAITING_USER_ANSWER was pasted into the AskUserQuestion dialog, marked DELIVERED, and the
+  trailing Enter answered the question. Eager delivery now holds the message while a provider
+  that declares `blocks_orchestrated_input_while_waiting_user_answer` shows a dialog, and
+  `dispatch_input`'s dialog guard covers every `OrchestrationType` (including `send_message`),
+  not a hand-written subset. A refusal caused by an open dialog keeps the message PENDING for
+  the next IDLE/COMPLETED event or reconcile sweep instead of marking it FAILED. The guard also
+  covers the swallowed-Enter recovery from #78: a bare Enter submits what is already in the
+  composer without going through `dispatch_input`, so it checks the same predicate itself rather
+  than relying on a dialog happening to hide the composer box.
 - Workflow scripts over 131,072 characters (128 KiB) now fail `validate`, `create`, `update`,
   `run` and `submit` with a `syntax` finding that names the size and the limit, instead of being
   parsed. On CPython 3.10 `ast.parse` segfaults the interpreter on deeply nested source and no

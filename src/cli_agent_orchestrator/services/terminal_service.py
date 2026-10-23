@@ -86,6 +86,7 @@ from cli_agent_orchestrator.models.terminal import (
     ProviderExitedInputBlockedError,
     Terminal,
     TerminalInputBlockedError,
+    TerminalInputBlockedReason,
     TerminalLimitError,
     TerminalStatus,
 )
@@ -147,6 +148,58 @@ from cli_agent_orchestrator.utils.terminal import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: Every orchestration-type value that marks input as machine-originated, derived
+#: from the enum rather than hand-enumerated (#896). The dialog guard in
+#: ``send_input`` used to test ``{ASSIGN, HANDOFF}`` and ``SEND_MESSAGE`` walked
+#: past it into an open AskUserQuestion dialog. Deriving the set means a member
+#: added to ``OrchestrationType`` later inherits the guard the day it is defined;
+#: test/services/test_orchestrated_input_guard_invariants.py pins that per member
+#: and test/test_callsite_lint_rules.py refuses a return to a literal subset.
+_ORCHESTRATED_INPUT_VALUES = frozenset(t.value for t in OrchestrationType)
+
+
+def _orchestration_value(orchestration_type: "Optional[OrchestrationType]") -> str:
+    """Normalize an orchestration type to the string the dialog guard tests.
+
+    An operator typing by hand carries no type at all, which normalizes to ``""``
+    and is therefore never in ``_ORCHESTRATED_INPUT_VALUES``.
+    """
+    return (
+        orchestration_type.value
+        if isinstance(orchestration_type, OrchestrationType)
+        else str(orchestration_type or "")
+    )
+
+
+def _dialog_blocks_orchestrated_input(
+    provider: Any,
+    orchestration_type: "Optional[OrchestrationType]",
+    current_status: TerminalStatus,
+) -> bool:
+    """Whether machine-originated input must not be submitted into this terminal now.
+
+    The #896 predicate, in one place because it now has two enforcement sites and
+    they must not drift:
+
+    - :func:`dispatch_input`, which refuses the paste itself, and
+    - :func:`redeliver_dropped_message_with_boundary`'s bare-Enter recovery, which
+      submits what is already in the composer and so never reaches
+      ``dispatch_input`` at all.
+
+    Only a real ``answer_user_prompt`` call, or the operator typing by hand (no
+    orchestration type), may resolve a prompt. Keeping the membership test derived
+    from the enum means a member added to ``OrchestrationType`` inherits both
+    sites the day it is defined; test/test_callsite_lint_rules.py refuses a return
+    to a hand-written subset.
+    """
+    return (
+        provider is not None
+        and getattr(provider, "blocks_orchestrated_input_while_waiting_user_answer", False) is True
+        and _orchestration_value(orchestration_type) in _ORCHESTRATED_INPUT_VALUES
+        and current_status == TerminalStatus.WAITING_USER_ANSWER
+    )
+
 
 _DEFERRED_INIT_FAILURE_MESSAGE_MAX = 4096
 _DEFERRED_INIT_FAILURE_SCAN_MAX = 16384
@@ -3150,7 +3203,14 @@ def redeliver_dropped_message_with_boundary(
     The full re-send goes through ``dispatch_input`` with ``redelivery=True``: it
     repeats the dispatch CAO is already waiting on, so the provider must treat
     it as another delivery attempt of the same logical turn rather than as a
-    newly dispatched turn.
+    newly dispatched turn. That also means the full re-send inherits
+    ``dispatch_input``'s own guards: a terminal in ERROR or (for a dialog-blocking
+    provider carrying an orchestration type) in WAITING_USER_ANSWER raises
+    ``TerminalInputBlockedError`` out of this function rather than being pasted
+    into. The bare Enter does NOT go through ``dispatch_input``, so it checks
+    ``_dialog_blocks_orchestrated_input`` itself and sends nothing when a dialog
+    is open (#896) -- otherwise the one recovery that submits without pasting
+    would be the one recovery that can answer a human's question.
 
     Returns ``(started, boundary)``. ``started`` is True when the worker was
     found already running and nothing was sent; False when a redelivery was
@@ -3182,6 +3242,35 @@ def redeliver_dropped_message_with_boundary(
             return True, None
     in_composer = _message_in_composer(terminal_id, message)
     if in_composer is True:
+        # The bare Enter is machine-originated input too, and it is the ONE
+        # recovery that does not go through ``dispatch_input`` -- so #896's
+        # dialog guard, which lives there, never sees it. An Enter into an open
+        # choice widget is worse than a paste: it submits whichever option is
+        # highlighted, answering a question reserved for a human, with no text
+        # involved at all.
+        #
+        # Today this branch happens to be unreachable with a prompt open: on
+        # every real capture in test/providers/fixtures the dialog replaces the
+        # composer box, so ``extract_current_composer`` returns None for the only
+        # two providers that both block dialogs and read a composer (claude_code
+        # and codex -- the overlap is enumerated in
+        # test/services/test_inbox_service.py's
+        # TestDialogGuardCoversSubmitRecovery). But that is a property of those
+        # two extractors, not an invariant: the moment one of them learns to read
+        # the composer under an overlaying permission prompt, this Enter starts
+        # answering dialogs. Check the guard here rather than inherit it by
+        # coincidence.
+        if _dialog_blocks_orchestrated_input(
+            provider, orchestration_type, status_monitor.get_status(terminal_id)
+        ):
+            logger.warning(
+                "Delivery to %s is unsubmitted but the terminal is waiting on a user "
+                "answer; skipping the bare-Enter re-submit so it cannot answer the "
+                "dialog (attempt %d)",
+                terminal_id,
+                attempt,
+            )
+            return False, None
         logger.warning(
             "Delivery to %s unsubmitted (Enter swallowed); " "re-submitting via Enter (attempt %d)",
             terminal_id,
@@ -3441,9 +3530,10 @@ def _schedule_deferred_init(
                 # Round-3 review fix (call-me-ram): a raw POST /sessions caller that
                 # supplies initial_message with no orchestration_type previously sailed
                 # straight past send_input's WAITING_USER_ANSWER guard entirely -- the
-                # guard only fires for OrchestrationType.ASSIGN/HANDOFF, so an unstated
-                # type meant no protection at all against pasting the initial task into
-                # a live choice prompt. Every call that reaches THIS function is by
+                # guard fires only for input carrying an OrchestrationType (every
+                # member, derived from the enum since #896), so an unstated type meant
+                # no protection at all against pasting the initial task into a live
+                # choice prompt. Every call that reaches THIS function is by
                 # construction an unattended initial-task delivery (never an interactive
                 # human answer -- those go through answer_user_prompt's own separate
                 # /terminals/{id}/input call, which never routes through
@@ -4158,11 +4248,7 @@ def dispatch_input(
             raise KiroPhase0KASError(profile_has_v2_policy=False)
 
         provider = provider_manager.get_provider(terminal_id)
-        orchestration_value = (
-            orchestration_type.value
-            if isinstance(orchestration_type, OrchestrationType)
-            else str(orchestration_type or "")
-        )
+        orchestration_value = _orchestration_value(orchestration_type)
 
         if provider:
             current_status = status_monitor.get_status(terminal_id)
@@ -4175,19 +4261,23 @@ def dispatch_input(
             if current_status == TerminalStatus.ERROR:
                 raise ProviderExitedInputBlockedError(
                     f"Terminal {terminal_id} provider is in ERROR state "
-                    "(provider process may have exited). Refusing to deliver input."
+                    "(provider process may have exited). Refusing to deliver input.",
+                    reason=TerminalInputBlockedReason.PROVIDER_ERROR,
                 )
 
-            if (
-                provider.blocks_orchestrated_input_while_waiting_user_answer is True
-                and orchestration_value
-                in {OrchestrationType.ASSIGN.value, OrchestrationType.HANDOFF.value}
-                and current_status == TerminalStatus.WAITING_USER_ANSWER
-            ):
+            # Any orchestration type is machine-originated input (#896): an inbox
+            # delivery is just as much so as an assign, and the dialog cannot
+            # tell them apart -- it ate the paste and the trailing Enter answered
+            # the question. Only a real answer_user_prompt call or the operator
+            # typing by hand (no orchestration type, so an empty value here) may
+            # resolve a prompt. Shared with the bare-Enter recovery's own check;
+            # see ``_dialog_blocks_orchestrated_input``.
+            if _dialog_blocks_orchestrated_input(provider, orchestration_type, current_status):
                 raise TerminalInputBlockedError(
                     f"Terminal {terminal_id} is waiting for a user answer. "
                     "Use answer_user_prompt to submit a selection or approval before "
-                    f"sending {orchestration_value} input."
+                    f"sending {orchestration_value} input.",
+                    reason=TerminalInputBlockedReason.WAITING_USER_ANSWER,
                 )
 
         # Inject memory context into the very first user message after init.
