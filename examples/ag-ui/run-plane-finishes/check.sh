@@ -25,16 +25,21 @@ BODY="{\"threadId\":\"thread-$(rand)\",\"runId\":\"run-$(rand)\",\"state\":{},\"
 
 echo "POST ${URL} (limit ${LIMIT}s)"
 rc=0
-out="$(curl -sS -N --max-time "${LIMIT}" \
+out="$(curl -fsS -N --max-time "${LIMIT}" \
     -H 'Content-Type: application/json' \
     -H 'Accept: text/event-stream' \
     --data "${BODY}" "${URL}" 2>&1)" || rc=$?
 
-frames="$(printf '%s\n' "${out}" | sed -n 's/^data: .*"type": *"\([A-Z_]*\)".*/\1/p' | tr '\n' ' ')"
+frames="$(printf '%s\n' "${out}" | sed -n 's/^data: {"type": *"\([A-Z_]*\)".*/\1/p' | tr '\n' ' ')"
 echo "frames: ${frames:-<none>}"
 
 if [ "${rc}" -eq 28 ]; then
     echo "FAIL: body did not end within ${LIMIT}s"
+    exit 1
+fi
+if [ "${rc}" -eq 22 ]; then
+    echo "FAIL: HTTP error: $(printf '%s' "${out}" | tail -n 1)"
+    echo "      404: AG-UI is off (CAO_AGUI_ENABLED=1); 501: the [agui] extra is missing; 401/403: auth"
     exit 1
 fi
 if [ "${rc}" -ne 0 ]; then
@@ -47,7 +52,7 @@ case " ${frames}" in
         exit 1
         ;;
     *" RUN_FINISHED "*)
-        outcome="$(printf '%s\n' "${out}" | sed -n 's/.*"RUN_FINISHED".*"outcome": *{"type": *"\([a-z]*\)".*/\1/p' | head -n 1)"
+        outcome="$(printf '%s\n' "${out}" | sed -n 's/.*"RUN_FINISHED".*"outcome": *{"type": *"\([a-z]*\)".*/\1/p')"
         echo "PASS: RUN_FINISHED (outcome ${outcome:-unknown}), body closed"
         ;;
     *)
