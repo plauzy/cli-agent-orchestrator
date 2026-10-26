@@ -2619,6 +2619,11 @@ async def agui_run(
     When ``resume[]`` is non-empty, ``cao:write`` is required (the caller is
     mutating interrupt state). Otherwise ``cao:read`` is the floor.
 
+    After a ``resume[]`` run, ``RUN_FINISHED`` with outcome ``success`` means
+    the decision was delivered to the terminal, not that the agent finished
+    its work. A later permission prompt arrives as an interrupt on the next
+    run.
+
     Returns 501 when the ``ag-ui-protocol`` package is not installed (the
     [agui] optional extra was not included at install time).
     Returns 404 when the AG-UI surface is disabled.
