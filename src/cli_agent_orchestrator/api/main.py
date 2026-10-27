@@ -2684,8 +2684,14 @@ async def agui_run(
             },
         )
 
-    # Parse the body
-    body = await request.json()
+    # Parse the body. An empty or non-JSON body raises JSONDecodeError (a
+    # ValueError); answer 422 json_invalid as FastAPI Body() routes do, not 500.
+    try:
+        body = await request.json()
+    except ValueError:
+        raise RequestValidationError(
+            [{"type": "json_invalid", "loc": ("body",), "msg": "invalid JSON body"}]
+        )
 
     # Validate before streaming. run_plane_stream builds RunAgentInput inside the
     # generator, after the 200 has been sent, so an invalid body (for example a

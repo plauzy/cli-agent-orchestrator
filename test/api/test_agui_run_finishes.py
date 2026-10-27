@@ -152,3 +152,21 @@ async def test_resume_entry_with_status_still_streams_to_run_finished(construct)
     assert [f["type"] for f in frames][0] == "RUN_STARTED"
     assert frames[-1]["type"] == "RUN_FINISHED"
     assert frames[-1]["outcome"]["type"] == "success"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw", [b"", b"not json", b'{"threadId": '])
+async def test_empty_or_non_json_body_is_rejected_with_422(construct, raw):
+    # request.json() raises JSONDecodeError for these; the route used to answer 500.
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as http:
+        resp = await asyncio.wait_for(
+            http.post("/agui/v1/run", content=raw, headers={"content-type": "application/json"}),
+            timeout=RUN_DEADLINE_SECONDS,
+        )
+
+    assert resp.status_code == 422
+    assert resp.headers["content-type"].startswith("application/json")
+    assert resp.json()["detail"] == [
+        {"type": "json_invalid", "loc": ["body"], "msg": "invalid JSON body"}
+    ]
