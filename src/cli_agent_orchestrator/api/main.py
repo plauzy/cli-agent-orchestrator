@@ -2658,6 +2658,11 @@ async def agui_run(
     When ``resume[]`` is non-empty, ``cao:write`` is required (the caller is
     mutating interrupt state). Otherwise ``cao:read`` is the floor.
 
+    After a ``resume[]`` run, ``RUN_FINISHED`` with outcome ``success`` means
+    the decision was delivered to the terminal, not that the agent finished
+    its work. A later permission prompt arrives as an interrupt on the next
+    run.
+
     Returns 501 when the ``ag-ui-protocol`` package is not installed (the
     [agui] optional extra was not included at install time).
     Returns 404 when the AG-UI surface is disabled.
@@ -2709,18 +2714,6 @@ async def agui_run(
                 pass
         return build_dashboard_snapshot(sessions, terminals, list(_scopes))
 
-    # Build the bus subscription function
-    async def _bus_events():
-        from cli_agent_orchestrator.services.sse_bus import get_bus
-
-        sse_bus = get_bus()
-        sub = sse_bus.register(overflow_close=True)
-        try:
-            async for event in sse_bus.drain(sub):
-                yield event
-        finally:
-            sse_bus.unregister(sub)
-
     from fastapi.responses import StreamingResponse
 
     from cli_agent_orchestrator.services.agui.run_plane import (
@@ -2731,12 +2724,13 @@ async def agui_run(
     accept_header = request.headers.get("accept")
     content_type = get_run_plane_content_type(accept_header)
 
+    # No bus: the fleet SseBus never ends, and a stock AG-UI client completes a
+    # run only when the body ends. Live fleet activity is GET /agui/v1/stream.
     return StreamingResponse(
         run_plane_stream(
             input_data=body,
             approval_construct=approval_construct,
             snapshot_fn=_fleet_snapshot,
-            bus_subscribe_fn=_bus_events,
             accept=accept_header,
         ),
         media_type=content_type,
