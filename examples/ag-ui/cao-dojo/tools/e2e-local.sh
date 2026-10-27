@@ -111,12 +111,18 @@ stop_pid() {
 # shellcheck disable=SC2329 # called from cleanup, which the EXIT trap runs
 stop_private_tmux() {
   tmux kill-session -t "cao-$SESSION" 2>/dev/null || true
-  if [ -z "$(tmux ls 2>/dev/null)" ]; then
-    tpid="$(tmux display-message -p '#{pid}' 2>/dev/null || true)"
-    if [ -n "$tpid" ]; then stop_pid "$tpid" "the private tmux server"; fi
-  else
-    echo "e2e-local: warning: private tmux server still has sessions; left running" >&2
+  # Remove the socket dir only once the server is stopped; removing it under a
+  # live server would leave that server running and unreachable.
+  if [ -n "$(tmux ls 2>/dev/null)" ]; then
+    echo "e2e-local: warning: private tmux server still has sessions; left running in $TMUX_TMPDIR" >&2
+    return 0
   fi
+  tpid="$(tmux display-message -p '#{pid}' 2>/dev/null || true)"
+  if [ -z "$tpid" ]; then
+    echo "e2e-local: warning: could not read the private tmux server's pid; left $TMUX_TMPDIR in place" >&2
+    return 0
+  fi
+  stop_pid "$tpid" "the private tmux server"
   rm -rf "$TMUX_TMPDIR"
 }
 # A coding CLI's exit hooks can still write into its work dir after its session
