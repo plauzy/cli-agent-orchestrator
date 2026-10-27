@@ -10,8 +10,9 @@
       renders fleet state and the six allow-listed GENERATIVE_UI components;
     - renders approval_card with Approve and Reject buttons;
     - posts POST /agui/v1/run (Run_Transport: fetch-based SSE) to collect open
-      interrupts, and resumes one with resume: [{interruptId, payload}], where
-      payload is {approved: true} or {approved: false};
+      interrupts, and resumes one with
+      resume: [{interruptId, status: "resolved", payload}], where payload is
+      {approved: true} or {approved: false};
     - shows how each run ended: RUN_FINISHED (with its outcome) or RUN_ERROR.
 
   Security note: everything on the AG-UI wire is a named component + JSON props.

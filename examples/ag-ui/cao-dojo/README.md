@@ -98,14 +98,14 @@ pass it in the URL: `index.html?endpoint=http://127.0.0.1:9890`.
 
 ```bash
 (cd examples/ag-ui/cao-dojo/tools && npm install && npx playwright install chromium)
-CAO_HOME_DIR="$(mktemp -d)" TMUX_TMPDIR="$(mktemp -d)" \
-  examples/ag-ui/cao-dojo/tools/e2e-local.sh
+examples/ag-ui/cao-dojo/tools/e2e-local.sh
 ```
 
 It needs `cao`, `cao-server` (at #44 or later, with `[agui]`) and a logged-in `claude`
 on `PATH`, so it is not wired into CI. It refuses port 9889 and any port already in use.
-Setting `CAO_HOME_DIR` and `TMUX_TMPDIR` to fresh directories keeps the run out of your
-own CAO state and tmux server. `E2E_SHOT_DIR`, `E2E_VIDEO_DIR`, `E2E_CAPTION` and
+It is isolated by default: unless you set `CAO_HOME_DIR` or `TMUX_TMPDIR`, it uses a
+fresh CAO home (so the profile install never reaches your own store) and a private tmux
+server, and removes both on exit. `E2E_SHOT_DIR`, `E2E_VIDEO_DIR`, `E2E_CAPTION` and
 `E2E_HOLD_MS` record screenshots and video.
 
 ## Not in this page yet

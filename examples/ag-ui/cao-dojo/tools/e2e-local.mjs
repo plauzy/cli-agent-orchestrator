@@ -13,6 +13,8 @@
 //   PAGE_URL        the served index.html
 //   CAO_URL         the cao-server under test
 //   E2E_WORKDIR     the agent's work dir (approve/reject check the file there)
+//   E2E_INTERRUPT_ID  the open interrupt's id (approve/reject): its card must
+//                   arrive over the stream before the page posts any run
 //   E2E_VIDEO_DIR   opt-in: record a video of the page into this dir
 //   E2E_CAPTION     opt-in: caption drawn on the page, e.g. the CAO build
 //   E2E_SHOT_DIR    opt-in: save screenshots of each step into this dir
@@ -122,11 +124,19 @@ page.on("requestfinished", async (r) => {
       ? "RUN_FINISHED"
       : null;
   r._run.outcome = body.match(/"outcome":\{"type":"(\w+)"/)?.[1] ?? null;
+  r._run.body = body;
   r._run.end = Date.now();
 });
 page.on("requestfailed", (r) => {
   if (r._run) r._run.end = Date.now();
 });
+
+async function agentStatus() {
+  const res = await fetch(`${CAO_URL}/sessions/cao-dojo-demo/terminals`);
+  const [terminal] = await res.json();
+  return (await (await fetch(`${CAO_URL}/terminals/${terminal.id}`)).json())
+    .status;
+}
 
 async function runsSettled() {
   const deadline = Date.now() + SETTLE_MS;
@@ -192,8 +202,28 @@ try {
     await shot("3-run-error");
     await hold();
   } else {
-    // e2e-local.sh waits until the run plane reports the interrupt, so one
-    // run is enough; the card may also have arrived from the stream replay.
+    // FR-11.1: the card must come from the stream's GENERATIVE_UI frame, so
+    // wait for this interrupt's card before the page posts any run. Earlier
+    // phases' cards replay too, hence matching on the id e2e-local.sh probed.
+    const id = process.env.E2E_INTERRUPT_ID;
+    if (!check(Boolean(id), "E2E_INTERRUPT_ID is set"))
+      throw new Error("no id");
+    const card = page.locator(
+      `[data-testid="approval-card"][data-interrupt-id="${id}"]`,
+    );
+    const streamed = await card
+      .and(pending)
+      .waitFor({ timeout: SETTLE_MS })
+      .then(
+        () => true,
+        () => false,
+      );
+    if (!check(streamed, "the approval card arrived over the stream"))
+      throw new Error("no card");
+    check(runs.length === 0, "before the page posted any run");
+
+    // Then the run plane reports the same interrupt and the page settles any
+    // replayed cards, leaving this one as the only pending card.
     await prompt.fill("Is anything waiting for my approval?");
     await send.click();
     check(
@@ -204,19 +234,13 @@ try {
       runs[0]?.terminal === "RUN_FINISHED" && runs[0]?.outcome === "interrupt",
       "RUN_FINISHED with an interrupt outcome",
     );
-    const shown = await pending
-      .first()
-      .waitFor({ timeout: SETTLE_MS })
-      .then(
-        () => true,
-        () => false,
-      );
-    if (!check(shown, "the approval card appeared")) throw new Error("no card");
-    check((await pending.count()) === 1, "exactly one pending card");
-    // Pin the card by its interrupt id: once decided it no longer matches `pending`.
-    const id = await pending.first().getAttribute("data-interrupt-id");
-    const card = page.locator(
-      `[data-testid="approval-card"][data-interrupt-id="${id}"]`,
+    check(
+      Boolean(runs[0]?.body.includes(`"id":"${id}"`)),
+      "the run lists the same interrupt",
+    );
+    check(
+      (await pending.count()) === 1 && (await card.and(pending).count()) === 1,
+      "exactly one pending card, for that interrupt",
     );
     console.log(`${at()} card: ${JSON.stringify(await card.innerText())}`);
     check(
@@ -271,8 +295,15 @@ try {
         }
         check(found, `${FILE} exists and contains "${LINE}"`);
       } else {
-        // Give the agent time to act on the denial before checking for the file.
-        await sleep(10_000);
+        // Wait for the agent to finish its turn before checking nothing was written.
+        let done = false;
+        for (let i = 0; i < 120 && !done; i++) {
+          done = ["completed", "idle"].includes(
+            await agentStatus().catch(() => ""),
+          );
+          if (!done) await sleep(500);
+        }
+        check(done, "the agent finished its turn");
         check(!existsSync(file), `${FILE} was not created`);
       }
     }
