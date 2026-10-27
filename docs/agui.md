@@ -336,7 +336,11 @@ Human-in-the-loop approval lifecycle:
 - `pending()`: list of unresolved interrupts
 
 **Interrupt options** derive from the classified reason (permission_request gets
-approve/deny/edit; trust_prompt gets approve/deny).
+approve/deny/edit; trust_prompt gets approve/deny). `claude-code:permission_request`
+gets approve/deny only: Claude Code's permission dialog is a selector with no text
+field, so typed edit text cannot reach the agent. An `edit` decision on it is
+refused (422 on the REST route, `RUN_ERROR` on the run plane) before anything is
+typed, and the interrupt stays pending.
 
 ### Subclass extension points
 

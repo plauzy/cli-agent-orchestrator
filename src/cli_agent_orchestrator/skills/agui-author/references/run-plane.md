@@ -92,6 +92,8 @@ frame and pauses. The interrupt carries:
 {"decision": "edit", "edited_text": "modified command"}
 ```
 
+`edit` is offered only where the interrupt's `options` include it: `claude-code:permission_request` offers only approve and deny, and an `edit` decision on it is refused (422 on REST, `RUN_ERROR` on the run plane) before anything is typed, with the interrupt left pending.
+
 ### Error handling
 
 - Delivery failure → `RUN_ERROR` frame (retryable)
