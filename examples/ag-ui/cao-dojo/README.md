@@ -108,7 +108,6 @@ server, and removes both on exit. `E2E_SHOT_DIR`, `E2E_VIDEO_DIR`, `E2E_CAPTION`
 
 ## Not in this page yet
 
-- Replay mode (the embedded fixture) and the docs-site build under
-  `docusaurus/static/dojo/`.
+- A replay mode from a recorded trace, and a docs-site build.
 - A CI gate.
 - The "edit" option. CAO offers it, but this page sends only approve and reject.

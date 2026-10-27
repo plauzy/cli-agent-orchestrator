@@ -6,10 +6,10 @@
   Built from examples/ag-ui/ag-ui-eventsource-viewer/index.html, adding the
   answerable approval card described in #1109. No npm, no framework, no
   build step. It:
-    - opens an EventSource on GET /agui/v1/stream?since=… (Live_Transport) and
+    - opens an EventSource on GET /agui/v1/stream?since=… (the live stream) and
       renders fleet state and the six allow-listed GENERATIVE_UI components;
     - renders approval_card with Approve and Reject buttons;
-    - posts POST /agui/v1/run (Run_Transport: fetch-based SSE) to collect open
+    - posts POST /agui/v1/run (the run plane: fetch-based SSE) to collect open
       interrupts, and resumes one with
       resume: [{interruptId, status: "resolved", payload}], where payload is
       {approved: true} or {approved: false};
@@ -464,7 +464,7 @@
     while (els.log.children.length > 300) els.log.removeChild(els.log.lastChild);
   }
 
-  // Live_Transport: EventSource on GET /agui/v1/stream (named events).
+  // The live stream: EventSource on GET /agui/v1/stream (named events).
   function handleStream(type, ev) {
     var data;
     try { data = JSON.parse(ev.data); } catch (e) { data = {}; }
@@ -527,7 +527,7 @@
     setStatus("disconnected", "disconnected");
   }
 
-  // Run_Transport: fetch-based SSE over POST /agui/v1/run (data:-only frames).
+  // The run plane: fetch-based SSE over POST /agui/v1/run (data:-only frames).
   function addRunResult(terminal, outcome, detail) {
     dropEmpty(els.runs);
     var row = el("div", "run");
