@@ -19,15 +19,20 @@ the upstream-facing copy only — this directory correctly uses the kebab-case f
 
 ## Overview
 
-This plan delivers a CAO Dojo on the docs site: a single-file, `file://`-openable AG-UI page
-that replays a recorded fleet run and, later, connects live to a local `cao-server`.
+This plan delivers a CAO Dojo on the docs site: a single-file AG-UI page that connects live
+to a local `cao-server`, answers its approval cards, and replays a recorded fleet run.
 
-The work is split across four pull requests: **PR 1** — replay mode, the static page, and the
-CI gate; **PR 2** — live mode; **PR 3** — the demo agent plugin; **PR 4** — the blog post.
+The work is split across five pull requests: **PR 0** — live mode and the interactive
+approval card (FR-11), shipped first; **PR 1** — replay mode, the docs-site page, and the
+CI gate; **PR 2** — the rest of live mode on the docs-site page; **PR 3** — the demo agent
+plugin; **PR 4** — the blog post.
 
-**PR 1 is the immediate scope and depends on no unmerged pull request** (FR-9.3). PR 3 is
-gated on https://github.com/awslabs/cli-agent-orchestrator/pull/584, and PR 4 lands last so
-it links to a live page.
+**PR 0 is the immediate scope, and it depends on unmerged work**: the run-plane fix and the
+Claude Code 2.1.310 prompt detection in
+https://github.com/plauzy/cli-agent-orchestrator/pull/44. That breaks the sequencing FR-9.3
+assumed (see the note under FR-9 in `requirements.md`). PR 1 still depends on no unmerged
+pull request. PR 3 is gated on https://github.com/awslabs/cli-agent-orchestrator/pull/584,
+and PR 4 lands last so it links to a live page.
 
 ---
 
@@ -73,7 +78,46 @@ any environment without a full local CAO install, these tasks may be impossible.
 
 ## Tasks
 
-### PR 1 — replay mode, static page, CI gate  *(depends on no unmerged pull request, FR-9.3)*
+### PR 0 — live mode and the approval card  *(ships first; depends on https://github.com/plauzy/cli-agent-orchestrator/pull/44)*
+
+A standalone page under `examples/`, not yet wired into the docs site, so it needs no build
+step and no `docusaurus/` change. It reuses the Renderer source rather than starting over,
+so the work carries into PR 1.
+
+- [x] 0.1 Add FR-11, Run_Transport and Approval_Card to `requirements.md`, and reorder this
+      plan so live mode and the approval card ship first.
+      - _Requirements: FR-9, FR-11_
+
+- [x] 0.2 Write the local end-to-end check first, RED against a missing page:
+      `examples/ag-ui/cao-dojo/tools/e2e-local.{sh,mjs}`. It starts its own `cao-server`
+      and static server, launches the `dojo-approver` agent in a throwaway directory, and
+      drives the page in Playwright through approve (card, `RUN_FINISHED`, file written),
+      reject (card, `RUN_FINISHED`, no file) and none (`RUN_FINISHED`, no pending card;
+      an unknown interrupt shows `RUN_ERROR`). Local only: it needs a logged-in `claude`.
+      - _Requirements: FR-11.1-FR-11.5_
+
+- [x] 0.3 Build `examples/ag-ui/cao-dojo/index.html` from
+      `examples/ag-ui/ag-ui-eventsource-viewer/index.html`: Live_Transport with `?since=`
+      replay, Run_Transport, the Approval_Card with Approve and Reject posting
+      `resume[]`, and a run-results list showing `RUN_FINISHED` (with outcome) or
+      `RUN_ERROR`. Zero dependencies (NFR-1). Endpoint defaults to
+      `http://localhost:9889`.
+      - _Requirements: FR-2.1, FR-2.3, FR-11, NFR-1.1_
+
+- [x] 0.4 Write `examples/ag-ui/cao-dojo/README.md`: `CAO_AGUI_ENABLED`, the
+      `CAO_CORS_ORIGINS` entry for the page's origin (a `file://` page sends
+      `Origin: null` and the resume `POST` is refused), a throwaway working directory for
+      the agent, and teardown.
+      - _Requirements: FR-2.1, FR-8.1_
+
+- [ ] 0.5 Docs-site wiring: move the page into `docusaurus/dojo-src/` parts so
+      `docusaurus/static/dojo/` serves it. Not blocking PR 0; folded into PR 1 task 1.19.
+      - _Requirements: FR-1_
+
+Not in PR 0: replay mode, the docs-site build, a CI gate, the "edit" option, and removing
+the client-side allow-list mirror (task 1.9 applies to this page too).
+
+### PR 1 — replay mode, static page, CI gate  *(follow-up to PR 0; depends on no unmerged pull request, FR-9.3)*
 
 - [ ] 1.1 Add `/static/dojo/` to `docusaurus/.gitignore` in the build-output block
       alongside `/static/course/`, `/static/course-advanced/`, `/static/course-assets/` at
@@ -359,7 +403,7 @@ any environment without a full local CAO install, these tasks may be impossible.
 
 - [ ] 1.32 Checkpoint — ensure all tests pass, ask the user if questions arise.
 
-### PR 2 — live mode  *(no hard dependency, but better after PR 1 merges)*
+### PR 2 — live mode on the docs-site page  *(after PR 1; PR 0 already proves 2.1-2.3 on the standalone page)*
 
 - [ ] 2.1 Implement `openLive(endpoint, onFrame, onError)` in `modules/10-transport.html`
       against `http://localhost:9889/agui/v1/stream`, with an editable endpoint field used for
@@ -429,8 +473,11 @@ any environment without a full local CAO install, these tasks may be impossible.
 
 ## Sequencing and rationale
 
-PR 1 is self-contained and carries the whole demonstrable value. PR 2 adds the
-differentiator. PR 3 needs https://github.com/awslabs/cli-agent-orchestrator/pull/584. PR 4
+PR 0 ships first because it is the differentiator a reader can act on: a card raised by a
+real agent, answered from the browser, with the run reaching `RUN_FINISHED` either way. It
+waits on https://github.com/plauzy/cli-agent-orchestrator/pull/44. PR 1 is self-contained
+and adds replay, so the page works with no server. PR 2 ports live mode into the docs-site
+page. PR 3 needs https://github.com/awslabs/cli-agent-orchestrator/pull/584. PR 4
 lands last so it links to a live page instead of promising one.
 
 Within PR 1: `.gitignore` first so nothing dirties the tree; recorder capture (1.2) next, so
@@ -497,30 +544,32 @@ prerequisites named.
 ```json
 {
   "waves": [
-    { "id": 0, "tasks": ["1.1", "1.2", "1.8"] },
-    { "id": 1, "tasks": ["1.3", "1.9", "1.12", "1.13", "1.16"] },
-    { "id": 2, "tasks": ["1.4", "1.10", "1.14", "1.17"] },
-    { "id": 3, "tasks": ["1.5", "1.11", "1.15"] },
-    { "id": 4, "tasks": ["1.6", "1.18"] },
-    { "id": 5, "tasks": ["1.7"] },
-    { "id": 6, "tasks": ["1.19"] },
-    { "id": 7, "tasks": ["1.20"] },
-    { "id": 8, "tasks": ["1.21"] },
-    { "id": 9, "tasks": ["1.22"] },
-    { "id": 10, "tasks": ["1.23", "1.29"] },
-    { "id": 11, "tasks": ["1.24", "1.30"] },
-    { "id": 12, "tasks": ["1.25"] },
-    { "id": 13, "tasks": ["1.26"] },
-    { "id": 14, "tasks": ["1.27"] },
-    { "id": 15, "tasks": ["1.28"] },
-    { "id": 16, "tasks": ["1.31"] },
-    { "id": 17, "tasks": ["2.1", "2.2", "2.3"] },
-    { "id": 18, "tasks": ["2.4", "2.5"] },
-    { "id": 19, "tasks": ["3.1"] },
-    { "id": 20, "tasks": ["3.2", "3.3"] },
-    { "id": 21, "tasks": ["4.1", "4.2"] },
-    { "id": 22, "tasks": ["4.3"] },
-    { "id": 23, "tasks": ["4.4"] }
+    { "id": 0, "tasks": ["0.1", "0.2"] },
+    { "id": 1, "tasks": ["0.3", "0.4"] },
+    { "id": 2, "tasks": ["1.1", "1.2", "1.8"] },
+    { "id": 3, "tasks": ["1.3", "1.9", "1.12", "1.13", "1.16"] },
+    { "id": 4, "tasks": ["1.4", "1.10", "1.14", "1.17"] },
+    { "id": 5, "tasks": ["1.5", "1.11", "1.15"] },
+    { "id": 6, "tasks": ["1.6", "1.18"] },
+    { "id": 7, "tasks": ["1.7"] },
+    { "id": 8, "tasks": ["1.19"] },
+    { "id": 9, "tasks": ["1.20"] },
+    { "id": 10, "tasks": ["1.21"] },
+    { "id": 11, "tasks": ["1.22"] },
+    { "id": 12, "tasks": ["1.23", "1.29"] },
+    { "id": 13, "tasks": ["1.24", "1.30"] },
+    { "id": 14, "tasks": ["1.25"] },
+    { "id": 15, "tasks": ["1.26"] },
+    { "id": 16, "tasks": ["1.27"] },
+    { "id": 17, "tasks": ["1.28"] },
+    { "id": 18, "tasks": ["1.31"] },
+    { "id": 19, "tasks": ["2.1", "2.2", "2.3"] },
+    { "id": 20, "tasks": ["2.4", "2.5"] },
+    { "id": 21, "tasks": ["3.1"] },
+    { "id": 22, "tasks": ["3.2", "3.3"] },
+    { "id": 23, "tasks": ["4.1", "4.2"] },
+    { "id": 24, "tasks": ["4.3"] },
+    { "id": 25, "tasks": ["4.4"] }
   ]
 }
 ```

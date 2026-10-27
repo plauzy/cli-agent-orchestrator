@@ -34,9 +34,18 @@ added.
 - **Renderer**: the component-dispatch and state-application logic inside Dojo_Page,
   sourced from `examples/ag-ui/ag-ui-eventsource-viewer/index.html`.
 - **Transport**: the seam supplying AG-UI frames to Renderer. Two implementations exist:
-  Live_Transport and Replay_Transport.
+  Live_Transport and Replay_Transport. Run_Transport is the separate, write-capable
+  channel FR-11 adds beside them.
 - **Live_Transport**: an `EventSource` connection to a reader-supplied AG-UI endpoint,
   default `http://localhost:9889/agui/v1/stream`.
+- **Run_Transport**: a `fetch`-based SSE reader over `POST /agui/v1/run` on the same
+  endpoint. It sends a `RunAgentInput` (optionally with `resume[]`) and reads the
+  `data:`-only frames until `RUN_FINISHED` or `RUN_ERROR`. It is the only path by which the
+  page changes server state (FR-11).
+- **Approval_Card**: the `GENERATIVE_UI` frame with `component: "approval_card"` that
+  `services/agui/handoff_approval.py` emits when CAO opens an interrupt. Props:
+  `interrupt_id`, `reason`, `message` (always `""` under the metadata-only contract),
+  `options`, `provider`, `terminal_id`.
 - **Replay_Transport**: a paced player over Trace_Fixture, requiring no network.
 - **Trace_Fixture**: the NDJSON event trace committed under `docusaurus/dojo-src/fixtures/`,
   captured from a real recorded CAO run.
@@ -435,6 +444,15 @@ requirement is normative rather than advisory.
    replay-mode increment.
 3. THE replay-mode increment SHALL depend on no unmerged pull request.
 
+> **FR-11 breaks the sequencing FR-9.3 assumed.** The first increment to ship is now live
+> mode with the interactive Approval_Card (`tasks.md`, PR 0), and it **does** depend on
+> unmerged work: the run-plane fix in
+> [plauzy/cli-agent-orchestrator#44](https://github.com/plauzy/cli-agent-orchestrator/pull/44)
+> (without it `POST /agui/v1/run` can stay open and never reach `RUN_FINISHED`) and that
+> PR's Claude Code 2.1.310 permission-prompt detection (without it no real interrupt is
+> raised). FR-9.3 still holds for the replay-mode increment, which moves to the follow-up
+> PR; FR-9.1 and FR-9.2 are unchanged.
+
 #### FR-10 — Blog governance is a build gate, not a formality
 
 `docusaurus.config.ts` sets `onInlineAuthors: 'throw'` and `onInlineTags: 'throw'`.
@@ -457,6 +475,56 @@ explicitly permits.
    `docusaurus/blog/tags.yml` with a justification in the pull request description.
 4. WHEN `npm run build` runs in `docusaurus/`, THE build SHALL succeed, demonstrating
    author and tag registration are complete.
+
+#### FR-11 — Interactive approval via the run plane
+
+FR-2 makes live mode read-only: an `EventSource` on `/agui/v1/stream`. That shows an
+Approval_Card but cannot answer it, so the page demonstrates the least interesting half
+of the AG-UI surface. CAO's run plane already accepts the protocol's own answer:
+`POST /agui/v1/run` with `resume: [{interruptId, status, payload}]`, where `payload` is
+`{approved: true}`, `{approved: false}` or `{editedArgs: …}`
+(`services/agui/run_plane.py` `_map_resume_payload`). This requirement makes the card
+answerable through that path, with no CAO-specific endpoint.
+
+##### Acceptance Criteria
+
+1. WHEN a `GENERATIVE_UI` frame with `component: "approval_card"` arrives on
+   Live_Transport, THE Dojo_Page SHALL render an Approval_Card with an Approve and a
+   Reject control. WHEN a Run_Transport run finishes with outcome `interrupt`, THE
+   Dojo_Page SHALL render the same card, through the same renderer, for every listed
+   interrupt it is not already showing.
+2. WHEN the reader activates Approve or Reject, THE Run_Transport SHALL post
+   `POST /agui/v1/run` with `resume: [{interruptId, status: "resolved", payload}]`, where
+   `payload` is `{approved: true}` for Approve and `{approved: false}` for Reject. THE
+   Dojo_Page SHALL NOT call `POST /agui/v1/interrupts/{id}/resume`; that REST path remains
+   a debugging fallback only.
+3. WHEN a resume run is posted for a pending interrupt, THE run SHALL reach
+   `RUN_FINISHED`, and THE Dojo_Page SHALL show that terminal event and its outcome, for
+   both Approve and Reject.
+4. WHEN a run is posted with nothing pending, THE run SHALL reach `RUN_FINISHED` with
+   outcome `success`, and THE Dojo_Page SHALL show no pending card.
+5. IF a resume names an unknown interrupt or carries an ambiguous payload, THEN THE
+   Dojo_Page SHALL show `RUN_ERROR` with the server's message. IF the run stream closes
+   without `RUN_FINISHED` or `RUN_ERROR`, or fails at the HTTP layer, THEN THE Dojo_Page
+   SHALL show that as an error. THE Dojo_Page SHALL NOT wait indefinitely for any run.
+6. THE Dojo_Page SHALL render every Approval_Card prop as text only (`textContent`), and
+   SHALL show `reason`, `provider` and `terminal_id`. No prop SHALL be interpreted as
+   markup.
+7. THE Dojo_Page SHALL send state-changing requests only to the reader-supplied endpoint,
+   and only on an explicit reader action (Approve, Reject, or sending a run).
+
+**Notes.**
+- The page connects Live_Transport with `?since=` so a card raised before the page opened
+  is replayed from the server's ring buffer (verified against `f0bba5f2`).
+- `ResumeEntry.status` is required by the `ag-ui-protocol` model. A resume without it
+  fails validation before `RUN_STARTED`, and the run stream breaks instead of returning
+  `RUN_ERROR` (observed at `f0bba5f2`). The page always sends `status: "resolved"`; the
+  server-side gap is a follow-up for the run plane, not for this page.
+- The "edit" option is out of scope for the first increment.
+- The interactive page lives at `examples/ag-ui/cao-dojo/index.html`, copied from the
+  Renderer source. Until the replay follow-up extracts shared parts (task 1.19), the tree
+  holds two copies of the Renderer; release-gate criterion 8 ("exactly one copy") is met
+  only when that follow-up lands.
 
 ---
 
@@ -596,8 +664,9 @@ positives, while missing keys whose serialisation is split across lines.
 
 ## Acceptance criteria
 
-These are the release gates for the feature as a whole. Criteria 1, 3, 4, 5, 6, 7, and 8
-gate PR 1 (replay mode); criterion 2 gates PR 2 (live mode).
+These are the release gates for the feature as a whole. Criteria 2 and 11 gate PR 0 (live
+mode and the approval card), which now ships first; criteria 1, 3, 4, 5, 6, 7, and 8 gate
+PR 1 (replay mode).
 
 1. `cd docusaurus && npm run build` produces `static/dojo/index.html`; the page opens
    from `file://` and renders the fixture with no server running and no network access,
@@ -625,3 +694,7 @@ gate PR 1 (replay mode); criterion 2 gates PR 2 (live mode).
    Renderer exists in the tree.
 9. Replay mode and live mode ship as separate pull requests.
 10. CP-1 through CP-5 are implemented as property-based tests and pass.
+11. Against a real `cao-server` with a real agent at a permission prompt, Approve leads to
+    `RUN_FINISHED` and the agent's write happening, Reject leads to `RUN_FINISHED` and no
+    write, a run with nothing pending reaches `RUN_FINISHED`, and an unknown interrupt
+    yields `RUN_ERROR` (FR-11).
