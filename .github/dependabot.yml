@@ -47,6 +47,7 @@ updates:
       - "/cao_mcp_apps"
       - "/docusaurus"
       - "/examples/ag-ui/ag-ui-construct-demos/tools"
+      - "/examples/ag-ui/cao-dojo/tools"
       - "/examples/ag-ui/ag-ui-eventsource-viewer/tools"
       - "/examples/ag-ui/ag-ui-stock-client-live"
       - "/examples/agent-plugins/agent-plugins-dogfood/tools"
