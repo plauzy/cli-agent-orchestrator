@@ -2,13 +2,20 @@
 
 **Requirements:** `./requirements.md` · **Design:** `./design.md`
 
-Ported from `docs/issues/docsite-dojo/tasks.md`, whose four-PR split, sequencing rationale,
-riskiest-step callout, and definition of done are preserved. Two of its tasks contradicted
-the design and are corrected here — see **Corrections to the ported plan** below.
+Ported from `docs/issues/docsite-dojo/tasks.md` (removed; preserved at commit `b18eff6`),
+whose four-PR split, sequencing rationale, riskiest-step callout, and definition of done are
+preserved. Two of its tasks contradicted the design and are corrected here — see
+**Corrections to the ported plan** below.
 
 **Drop this file if the spec ships upstream, keeping a trimmed `design.md`.** Review on
 https://github.com/awslabs/cli-agent-orchestrator/pull/584 asked for planning artifacts to
-be removed from `docs/issues/`.
+be removed from `docs/issues/`. This spec now lives under `.kiro/`, which CAO gitignores
+wholesale (`.gitignore:56-59`) and which was force-added, so the `.kiro/` copy cannot ship
+upstream as-is: an upstream pull request would place a trimmed `design.md` under
+`docs/issues/<issue-number>-docsite-dojo/`, named for the tracking issue to match
+`345-okf-export-import` and `568-js-yaml-omap-dos`. That numbering convention applies to
+the upstream-facing copy only — this directory correctly uses the kebab-case feature name
+`cao-docsite-dojo`.
 
 ## Overview
 
