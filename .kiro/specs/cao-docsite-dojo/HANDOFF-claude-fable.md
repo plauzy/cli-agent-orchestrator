@@ -1,8 +1,10 @@
 # Handoff — spec hardening pass, Claude Code + Claude Fable 5
 
 **How to use:** clone `https://github.com/plauzy/cli-agent-orchestrator`, check out
-`spec/docsite-dojo` (currently `38d7b9a`), open Claude Code, select Fable 5 via `/model`
-(`claude-fable-5`), then paste everything below the `---`.
+`spec/docsite-dojo-claude-fable-review` — your own review branch — open Claude Code,
+select Fable 5 via `/model` (`claude-fable-5`), then paste everything below the `---`.
+Commit your findings and edits to that branch. The shared baseline both reviews are
+cut from is `spec/docsite-dojo`; diff against it to see exactly what you changed.
 
 **Why Fable for this:** the task is long-horizon and adversarial — read three interlocking
 documents, attack them, and hold consistency across all three while proposing changes.
@@ -31,7 +33,7 @@ edits.
 
 ## Where the spec is
 
-`.kiro/specs/cao-docsite-dojo/` on branch `spec/docsite-dojo`:
+`.kiro/specs/cao-docsite-dojo/` on the review branch named in the preamble:
 
 - `requirements.md` — FR-1..FR-10, NFR-1..NFR-3, CP-1..CP-5, EARS acceptance criteria
 - `design.md` — architecture, transport seam, Properties 1-9, alternatives, risks

@@ -1,8 +1,10 @@
 # Handoff — spec hardening pass, Gemini Pro
 
 **How to use:** clone `https://github.com/plauzy/cli-agent-orchestrator`, check out
-`spec/docsite-dojo` (currently `38d7b9a`), then paste everything below the `---` into
-Gemini Pro. If your session cannot read the repo directly, attach the three files from
+`spec/docsite-dojo-gemini-pro-review` — your own review branch — then paste everything
+below the `---` into Gemini Pro. Commit your findings and edits to that branch. The
+shared baseline both reviews are cut from is `spec/docsite-dojo`; diff against it to see exactly
+what you changed. If your session cannot read the repo directly, attach the three files from
 `.kiro/specs/cao-docsite-dojo/` (`requirements.md`, `design.md`, `tasks.md`) plus
 `examples/ag-ui/ag-ui-eventsource-viewer/index.html` and
 `docusaurus/course-src/build.sh` — those two source files are what the spec's factual
@@ -31,7 +33,7 @@ edits.
 
 ## Where the spec is
 
-`.kiro/specs/cao-docsite-dojo/` on branch `spec/docsite-dojo`:
+`.kiro/specs/cao-docsite-dojo/` on the review branch named in the preamble:
 
 - `requirements.md` — FR-1..FR-10, NFR-1..NFR-3, CP-1..CP-5, EARS acceptance criteria
 - `design.md` — architecture, transport seam, Properties 1-9, alternatives, risks
