@@ -1,11 +1,11 @@
 
  ▐▛███▛█   Claude Code v2.1.310                   
-▝▜██████▀  Haiku 5.5 · Claude Max
+▝▜██████▀  Haiku 5.5 · Claude Sub
  ▝▝   ▝▝   /home/user/project · /rc            
 
   ⎿  SessionStart:startup hook error                                                       
-  ⎿  Failed with non-blocking status code: cat: /home/user/.claude/plugins/synced/62b86c05-1221-40a0-b137-7254f0ede94a_
-     b15e8947-4576-4374-b28a-c4109f33dd82/3268d6cd-d5b5-4cb7-9194-106443c39d53/scripts/sta…                             
+  ⎿  Failed with non-blocking status code: cat: /home/user/.claude/plugins/synced/00000000-0000-4000-8000-000000000000_
+     00000000-0000-4000-8000-000000000001/00000000-0000-4000-8000-000000000002/scripts/sta…                             
 
 ❯ Run the bash command: echo hi                                                                                         
 
