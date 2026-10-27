@@ -337,8 +337,9 @@ verifies the exact parsed bytes against the registry profile_sha256 on every
 load (`load_launch_profile` in `utils/agent_profiles.py` (#1063)), including the claim-less preflight and
 provider reloads (`providers/claude_code.py:404`, `providers/codex.py:1590`,
 `providers/codex.py:2143`). Missing hashes and modified bytes refuse before parsing.
-Finalize still replaces the file before updating the registry hash; a concurrent
-load can transiently refuse a mismatched pair. It cannot parse unverified bytes.
+With E2, finalize updates the registry hash under the claim guard and replaces the
+file inside the same transaction; a concurrent load can transiently refuse the
+mismatched pair until the commit. It cannot parse unverified bytes.
 The fixed generated shape is not tamper-proof against edits to both file and
 registry by the same OS user, and neither path is a privilege boundary.
 

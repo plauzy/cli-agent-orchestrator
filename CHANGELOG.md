@@ -152,6 +152,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Ephemeral agents (#801) accept an explicit `effort` and apply `ephemeral.default_effort` and `ephemeral.max_effort` (Claude Code `--effort`, Codex `model_reasoning_effort`).
+
+- Ephemeral agents (#801) accept an explicit `model_tier` and apply `ephemeral.default_tier`, `ephemeral.max_tier` and the top-level `model_tiers` table at create, and again at claim. `auto` still refuses.
+
 - `examples/decision-model-host`: hosts the open-weight JevK5-4B decision model behind
   a loopback-only `/v1/systemone` API. Locally, it uses llama.cpp, with Metal or the CPU.
   On AWS, a CDK stack creates a single GPU instance with no IAM resources. Its services
@@ -251,10 +255,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retained. There is no background sweep, so keep the feature disabled outside testing.
   The live files and archive can be deleted by exact path while no ephemeral
   terminal exists. Reserved names also refuse remote placement with
-  `remote_placement_not_allowed`. Explicit tiers and efforts temporarily refuse
-  with `tier_not_supported` / `effort_not_supported`; `auto` requires the decision
-  platform. Tier and effort policy keys are not applied yet, so `max_tier` sets
-  no ceiling.
+  `remote_placement_not_allowed`. `auto` still requires the decision platform.
 - Advanced CodeQL analysis for same-repository and fork pull requests, with
   Python, JavaScript/TypeScript, GitHub Actions, and Rust coverage, plus `main`,
   weekly, and manual scans. CI workflow definitions and their `CODEOWNERS`
@@ -1017,6 +1018,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of spinning on a cancelled task and never exiting (#823)
 
 ### Changed
+
+- Ephemeral settings (#801): `ephemeral.max_tier`, `default_tier`, `max_effort`, `default_effort` and the `model_tiers` table are now validated, not ignored with a warning. A ceiling without a default, an invalid value, or a table missing a required mapping refuses every ephemeral create and claim with `policy_config_error:<key>`. Explicit `model_tier` and `effort` no longer refuse with `tier_not_supported`/`effort_not_supported`, and the 'not applied yet' notes and create warning are removed.
 
 - A plain (non-Git) directory is now an approvable plan, keyed by its canonical path.
 
