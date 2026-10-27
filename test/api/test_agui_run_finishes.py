@@ -167,6 +167,13 @@ async def test_empty_or_non_json_body_is_rejected_with_422(construct, raw):
 
     assert resp.status_code == 422
     assert resp.headers["content-type"].startswith("application/json")
+    with pytest.raises(ValueError) as decode_error:
+        json.loads(raw)
     assert resp.json()["detail"] == [
-        {"type": "json_invalid", "loc": ["body"], "msg": "invalid JSON body"}
+        {
+            "type": "json_invalid",
+            "loc": ["body"],
+            "msg": "invalid JSON body",
+            "ctx": {"error": str(decode_error.value)},
+        }
     ]

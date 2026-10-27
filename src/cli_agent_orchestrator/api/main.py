@@ -2688,9 +2688,16 @@ async def agui_run(
     # ValueError); answer 422 json_invalid as FastAPI Body() routes do, not 500.
     try:
         body = await request.json()
-    except ValueError:
+    except ValueError as e:
         raise RequestValidationError(
-            [{"type": "json_invalid", "loc": ("body",), "msg": "invalid JSON body"}]
+            [
+                {
+                    "type": "json_invalid",
+                    "loc": ("body",),
+                    "msg": "invalid JSON body",
+                    "ctx": {"error": str(e)},
+                }
+            ]
         )
 
     # Validate before streaming. run_plane_stream builds RunAgentInput inside the
