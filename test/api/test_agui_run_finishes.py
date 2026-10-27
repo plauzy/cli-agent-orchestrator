@@ -118,3 +118,37 @@ async def test_run_ends_with_remaining_interrupt_after_partial_resume(construct)
     assert frames[-1]["type"] == "RUN_FINISHED"
     assert frames[-1]["outcome"]["type"] == "interrupt"
     assert [i["id"] for i in frames[-1]["outcome"]["interrupts"]] == [second.id]
+
+
+@pytest.mark.asyncio
+async def test_resume_entry_without_status_is_rejected_with_422(construct):
+    # AG-UI 1.0 requires `status` on every resume entry. The body must be rejected
+    # before the stream starts, not end an already-sent 200 with no frames.
+    interrupt = construct.on_provider_waiting("t-1", "claude_code", _WAITING_PROMPT)
+    entry = {"interruptId": interrupt.id, "payload": {"approved": True}}
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as http:
+        resp = await asyncio.wait_for(
+            http.post("/agui/v1/run", json=_body(resume=[entry])),
+            timeout=RUN_DEADLINE_SECONDS,
+        )
+
+    assert resp.status_code == 422
+    assert resp.headers["content-type"].startswith("application/json")
+    locs = [tuple(err["loc"]) for err in resp.json()["detail"]]
+    assert ("body", "resume", 0, "status") in locs
+    assert not construct.get_interrupt(interrupt.id).resolved
+
+
+@pytest.mark.asyncio
+async def test_resume_entry_with_status_still_streams_to_run_finished(construct):
+    interrupt = construct.on_provider_waiting("t-1", "claude_code", _WAITING_PROMPT)
+    entry = {"interruptId": interrupt.id, "status": "resolved", "payload": {"approved": True}}
+
+    frames = await _post_run(_body(resume=[entry]))
+
+    assert construct.get_interrupt(interrupt.id).resolved
+    assert [f["type"] for f in frames][0] == "RUN_STARTED"
+    assert frames[-1]["type"] == "RUN_FINISHED"
+    assert frames[-1]["outcome"]["type"] == "success"

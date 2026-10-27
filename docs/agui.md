@@ -253,7 +253,10 @@ receives a lifecycle-legal stream: `RUN_STARTED`, then `STATE_SNAPSHOT`, then
 `RUN_ERROR`), because a stock AG-UI client completes a run only when the body
 ends. If open approval interrupts exist, the outcome is
 `{type: "interrupt", interrupts: [...]}`, and the client re-POSTs with a
-`resume[]` array to resolve them. Once `resume[]` is delivered and nothing is
+`resume[]` array to resolve them. Each entry is
+`{interruptId, status: "resolved" | "cancelled", payload: {approved: bool} | {editedArgs}}`;
+`status` is required, `cancelled` is treated as a deny, and a body that is not a
+valid `RunAgentInput` is rejected with HTTP 422 before the stream starts. Once `resume[]` is delivered and nothing is
 left pending, the outcome is `{type: "success"}`. That means the decision
 reached the agent, not that the agent finished. If the agent prompts again, the
 next run returns the new interrupt. `messages[]` is not read. Live fleet

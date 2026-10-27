@@ -50,6 +50,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ValidationError,
     ValidationInfo,
     field_validator,
     model_validator,
@@ -2666,6 +2667,7 @@ async def agui_run(
     Returns 501 when the ``ag-ui-protocol`` package is not installed (the
     [agui] optional extra was not included at install time).
     Returns 404 when the AG-UI surface is disabled.
+    Returns 422 when the body is not a valid ``RunAgentInput``.
     """
     _require_agui_enabled()
 
@@ -2684,6 +2686,19 @@ async def agui_run(
 
     # Parse the body
     body = await request.json()
+
+    # Validate before streaming. run_plane_stream builds RunAgentInput inside the
+    # generator, after the 200 has been sent, so an invalid body (for example a
+    # resume[] entry without `status`) would end the stream before RUN_STARTED with
+    # no RUN_ERROR and no 4xx. Reject it here with FastAPI's standard 422 shape.
+    from cli_agent_orchestrator.services.agui.run_plane import RunAgentInput
+
+    try:
+        RunAgentInput.model_validate(body)
+    except ValidationError as e:
+        raise RequestValidationError(
+            [{**err, "loc": ("body", *err["loc"])} for err in e.errors(include_url=False)]
+        )
 
     # Scope escalation: if resume[] is non-empty, require cao:write
     resume_entries = body.get("resume") or []
