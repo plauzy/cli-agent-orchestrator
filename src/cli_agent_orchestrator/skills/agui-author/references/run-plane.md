@@ -10,12 +10,18 @@ POST /agui/v1/run
 Content-Type: application/json
 
 {
-  "agent_id": "<agent_profile>",
-  "session_id": "<optional session name>",
-  "input": "<task prompt>",
-  "resume": [{"interrupt_id": "...", "value": {...}}]
+  "threadId": "<thread id>",
+  "runId": "<run id>",
+  "messages": [],
+  "resume": [{"interruptId": "...", "status": "resolved", "payload": {"approved": true}}]
 }
 ```
+
+`threadId`, `runId` and `messages` are required (an empty `messages` array is
+valid; it is not read). `resume[]` is optional. Each entry needs `interruptId`,
+`status` (`resolved` or `cancelled`, where `cancelled` is a deny) and a
+`payload` of `{"approved": true|false}` or `{"editedArgs": "..."}`. A body that
+is not a valid `RunAgentInput` gets HTTP 422 before the stream starts.
 
 **Requires:** `CAO_AGUI_ENABLED=true`
 
@@ -31,6 +37,7 @@ stock AG-UI client completes a run only when the body ends):
 | `resume[]` delivered, nothing left pending | `RUN_STARTED`, `STATE_SNAPSHOT`, `RUN_FINISHED` (`outcome: success`) |
 | `resume[]` delivered, other interrupts still pending | `RUN_STARTED`, `STATE_SNAPSHOT`, `RUN_FINISHED` (`outcome: interrupt`, the remaining ones) |
 | Resume failed (unknown id, bad payload, delivery failure) | `RUN_STARTED`, `RUN_ERROR` |
+| `resume[]` sent, but the server has no approval bridge | HTTP 404 "Approval bridge not initialized", no stream |
 
 A `success` after `resume[]` means the decision was delivered, not that the
 agent finished its work. If the agent prompts again, the next run returns that
@@ -89,7 +96,10 @@ interrupt carries:
 **Via the run plane:** Include `resume` in a new `POST /agui/v1/run` request:
 ```json
 {
-  "resume": [{"interrupt_id": "abc123", "value": {"approved": true}}]
+  "threadId": "t1",
+  "runId": "r1",
+  "messages": [],
+  "resume": [{"interruptId": "abc123", "status": "resolved", "payload": {"approved": true}}]
 }
 ```
 
@@ -103,7 +113,11 @@ interrupt carries:
 ### Error handling
 
 - Delivery failure → `RUN_ERROR` frame (retryable)
-- Expired interrupt (terminal moved on) → `RUN_FINISHED` with `outcome: expired`
+- Expired interrupt (terminal moved on) → the interrupt is already resolved, so
+  the entry is skipped like a repeat resume and the run ends with `RUN_FINISHED`
+  (`success`, or `interrupt` if others are pending). There is no `expired`
+  outcome. After the resolved record ages out (5 minutes), the id is unknown and
+  the run ends with `RUN_ERROR`.
 - Surface disabled → HTTP 404 (not 403)
 
 ## Replay Contract

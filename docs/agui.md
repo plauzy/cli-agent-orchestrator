@@ -247,7 +247,8 @@ The **run plane** is the `POST /agui/v1/run` endpoint. It speaks the stock
 `EventEncoder`. This is what CopilotKit, the AG-UI Dojo, and other stock AG-UI
 clients expect.
 
-A client POSTs a `RunAgentInput` (threadId, runId, optional resume[]) and
+A client POSTs a `RunAgentInput` (required: `threadId`, `runId` and `messages`,
+where an empty array is valid; optional: `resume[]`) and
 receives a lifecycle-legal stream: `RUN_STARTED`, then `STATE_SNAPSHOT`, then
 `RUN_FINISHED`. The response body ends right after `RUN_FINISHED` (or
 `RUN_ERROR`), because a stock AG-UI client completes a run only when the body
@@ -256,7 +257,10 @@ ends. If open approval interrupts exist, the outcome is
 `resume[]` array to resolve them. Each entry is
 `{interruptId, status: "resolved" | "cancelled", payload: {approved: bool} | {editedArgs}}`;
 `status` is required, `cancelled` is treated as a deny, and a body that is not a
-valid `RunAgentInput` is rejected with HTTP 422 before the stream starts. Once `resume[]` is delivered and nothing is
+valid `RunAgentInput` is rejected with HTTP 422 before the stream starts. A
+non-empty `resume[]` gets HTTP 404 when the server has no approval bridge (the
+AG-UI surface was off when it started), as `POST /agui/v1/interrupts/{id}/resume`
+does. Once `resume[]` is delivered and nothing is
 left pending, the outcome is `{type: "success"}`. That means the decision
 reached the agent, not that the agent finished. If the agent prompts again, the
 next run returns the new interrupt. `messages[]` is not read. Live fleet
