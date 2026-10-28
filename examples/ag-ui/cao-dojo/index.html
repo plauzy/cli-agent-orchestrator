@@ -499,7 +499,15 @@
   function handleStream(type, ev) {
     var data;
     try { data = JSON.parse(ev.data); } catch (e) { data = {}; }
-    var id = ev.lastEventId || data.event_id;
+    // Dedupe record frames on their id (the SSE `id:` line or the payload's
+    // event_id), which absorbs the reconnect replay overlap. Never
+    // STATE_SNAPSHOT / STATE_DELTA: cao-server sends these per connection with
+    // no `id:` line and never replays them, so they cannot be duplicates.
+    // EventSource keeps lastEventId across events and reconnects, so deduping
+    // them on it would drop every snapshot after a reconnect and every delta
+    // that follows a record.
+    var stateFrame = type === "STATE_SNAPSHOT" || type === "STATE_DELTA";
+    var id = stateFrame ? null : ev.lastEventId || data.event_id;
     if (id) {
       if (seenIds.has(id)) return;
       seenIds.add(id);

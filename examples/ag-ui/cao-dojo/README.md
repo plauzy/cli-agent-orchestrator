@@ -105,8 +105,9 @@ On either, or on `RUN_ERROR`, a card you just answered goes back to pending.
   page's own state handling: pending cards survive the 40-card cap, a card answered
   with no endpoint goes back to pending, an answered card stays answered when a
   reconnect replays it, a patch with a failing op changes nothing, a new connection
-  clears the old server's state, a non-finite progress value is not shown, and a
-  transient stream error reads "reconnecting". Run it alone with
+  clears the old server's state, a non-finite progress value is not shown, a
+  transient stream error reads "reconnecting", and fleet snapshots and deltas still
+  apply after a reconnect while a re-sent record is dropped. Run it alone with
   `node examples/ag-ui/cao-dojo/tools/e2e-local.mjs page`;
 
 - **approve**: the card appears, Approve posts the resume, the run ends `RUN_FINISHED`
