@@ -8,9 +8,11 @@
 //   node e2e-local.mjs reject    card appears; Reject leaves no file
 //   node e2e-local.mjs none      nothing pending: the run still finishes, no
 //                                pending card; an unknown interrupt is RUN_ERROR
+//   node e2e-local.mjs page      no server: the page's own state handling, with a
+//                                scripted EventSource and a stubbed run
 //
 // Environment (e2e-local.sh sets these):
-//   PAGE_URL        the served index.html
+//   PAGE_URL        the served index.html (not used by the page phase)
 //   CAO_URL         the cao-server under test
 //   E2E_WORKDIR     the agent's work dir (approve/reject check the file there)
 //   E2E_INTERRUPT_ID  the open interrupt's id (approve/reject): its card must
@@ -21,7 +23,8 @@
 //   E2E_HOLD_MS     opt-in: pause this long on the card and on the result, so a
 //                   recording is watchable
 import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 let chromium;
 try {
@@ -35,10 +38,11 @@ try {
 }
 
 const phase = process.argv[2];
-if (!["approve", "reject", "none"].includes(phase)) {
-  console.error("usage: node e2e-local.mjs <approve|reject|none>");
+if (!["approve", "reject", "none", "page"].includes(phase)) {
+  console.error("usage: node e2e-local.mjs <approve|reject|none|page>");
   process.exit(2);
 }
+if (phase === "page") process.exit(await pagePhase());
 const PAGE_URL = process.env.PAGE_URL;
 const CAO_URL = process.env.CAO_URL;
 if (!PAGE_URL || !CAO_URL) {
@@ -64,6 +68,7 @@ const hold = () => sleep(Number(process.env.E2E_HOLD_MS ?? 0));
 
 const browser = await chromium.launch();
 const videoDir = process.env.E2E_VIDEO_DIR;
+if (videoDir) mkdirSync(videoDir, { recursive: true });
 const context = await browser.newContext({
   viewport: { width: 1280, height: 800 },
   ...(videoDir
@@ -138,10 +143,11 @@ async function agentStatus() {
     .status;
 }
 
-async function runsSettled() {
+// Wait until at least `count` runs were posted and every one of them ended.
+async function runsSettled(count) {
   const deadline = Date.now() + SETTLE_MS;
   while (Date.now() < deadline) {
-    if (runs.length > 0 && runs.every((r) => r.end)) return true;
+    if (runs.length >= count && runs.every((r) => r.end)) return true;
     await sleep(250);
   }
   return false;
@@ -164,7 +170,7 @@ try {
   if (phase === "none") {
     await prompt.fill("Is anything waiting for my approval?");
     await send.click();
-    check(await runsSettled(), `the run ended within ${SETTLE_MS / 1000}s`);
+    check(await runsSettled(1), `the run ended within ${SETTLE_MS / 1000}s`);
     check(
       runs.length === 1 &&
         runs[0].terminal === "RUN_FINISHED" &&
@@ -186,7 +192,7 @@ try {
         approved: true,
       }),
     );
-    check(await runsSettled(), "the unknown-interrupt run ended");
+    check(await runsSettled(2), "the unknown-interrupt run ended");
     check(
       runs[1]?.terminal === "RUN_ERROR",
       "an unknown interrupt yields RUN_ERROR",
@@ -227,7 +233,7 @@ try {
     await prompt.fill("Is anything waiting for my approval?");
     await send.click();
     check(
-      await runsSettled(),
+      await runsSettled(1),
       `the collecting run ended within ${SETTLE_MS / 1000}s`,
     );
     check(
@@ -257,7 +263,7 @@ try {
       .getByTestId(phase === "approve" ? "approval-approve" : "approval-reject")
       .click();
     check(
-      await runsSettled(),
+      await runsSettled(decideAt + 1),
       `the resumed run ended within ${SETTLE_MS / 1000}s`,
     );
     const resumed = runs[decideAt];
@@ -341,3 +347,174 @@ console.log(
   failures.length ? `FAIL ${phase} (${failures.length})` : `PASS ${phase}`,
 );
 process.exit(failures.length ? 1 : 0);
+
+// The page phase: no cao-server, no agent. The page is served from a fake
+// origin, EventSource is replaced by a scripted one, and POST /agui/v1/run is
+// answered with a canned SSE body.
+async function pagePhase() {
+  const origin = "http://dojo.test";
+  const base = "http://cao.test";
+  const html = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "index.html"),
+    "utf8",
+  );
+  const failed = [];
+  const expect = (ok, what) => {
+    console.log(`${ok ? "PASS" : "FAIL"} page: ${what}`);
+    if (!ok) failed.push(what);
+  };
+  const browser = await chromium.launch();
+  const page = await browser.newPage();
+  await page.addInitScript(() => {
+    class FakeEventSource {
+      constructor(url) {
+        this.url = url;
+        this.readyState = 0;
+        this.listeners = {};
+        window.__es = this;
+        (window.__esAll = window.__esAll || []).push(this);
+      }
+      addEventListener(type, fn) {
+        (this.listeners[type] = this.listeners[type] || []).push(fn);
+      }
+      close() {
+        this.readyState = 2;
+      }
+      open() {
+        this.readyState = 1;
+        if (this.onopen) this.onopen({});
+      }
+      emit(type, data, id) {
+        const ev = { data: typeof data === "string" ? data : JSON.stringify(data), lastEventId: id || "" };
+        (this.listeners[type] || []).forEach((fn) => fn(ev));
+      }
+      fail(readyState) {
+        this.readyState = readyState;
+        if (this.onerror) this.onerror({});
+      }
+    }
+    FakeEventSource.CONNECTING = 0;
+    FakeEventSource.OPEN = 1;
+    FakeEventSource.CLOSED = 2;
+    window.EventSource = FakeEventSource;
+  });
+  await page.route(`${origin}/**`, (route) =>
+    route.fulfill({ contentType: "text/html", body: html }),
+  );
+  const finished = (outcome) =>
+    `data: ${JSON.stringify({ type: "RUN_STARTED" })}\n\n` +
+    `data: ${JSON.stringify({ type: "RUN_FINISHED", outcome })}\n\n`;
+  let runBody = finished({ type: "success" });
+  const cors = {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
+    "Access-Control-Allow-Methods": "POST",
+  };
+  await page.route("http://*.test/agui/v1/run", (route) =>
+    route.request().method() === "OPTIONS"
+      ? route.fulfill({ status: 204, headers: cors })
+      : route.fulfill({
+          status: 200,
+          contentType: "text/event-stream",
+          headers: cors,
+          body: runBody,
+        }),
+  );
+  const card = (id) => ({
+    component: "approval_card",
+    props: { interrupt_id: id, reason: "claude-code:permission_request", options: ["approve", "reject"] },
+  });
+  const stateOf = (id) =>
+    page
+      .locator(`[data-testid="approval-card"][data-interrupt-id="${id}"]`)
+      .getAttribute("data-state", { timeout: 2_000 })
+      .catch(() => null);
+  const connect = async (url = base) => {
+    if (await page.locator("#connect").isDisabled()) await page.locator("#disconnect").click();
+    await page.locator("#endpoint").fill(url);
+    await page.locator("#connect").click();
+    await page.evaluate(() => window.__es.open());
+  };
+  const emit = (type, data, id) =>
+    page.evaluate(([t, d, i]) => window.__es.emit(t, d, i), [type, data, id]);
+
+  try {
+    await page.goto(`${origin}/index.html`);
+    await connect();
+
+    // 1. The 40-card cap never prunes a pending card.
+    await emit("GENERATIVE_UI", card("keep-me"), "e1");
+    for (let i = 0; i < 45; i++) {
+      await emit("GENERATIVE_UI", { component: "metric", props: { label: "m" + i, value: i } }, "m" + i);
+    }
+    expect((await stateOf("keep-me")) === "pending", "a pending card survives the 40-item cap");
+
+    // 2. Deciding with no base URL puts the card back to pending.
+    await page.locator("#endpoint").fill("");
+    await page
+      .locator('[data-interrupt-id="keep-me"] [data-testid="approval-approve"]')
+      .click();
+    expect((await stateOf("keep-me")) === "pending", "an empty base URL leaves the card pending, not sending");
+    expect(
+      await page
+        .locator('[data-interrupt-id="keep-me"] [data-testid="approval-approve"]')
+        .isEnabled(),
+      "its buttons are enabled again",
+    );
+
+    // 3. A resolved card stays resolved when a reconnect replays its frame.
+    await connect();
+    await emit("GENERATIVE_UI", card("done-1"), "d1");
+    runBody = finished({ type: "success" });
+    await page
+      .locator('[data-interrupt-id="done-1"] [data-testid="approval-approve"]')
+      .click();
+    expect(
+      await page
+        .locator('[data-interrupt-id="done-1"][data-state="approved"]')
+        .waitFor({ timeout: 5_000 })
+        .then(() => true, () => false),
+      "a stubbed RUN_FINISHED marks the card approved",
+    );
+    await connect();
+    await emit("GENERATIVE_UI", card("done-1"), "d1");
+    await emit("GENERATIVE_UI", card("done-1"), "d1-again");
+    const replayed = await stateOf("done-1");
+    expect(replayed !== null && replayed !== "pending", `a replayed resolved card is not pending (got ${replayed})`);
+
+    // 4. A STATE_DELTA with one bad op changes nothing.
+    await emit("STATE_SNAPSHOT", { snapshot: { sessions: [{ name: "s1", status: "idle" }], terminals: [] } }, "s1");
+    await emit("STATE_DELTA", {
+      delta: [
+        { op: "replace", path: "/sessions/0/status", value: "processing" },
+        { op: "remove", path: "/nope/missing" },
+      ],
+    }, "s2");
+    expect(
+      (await page.locator("#fleet .fleet-session .chip").first().innerText()) === "idle",
+      "a patch with a failing op leaves the fleet state unchanged",
+    );
+
+    // 5. Switching servers clears the old server's fleet and cards.
+    await connect("http://other.test");
+    expect((await page.locator("#fleet .fleet-session").count()) === 0, "connect() clears the fleet panel");
+    expect((await page.locator('[data-testid="approval-card"]').count()) === 0, "connect() clears the cards");
+
+    // 6. A non-finite progress value never renders "NaN%" or "Infinity%".
+    await emit("GENERATIVE_UI", '{"component":"progress","props":{"label":"p","value":1e999}}', "p1");
+    const progress = await page.locator("#components").innerText();
+    expect(!/NaN%|Infinity%/.test(progress), "a non-finite progress value is not shown as a percentage");
+
+    // 7. A transient error after the stream opened says reconnecting.
+    await emit("STATE_SNAPSHOT", { snapshot: { sessions: [], terminals: [] } }, "x1");
+    await page.evaluate(() => window.__es.fail(0));
+    const status = await page.locator("#statusText").innerText();
+    expect(/reconnecting/i.test(status) && !/no CAO server/.test(status), `a transient error shows reconnecting (got "${status}")`);
+  } catch (error) {
+    expect(false, `driver error: ${error.message.split("\n")[0]}`);
+  } finally {
+    await browser.close().catch(() => {});
+  }
+  console.log(failed.length ? `FAIL page (${failed.length})` : "PASS page");
+  return failed.length ? 1 : 0;
+}

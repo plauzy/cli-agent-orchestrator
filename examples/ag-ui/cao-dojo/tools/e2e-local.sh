@@ -39,7 +39,7 @@ PROFILE_FILE="$PAGE_DIR/dojo-approver.md"
 CAO_PORT="${CAO_PORT:-9890}"
 PAGE_PORT="${PAGE_PORT:-8790}"
 CAO_URL="http://127.0.0.1:$CAO_PORT"
-PAGE_ORIGIN="http://localhost:$PAGE_PORT"
+PAGE_ORIGIN="http://127.0.0.1:$PAGE_PORT"
 SESSION="dojo-demo" # cao prefixes it, so tmux shows "cao-dojo-demo"
 TMP_ROOT="${TMPDIR:-/tmp}"
 TMP_ROOT="${TMP_ROOT%/}"
@@ -55,7 +55,6 @@ if [ -z "${TMUX_TMPDIR:-}" ]; then
   OWN_TMUX=1
 fi
 export CAO_HOME_DIR TMUX_TMPDIR
-PROBE='{"threadId":"e2e-local","runId":"probe","state":{},"messages":[],"tools":[],"context":[],"forwardedProps":{}}'
 
 export CAO_API_HOST=127.0.0.1 CAO_API_PORT="$CAO_PORT"
 
@@ -95,7 +94,8 @@ cleanup() {
   if [ -n "$OWN_HOME" ]; then rm -rf "$CAO_HOME_DIR"; fi
   if [ "$status" -eq 0 ]; then rm -rf "$LOG_DIR"; else echo "e2e-local: logs kept in $LOG_DIR" >&2; fi
 }
-# Signal a pid this script started and wait for it to exit.
+# Signal a pid this script started and wait for it to exit; after a 30 s
+# grace period, SIGKILL that same pid. Never by name or pattern.
 # shellcheck disable=SC2329 # called from cleanup, which the EXIT trap runs
 stop_pid() {
   kill "$1" 2>/dev/null || return 0
@@ -104,7 +104,11 @@ stop_pid() {
     i=$((i + 1))
     sleep 1
   done
-  if kill -0 "$1" 2>/dev/null; then echo "e2e-local: warning: $2 (pid $1) did not exit" >&2; fi
+  kill -0 "$1" 2>/dev/null || return 0
+  echo "e2e-local: warning: $2 (pid $1) did not exit after 30s; sending SIGKILL" >&2
+  kill -9 "$1" 2>/dev/null || true
+  sleep 1
+  if kill -0 "$1" 2>/dev/null; then echo "e2e-local: warning: $2 (pid $1) still running" >&2; fi
 }
 # cao-server starts the private tmux server with exit-empty off, so it outlives
 # its last session. Stop it by pid, asked of that private socket only.
@@ -172,9 +176,33 @@ until curl -fsS -m 2 -o /dev/null "$PAGE_ORIGIN/index.html"; do
   sleep 0.5
 done
 
+# Each probe is its own run, with a fresh runId.
 run_probe() {
+  probe="$(printf '{"threadId":"e2e-local","runId":"probe-%s-%s","state":{},"messages":[],"tools":[],"context":[],"forwardedProps":{}}' "$$" "$(date +%s)$RANDOM")"
   curl -s -m 5 -X POST "$CAO_URL/agui/v1/run" -H 'Content-Type: application/json' \
-    -H 'Accept: text/event-stream' -d "$PROBE" || true
+    -H 'Accept: text/event-stream' -d "$probe" || true
+}
+# The first open interrupt's id from a probe's SSE body, read as JSON so key
+# order does not matter.
+first_interrupt_id() {
+  python3 -c '
+import json, sys
+for line in sys.stdin:
+    if not line.startswith("data:"):
+        continue
+    try:
+        frame = json.loads(line[5:])
+    except ValueError:
+        continue
+    if not isinstance(frame, dict) or frame.get("type") != "RUN_FINISHED":
+        continue
+    outcome = frame.get("outcome") or {}
+    if outcome.get("type") == "interrupt":
+        for intr in outcome.get("interrupts") or []:
+            if isinstance(intr, dict) and intr.get("id"):
+                print(intr["id"])
+                sys.exit(0)
+'
 }
 case "$(run_probe)" in
   *'"type":"RUN_FINISHED"'*) ;;
@@ -193,14 +221,13 @@ fresh_agent() {
     --headless --auto-approve --async "Do your task now." >"$LOG_DIR/launch.log" 2>&1 ||
     { cat "$LOG_DIR/launch.log" >&2; die "cao launch failed"; }
   i=0
-  until out="$(run_probe)" && case "$out" in *'"outcome":{"type":"interrupt"'*) true ;; *) false ;; esac; do
+  # The driver waits for this interrupt's card to arrive over the stream.
+  E2E_INTERRUPT_ID=""
+  until E2E_INTERRUPT_ID="$(run_probe | first_interrupt_id)" && [ -n "$E2E_INTERRUPT_ID" ]; do
     i=$((i + 1))
     [ "$i" -le 120 ] || die "the agent never raised a permission interrupt within 240s"
     sleep 2
   done
-  # The driver waits for this interrupt's card to arrive over the stream.
-  E2E_INTERRUPT_ID="$(printf '%s' "$out" | sed -n 's/.*"interrupts":\[{"id":"\([^"]*\)".*/\1/p' | head -n 1)"
-  [ -n "$E2E_INTERRUPT_ID" ] || die "could not read the interrupt id from the run plane"
   export E2E_INTERRUPT_ID
 }
 
@@ -210,6 +237,7 @@ phase() {
   if ! PAGE_URL="$PAGE_ORIGIN/index.html" CAO_URL="$CAO_URL" node "$DRIVER" "$1"; then result=1; fi
 }
 
+phase page
 fresh_agent
 phase approve
 fresh_agent

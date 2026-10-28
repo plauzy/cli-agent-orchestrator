@@ -195,6 +195,9 @@
   var fleetState = null;
   var seenIds = new Set();
   var cards = new Map();          // interrupt_id -> card element
+  // interrupt_id -> final state, kept across reconnects: the stream's replay
+  // window resends an answered card's frame, which must not reopen it.
+  var resolved = new Map();
   var runInFlight = false;
   var threadId = "cao-dojo-" + randomId();
 
@@ -213,36 +216,54 @@
       return tok.replace(/~1/g, "/").replace(/~0/g, "~");
     });
   }
+  // Atomic (CP-3): the ops apply to a copy, which replaces the state only if
+  // every op applies. Any op that cannot apply throws and the state is kept.
   function applyPatch(doc, ops) {
-    if (!Array.isArray(ops)) return doc;
-    ops.forEach(function (op) {
-      if (!op || typeof op !== "object") return;
+    if (!Array.isArray(ops)) throw new Error("delta is not an array");
+    var draft = JSON.parse(JSON.stringify(doc));
+    ops.forEach(function (op, n) {
+      var where = "op " + n + ": ";
+      if (!op || typeof op !== "object") throw new Error(where + "not an object");
+      if (op.op !== "add" && op.op !== "replace" && op.op !== "remove") {
+        throw new Error(where + "unsupported op " + op.op);
+      }
       var tokens = jsonPointerParse(op.path || "");
       if (tokens.length === 0) {
-        if ((op.op === "add" || op.op === "replace") && op.value && typeof op.value === "object") doc = op.value;
+        if (op.op === "remove" || !op.value || typeof op.value !== "object") {
+          throw new Error(where + "cannot " + op.op + " the whole document");
+        }
+        draft = JSON.parse(JSON.stringify(op.value));
         return;
       }
-      var parent = doc;
+      var parent = draft;
       for (var i = 0; i < tokens.length - 1; i++) {
         var key = tokens[i];
-        if (parent == null || typeof parent !== "object") return;
+        if (parent == null || typeof parent !== "object") throw new Error(where + "no parent at " + op.path);
         if (!(key in parent)) {
-          if (op.op === "add") parent[key] = {}; else return;
+          if (op.op !== "add") throw new Error(where + "missing " + op.path);
+          parent[key] = {};
         }
         parent = parent[key];
       }
       var last = tokens[tokens.length - 1];
-      if (parent == null || typeof parent !== "object") return;
-      if (op.op === "remove") {
-        if (Array.isArray(parent)) parent.splice(parseInt(last, 10), 1);
-        else delete parent[last];
-      } else if (op.op === "add" || op.op === "replace") {
-        if (Array.isArray(parent) && last === "-") parent.push(op.value);
-        else if (Array.isArray(parent)) parent.splice(parseInt(last, 10), op.op === "add" ? 0 : 1, op.value);
+      if (parent == null || typeof parent !== "object") throw new Error(where + "no parent at " + op.path);
+      if (Array.isArray(parent)) {
+        var idx = last === "-" && op.op === "add" ? parent.length : Number(last);
+        var max = op.op === "add" ? parent.length : parent.length - 1;
+        if (!/^(0|[1-9][0-9]*|-)$/.test(last) || !(idx >= 0 && idx <= max)) {
+          throw new Error(where + "bad array index at " + op.path);
+        }
+        if (op.op === "remove") parent.splice(idx, 1);
+        else parent.splice(idx, op.op === "add" ? 0 : 1, op.value);
+      } else {
+        if (op.op !== "add" && !Object.prototype.hasOwnProperty.call(parent, last)) {
+          throw new Error(where + "missing " + op.path);
+        }
+        if (op.op === "remove") delete parent[last];
         else parent[last] = op.value;
       }
     });
-    return doc;
+    return draft;
   }
 
   // DOM helpers: text and attributes only, never innerHTML.
@@ -312,6 +333,9 @@
   };
   function setCardState(card, state, note) {
     card.setAttribute("data-state", state);
+    var id = card.getAttribute("data-interrupt-id");
+    if (state === "pending" || state === "sending") resolved.delete(id);
+    else resolved.set(id, state);
     card._state.textContent = STATE_LABEL[state] + (note ? " — " + note : "");
     var live = state === "pending";
     card._approve.disabled = !live || runInFlight;
@@ -359,7 +383,9 @@
     if (!props || props.interrupt_id == null) return null;
     var id = String(props.interrupt_id);
     if (cards.has(id)) return cards.get(id);
+    var answered = resolved.get(id);
     var card = renderApprovalCard(props);
+    if (answered) setCardState(card, answered, "replayed");
     cards.set(id, card);
     dropEmpty(els.components);
     els.components.insertBefore(card, els.components.firstChild);
@@ -401,7 +427,7 @@
       });
     } else if (component === "progress") {
       head.appendChild(el("span", "gtitle", props.label || "Progress"));
-      var hasValue = typeof props.value === "number";
+      var hasValue = typeof props.value === "number" && isFinite(props.value);
       var bar = el("div", "bar" + (hasValue ? "" : " indeterminate"));
       var fill = el("span");
       if (hasValue) fill.style.width = Math.max(0, Math.min(1, props.value)) * 100 + "%";
@@ -438,10 +464,15 @@
       dropEmpty(els.components);
       els.components.insertBefore(renderComponent(component, props), els.components.firstChild);
     }
-    while (els.components.children.length > 40) {
-      var gone = els.components.lastChild;
+    // Prune the oldest cards past 40, but never one still waiting on a
+    // decision: that would leave an open interrupt with no control.
+    var kids = els.components.children;
+    for (var i = kids.length - 1; i >= 0 && kids.length > 40; i--) {
+      var state = kids[i].getAttribute("data-state");
+      if (state === "pending" || state === "sending") continue;
+      var gone = kids[i];
       els.components.removeChild(gone);
-      if (gone.getAttribute && gone.getAttribute("data-interrupt-id")) cards.delete(gone.getAttribute("data-interrupt-id"));
+      if (gone.getAttribute("data-interrupt-id")) cards.delete(gone.getAttribute("data-interrupt-id"));
     }
   }
 
@@ -478,7 +509,13 @@
       fleetState = data.snapshot && typeof data.snapshot === "object" ? data.snapshot : {};
       renderFleet();
     } else if (type === "STATE_DELTA") {
-      if (fleetState) { fleetState = applyPatch(fleetState, data.delta); renderFleet(); }
+      if (!fleetState) return;
+      try {
+        fleetState = applyPatch(fleetState, data.delta);
+        renderFleet();
+      } catch (e) {
+        logEvent("page", "PATCH_REJECTED", { message: e.message + "; fleet state unchanged" });
+      }
     } else if (type === "GENERATIVE_UI") {
       addComponent(data.component, data.props);
     }
@@ -493,8 +530,20 @@
     els.status.className = state;
     els.statusText.textContent = msg;
   }
+  // A new connection starts clean, so another server's fleet and cards never
+  // mix with this one's. Answered interrupt ids are kept (see `resolved`).
+  function resetView() {
+    fleetState = null;
+    seenIds = new Set();
+    cards = new Map();
+    clear(els.fleet);
+    els.fleet.appendChild(el("p", "empty", "Waiting for the first snapshot."));
+    clear(els.components);
+    els.components.appendChild(el("p", "empty", "No components yet."));
+  }
   function connect() {
     disconnect();
+    resetView();
     var base = baseUrl();
     if (!base) { setStatus("error", "enter a cao-server URL"); return; }
     var url;
@@ -509,9 +558,18 @@
     els.connect.disabled = true;
     els.disconnect.disabled = false;
     var frames = 0;
-    es.onopen = function () { setStatus("connected", "connected → " + base + "/agui/v1/stream"); };
+    var opened = false;
+    es.onopen = function () {
+      opened = true;
+      setStatus("connected", "connected → " + base + "/agui/v1/stream");
+    };
     es.onerror = function () {
-      if (es && es.readyState === 1) return;
+      if (!es) return;
+      // EventSource retries on its own while readyState is CONNECTING (0).
+      if (opened && es.readyState === 0) {
+        setStatus("connecting", "reconnecting… (" + frames + " frame(s) so far)");
+        return;
+      }
       setStatus("error", frames === 0
         ? "no CAO server reachable at " + base + " (is CAO_AGUI_ENABLED set, and this page's origin in CAO_CORS_ORIGINS?)"
         : "disconnected after " + frames + " frame(s); retrying…");
@@ -539,6 +597,8 @@
     els.runs.insertBefore(row, els.runs.firstChild);
     while (els.runs.children.length > 30) els.runs.removeChild(els.runs.lastChild);
   }
+  // run_plane.py camelCases interrupt metadata (terminalId, sessionName) to
+  // match the stock ag-ui client, so terminalId here is correct.
   function interruptToProps(intr) {
     var meta = (intr && intr.metadata) || {};
     return {
@@ -596,7 +656,11 @@
   }
   async function run(body, decided) {
     var base = baseUrl();
-    if (!base) { addRunResult("HTTP_ERROR", null, "enter a cao-server URL"); return; }
+    if (!base) {
+      addRunResult("HTTP_ERROR", null, "enter a cao-server URL");
+      if (decided) setCardState(decided.card, "pending", "not sent: enter a cao-server URL");
+      return;
+    }
     setRunInFlight(true);
     var ended = null;
     var abort = new AbortController();
