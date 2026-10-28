@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Breaking: CAO now requires Python 3.11 or later** (CVE-2026-114605). dnspython, which CAO pulls in
+  through fastmcp, pydantic and email-validator, fixes CVE-2026-114605 (HIGH) only in 2.9.0, and 2.9.0
+  requires Python 3.11. Python 3.10 reached end-of-life on 2026-10-01. `requires-python` is now `>=3.11`,
+  release wheels build on `cp311`, and CI no longer tests 3.10. On Python 3.10, keep using the current
+  release or upgrade the interpreter. The docusaurus lock also moves `qs` to 6.17.0 (CVE-2026-110816), and
+  its override floor is now `^6.16.1`.
+
 - **`POST /agui/v1/run` refuses a `resume[]` it cannot process** (#1107 follow-up). When the server
   started with the AG-UI surface off and it was turned on later, no approval bridge exists, so the run
   skipped every `resume[]` entry and still reported `RUN_FINISHED` `success`. The route now answers
