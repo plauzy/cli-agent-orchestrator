@@ -74,9 +74,18 @@ pass it in the URL: `index.html?endpoint=http://127.0.0.1:9890`.
 | Run (`fetch`, SSE body) | `POST /agui/v1/run` with a `RunAgentInput` | Collects open approvals. Ends `RUN_FINISHED` with outcome `interrupt` (and the interrupts) or `success`. |
 | Run, resuming | same, plus `resume: [{interruptId, status: "resolved", payload: {approved: true \| false}}]` | Answers one approval. Ends `RUN_FINISHED` (success) once CAO has delivered it, or `RUN_ERROR` (for example an unknown interrupt). |
 
-- The `approval_card` props are `interrupt_id`, `reason`, `message`, `options`,
-  `provider` and `terminal_id`. The page shows them as plain text. `message` is always
-  empty: CAO never puts the prompt body on the wire.
+The run list can also show two results that are not AG-UI events, both raised by the
+page itself:
+
+| Result | Meaning |
+|---|---|
+| `HTTP_ERROR` | The run never streamed: no endpoint set, a non-2xx answer (shown with its status and `detail`), a network or CORS failure, or no `RUN_FINISHED` within 150 s. |
+| `NO_END` | The stream closed without `RUN_FINISHED` or `RUN_ERROR`. |
+
+On either, or on `RUN_ERROR`, a card you just answered goes back to pending.
+
+- The card shows the `approval_card` props `reason`, `provider`, `terminal_id`, `options`
+  and `interrupt_id`, as plain text. CAO never puts the prompt body on the wire.
 - `RUN_FINISHED` after a resume means the answer reached the terminal, not that the agent
   finished. A later prompt arrives as a new interrupt on the next run.
 - The message box is sent as the run's user message. CAO's run plane uses the run to
@@ -84,11 +93,21 @@ pass it in the URL: `index.html?endpoint=http://127.0.0.1:9890`.
 - With auth enabled, the access token goes to the stream as `?access_token=` (EventSource
   cannot set headers) and to the run as `Authorization: Bearer`. A resume needs
   `cao:write`. The token is held in memory only.
+- Caution: a token in the stream URL can be written to proxy and server access logs.
+  Use a short-lived token.
 
 ## End-to-end check (local only)
 
 `tools/e2e-local.sh` starts its own `cao-server` and static server, launches the
-`dojo-approver` agent, and drives the page with Playwright through three phases:
+`dojo-approver` agent, and drives the page with Playwright through four phases:
+
+- **page**: no server or agent. A scripted `EventSource` and a stubbed run check the
+  page's own state handling: pending cards survive the 40-card cap, a card answered
+  with no endpoint goes back to pending, an answered card stays answered when a
+  reconnect replays it, a patch with a failing op changes nothing, a new connection
+  clears the old server's state, a non-finite progress value is not shown, and a
+  transient stream error reads "reconnecting". Run it alone with
+  `node examples/ag-ui/cao-dojo/tools/e2e-local.mjs page`;
 
 - **approve**: the card appears, Approve posts the resume, the run ends `RUN_FINISHED`
   (success) and the file is written;
