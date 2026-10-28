@@ -20,6 +20,15 @@ From `cao-mcp-server`, supervisors orchestrate work with:
 
 Your own terminal ID is available in the `CAO_TERMINAL_ID` environment variable. CAO appends it to assigned task messages and records it on worker terminals automatically, so you rarely need to handle it yourself.
 
+## Do It Directly or Delegate
+
+Delegating has a fixed cost: routing the message, starting a worker, and the worker's own verification. Choose by the shape of the task:
+
+- Do a small, fully specified change yourself when you can run its checks. Example: a one-line dependency floor plus a relock.
+- Delegate when parallel work saves wall-clock time, when the task needs a specialist profile, or when an independent review is worth the wait.
+
+Measured on #1119: the same dependency-floor change took 1m 18s done directly and about 2m 57s routed through a conductor to a developer seat. Both produced byte-identical lockfiles. The delegated result had the better code comment, which is the value an independent pass adds.
+
 ## Choosing Between Assign and Handoff
 
 Use `assign` when the worker should continue independently and report back later. This is the normal pattern for fan-out work or parallel execution.

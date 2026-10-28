@@ -219,6 +219,28 @@ pins this table to the workflow files.
   in CI, so you don't have to run it locally to land a change. The construct-demo recorder
   is the sibling at `examples/ag-ui/ag-ui-construct-demos/tools`.
 
+## Dependency and lockfile changes
+
+A lockfile change should contain only the change you meant. These rules come from #1119, where
+each one cost time to rediscover.
+
+1. **Relock with the uv CI uses, not an older local one.** CI's `setup-uv` installs the latest
+   release and nothing pins a version, so run `uvx uv@latest lock` (also in
+   `examples/robotics/cross-zone-transport/` when its lock changes). If `git diff uv.lock` changes
+   the `revision =` header or the markers of packages you did not touch, your uv is a different
+   version: a local 0.12.20 once rewrote `revision = 5` to `3`, where 0.13.6 changed only the
+   4 intended lines. Revert and relock with the right version.
+2. **A lockfile pin does not protect `pip install`.** `uv.lock` governs `uv sync`, not what
+   pip resolves from the published metadata. When a CVE is fixed only by bumping a
+   **transitive** dependency in the lock, also declare a floor in `[project].dependencies`, with
+   a comment naming the CVE and the dependency path, as `cryptography` and `dnspython`
+   do in `pyproject.toml`.
+3. **Check the floor in the built wheel**, not the source: `uv build --wheel`, then
+   `unzip -p dist/*.whl '*.dist-info/METADATA' | grep Requires-Dist`.
+4. **Run the dependency gate locally** with the Trivy version CI pins (see `SECURITY.md`):
+   `uv run python scripts/dependency_security.py`. Every HIGH or CRITICAL finding blocks, and
+   local mitigations are not exemptions.
+
 ## Pre-PR checklist
 
 1. `uv run black src/ test/ && uv run isort src/ test/` (or `--check` to verify).
@@ -235,11 +257,13 @@ pins this table to the workflow files.
 5. If you touched **any** `.md`, run `uv run python scripts/validate_markdown_links.py` —
    a dead relative link fails the Unit Tests job, and `skills/` is in scope. CAO has no
    root `AGENTS.md`; the contributor map is `CODEBASE.md`.
-6. If you touched `skills/`, run `uv run python scripts/sync_skills.py` so the packaged mirror
+6. If you touched `pyproject.toml` or any lockfile, follow
+   [Dependency and lockfile changes](#dependency-and-lockfile-changes) first.
+7. If you touched `skills/`, run `uv run python scripts/sync_skills.py` so the packaged mirror
    stays in lockstep (`test/test_skill_packaging_parity.py` enforces it).
-7. **Commits:** only when asked; sign if the repo expects it; keep the subject concise and
+8. **Commits:** only when asked; sign if the repo expects it; keep the subject concise and
    Conventional-Commits style; never force-push to `main`.
-8. **Open the PR, then watch its CI run to completion** and fix any red gate before calling
+9. **Open the PR, then watch its CI run to completion** and fix any red gate before calling
    it done (rule #2 and #4). Use `gh pr create` / `gh pr checks`.
 
 ## Not what you want?

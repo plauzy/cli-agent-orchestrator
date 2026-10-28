@@ -1013,6 +1013,45 @@ class TestOtherPrGatingWorkflowsAreDocumented:
         )
 
 
+DEPENDENCY_SECTION_HEADING = "## Dependency and lockfile changes"
+DEPENDENCY_SECTION_PATH_PATTERN = (
+    r"`((?:scripts|examples)/[^`\s]+?|pyproject\.toml|SECURITY\.md|uv\.lock)`"
+)
+DEPENDENCY_SECURITY_ACTION = REPO_ROOT / ".github" / "actions" / "dependency-security" / "action.yml"
+
+
+def _dependency_section() -> str:
+    text = _skill_text()
+    start = text.index(DEPENDENCY_SECTION_HEADING)
+    end = text.index("\n## ", start + len(DEPENDENCY_SECTION_HEADING))
+    return text[start:end]
+
+
+class TestDependencySectionMatchesTheRepo:
+    """#1120: the lockfile and CVE-floor rules must point at real files and versions."""
+
+    def test_the_section_exists(self):
+        assert DEPENDENCY_SECTION_HEADING in _skill_text()
+
+    def test_the_pre_pr_checklist_links_to_it(self):
+        assert "(#dependency-and-lockfile-changes)" in _skill_text()
+
+    @pytest.mark.parametrize(
+        "quoted", sorted(set(re.findall(DEPENDENCY_SECTION_PATH_PATTERN, _dependency_section())))
+    )
+    def test_every_named_path_exists(self, quoted: str):
+        assert (REPO_ROOT / quoted.rstrip("/")).exists(), f"{quoted!r} is named but does not exist"
+
+    def test_security_md_names_the_trivy_version_ci_pins(self):
+        pinned = re.search(r"version:\s*v?(\d+\.\d+\.\d+)", DEPENDENCY_SECURITY_ACTION.read_text())
+        assert pinned, "the dependency-security action no longer pins a Trivy version"
+        security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
+        assert f"Trivy {pinned.group(1)}" in security, (
+            f"the skill sends readers to SECURITY.md for the Trivy version, but SECURITY.md "
+            f"does not name the pinned {pinned.group(1)}"
+        )
+
+
 # NOTE: there is deliberately no test here that the packaged mirror matches
 # ``skills/cao-contributing/SKILL.md``. It would duplicate
 # ``test/test_skill_packaging_parity.py::TestPackagingParity``

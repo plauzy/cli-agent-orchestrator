@@ -34,9 +34,9 @@ Naming caveats, both deliberate and both recorded rather than silently resolved:
   the event-plugin authoring skill depend on **maintainer decision M4**. Both are
   provisional. Because each package's allowlist is *data*, a rename is a
   one-line edit here plus a rebuild — no restructuring.
-* ``cao-contributing`` is **conditional and not present**. It depends on PR #448,
-  which is open and still a draft, so this build does not claim it. Adding it
-  when #448 lands is likewise one allowlist line.
+* ``cao-contributing`` ships in the contributor package. It was held back while
+  PR #448 was a draft; #448 merged, and adding it was the one allowlist line this
+  design promised (#1120).
 """
 
 from __future__ import annotations
@@ -156,14 +156,13 @@ CONTRIBUTOR = PackageConfig(
         # Authoring an *event* plugin. Packaged under whichever name M4 settles on,
         # since the packaged folder name must equal the frontmatter `name`.
         "cao-plugin",
-        # `cao-contributing` joins here when PR #448 lands. Deliberately absent:
-        # the skill does not exist in the tree yet and this build does not claim it.
+        # Working on CAO itself: the dev loop, the CI gate map, dependency and
+        # lockfile rules, and PR discipline. Added once PR #448 merged (#1120).
+        "cao-contributing",
     ],
     excluded_note=(
         "Excluded: every operator-facing skill (they belong in the `cao` package), and "
-        "the adjacent-feature and vendored skills excluded there for the same reasons. "
-        "`cao-contributing` is conditional on PR #448 (open, draft) and is not present; "
-        "adding it is a one-line allowlist edit in scripts/build_agent_plugin.py."
+        "the adjacent-feature and vendored skills excluded there for the same reasons."
     ),
 )
 
