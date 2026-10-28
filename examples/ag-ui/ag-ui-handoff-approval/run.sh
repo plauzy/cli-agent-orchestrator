@@ -157,7 +157,8 @@ if ! curl -fsS "${BASE}/health" >/dev/null 2>&1; then
 fi
 echo "[handoff-approval] Server healthy." >&2
 
-# Check for pending interrupts via the approval endpoint.
+# Check for pending interrupts via the run plane. No route lists pending approvals:
+# a POST /agui/v1/run returns them in its RUN_FINISHED outcome.
 echo "[handoff-approval] Checking for approval interrupts..." >&2
 
 uv run python3 - "${BASE}" <<'PYTHON'
@@ -169,23 +170,33 @@ import requests
 
 base = sys.argv[1]
 
+
+def run_once(i):
+    body = {"threadId": "handoff-approval", "runId": f"poll-{i}", "messages": []}
+    resp = requests.post(f"{base}/agui/v1/run", json=body, timeout=10)
+    assert resp.status_code == 200, f"/agui/v1/run: {resp.status_code} {resp.text[:200]}"
+    frames = [
+        json.loads(line[len("data: "):])
+        for line in resp.text.split("\n")
+        if line.startswith("data: ")
+    ]
+    assert frames and frames[-1]["type"] == "RUN_FINISHED", f"run did not finish: {frames}"
+    return frames[-1]["outcome"]
+
+
 # Poll for pending interrupts (mock_cli scripted prompts may take a moment).
 pending = []
-for _ in range(20):
-    try:
-        resp = requests.get(f"{base}/agui/v1/approvals", timeout=5)
-        if resp.status_code == 200:
-            data = resp.json()
-            pending = data.get("pending", [])
-            if pending:
-                break
-    except Exception:
-        pass
+for i in range(20):
+    outcome = run_once(i)
+    if outcome.get("type") == "interrupt":
+        pending = outcome.get("interrupts", [])
+        if pending:
+            break
     time.sleep(0.5)
 
 if not pending:
     print("[handoff-approval] No pending interrupts found (scripted prompts may not have triggered).")
-    print("[handoff-approval] PASS: server is healthy and approval endpoint responds.")
+    print("[handoff-approval] PASS: server is healthy and the run plane finishes.")
     sys.exit(0)
 
 interrupt = pending[0]
@@ -193,7 +204,7 @@ print(f"[handoff-approval] Found pending interrupt: id={interrupt['id']}, reason
 
 # Resume it.
 resp = requests.post(
-    f"{base}/agui/v1/approvals/{interrupt['id']}/resume",
+    f"{base}/agui/v1/interrupts/{interrupt['id']}/resume",
     json={"decision": "approve"},
     timeout=10,
 )

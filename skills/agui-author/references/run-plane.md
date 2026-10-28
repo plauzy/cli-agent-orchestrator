@@ -117,8 +117,8 @@ interrupt carries:
   the entry is skipped like a repeat resume and the run ends with `RUN_FINISHED`
   (`success`, or `interrupt` if others are pending). There is no `expired`
   outcome. A resolved record is evicted when a later interrupt is raised after
-  the record is 5 minutes old. From then on the id is unknown and the run ends
-  with `RUN_ERROR`.
+  the record is 5 minutes old, or sooner if the registry is over its cap. From
+  then on the id is unknown and the run ends with `RUN_ERROR`.
 - Surface disabled → HTTP 404 (not 403)
 
 ## Replay Contract
