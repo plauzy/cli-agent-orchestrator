@@ -1017,7 +1017,9 @@ DEPENDENCY_SECTION_HEADING = "## Dependency and lockfile changes"
 DEPENDENCY_SECTION_PATH_PATTERN = (
     r"`((?:scripts|examples)/[^`\s]+?|pyproject\.toml|SECURITY\.md|uv\.lock)`"
 )
-DEPENDENCY_SECURITY_ACTION = REPO_ROOT / ".github" / "actions" / "dependency-security" / "action.yml"
+DEPENDENCY_SECURITY_ACTION = (
+    REPO_ROOT / ".github" / "actions" / "dependency-security" / "action.yml"
+)
 
 
 def _dependency_section() -> str:
