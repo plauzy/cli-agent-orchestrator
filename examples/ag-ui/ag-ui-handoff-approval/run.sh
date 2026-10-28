@@ -23,11 +23,13 @@ LIVE_MODE="${CAO_APPROVAL_LIVE:-0}"
 
 SERVER_PID=""
 SERVER_LOG=""
+SCRATCH_HOME=""
 
 cleanup() {
     local code=$?
     [ -n "${SERVER_PID}" ] && kill "${SERVER_PID}" >/dev/null 2>&1 || true
     [ -n "${SERVER_LOG}" ] && rm -f "${SERVER_LOG}" || true
+    [ -n "${SCRATCH_HOME}" ] && rm -rf "${SCRATCH_HOME}" || true
     exit "${code}"
 }
 trap cleanup EXIT INT TERM
@@ -131,7 +133,22 @@ fi
 echo "[handoff-approval] Running LIVE mode (server + scripted prompts)..." >&2
 
 export CAO_AGUI_ENABLED=1
-export CAO_API_PORT="${CAO_API_PORT:-9889}"
+# This check resumes whatever interrupt the run plane reports, so it must only ever
+# talk to the server it starts: never the operator's fleet port, never a port that
+# already answers, and never the operator's own CAO home.
+export CAO_API_PORT="${CAO_API_PORT:-9893}"
+if [ "${CAO_API_PORT}" = 9889 ]; then
+    echo "[handoff-approval] Refusing CAO_API_PORT=9889: that is the default fleet port; pick another." >&2
+    exit 1
+fi
+if curl -s -o /dev/null -m 2 "http://localhost:${CAO_API_PORT}/"; then
+    echo "[handoff-approval] Something already serves port ${CAO_API_PORT}; stop it or set CAO_API_PORT." >&2
+    exit 1
+fi
+if [ -z "${CAO_HOME_DIR:-}" ]; then
+    SCRATCH_HOME="$(mktemp -d -t agui-approval-home.XXXXXX)"
+    export CAO_HOME_DIR="${SCRATCH_HOME}"
+fi
 export CAO_MOCK_CLI_SCRIPTED_PROMPTS=1
 export PATH="${REPO_ROOT}/test/providers/fixtures/bin:${PATH}"
 BASE="http://localhost:${CAO_API_PORT}"
