@@ -384,8 +384,11 @@ async function pagePhase() {
         this.readyState = 1;
         if (this.onopen) this.onopen({});
       }
+      // Like a real EventSource, a frame with no id: line reports the last id
+      // seen on this object, across events and reconnects.
       emit(type, data, id) {
-        const ev = { data: typeof data === "string" ? data : JSON.stringify(data), lastEventId: id || "" };
+        if (id) this.lastEventId = id;
+        const ev = { data: typeof data === "string" ? data : JSON.stringify(data), lastEventId: this.lastEventId || "" };
         (this.listeners[type] || []).forEach((fn) => fn(ev));
       }
       fail(readyState) {
@@ -510,6 +513,25 @@ async function pagePhase() {
     await page.evaluate(() => window.__es.fail(0));
     const status = await page.locator("#statusText").innerText();
     expect(/reconnecting/i.test(status) && !/no CAO server/.test(status), `a transient error shows reconnecting (got "${status}")`);
+
+    // 8. STATE_SNAPSHOT and STATE_DELTA carry no id: line, so they report the
+    // previous record's id. They must never be deduped; records still are.
+    await connect();
+    const record = (n) => ({ component: "metric", props: { label: "rec-" + n, value: n } });
+    for (const n of [1, 2, 3]) {
+      if (n > 1) await page.evaluate(() => { window.__es.fail(0); window.__es.open(); });
+      await emit("GENERATIVE_UI", record(n), "evt-" + n);
+      await emit("STATE_SNAPSHOT", { snapshot: { sessions: [{ name: "conn-" + n, status: "idle" }], terminals: [] } });
+      await emit("STATE_DELTA", { delta: [{ op: "add", path: "/sessions/-", value: { name: "delta-" + n, status: "idle" } }] });
+      if (n === 3) await emit("GENERATIVE_UI", record(2), "evt-2");
+    }
+    const fleet = await page.locator("#fleet .sname").allInnerTexts();
+    expect(
+      JSON.stringify(fleet) === JSON.stringify(["conn-3", "delta-3"]),
+      `the fleet shows the last reconnect's snapshot plus its delta (got ${JSON.stringify(fleet)})`,
+    );
+    const rec2 = await page.locator("#components .gtitle", { hasText: /^rec-2$/ }).count();
+    expect(rec2 === 1, `a re-sent record is still dropped (rec-2 cards: ${rec2})`);
   } catch (error) {
     expect(false, `driver error: ${error.message.split("\n")[0]}`);
   } finally {
