@@ -455,9 +455,12 @@ start instructions (`cao-server` with `CAO_AGUI_ENABLED`), and `disconnected` as
 is a setup problem with a documented fix, the second is not. An empty view that resembles a
 working fleet with no activity is prohibited (FR-2.3, FR-2.4).
 
-All live-mode I/O is browser-side `EventSource` subject to CORS. No server-side fetch is
-introduced (FR-2.5), which is also what keeps the editable endpoint field from becoming an
-SSRF primitive.
+Live-mode reads are browser-side `EventSource`, subject to CORS. No server-side fetch is
+introduced (FR-2.5), so the editable endpoint field is not an SSRF primitive. FR-11 adds
+one write: a browser-side `fetch` `POST /agui/v1/run` (with a `resume[]` entry) to the
+reader-supplied endpoint. That request leaves the reader's browser with the reader's
+token, so the endpoint field decides where an approval and its bearer token are sent; see
+Risks.
 
 ---
 
@@ -812,7 +815,8 @@ displayed to the reader instead.
 | Fixture leaks agent output | Property 9 (recursive, with generated poisoned fixtures); capture from a committed synthetic demo run, never real work |
 | Fixture goes stale as the stream evolves | Recorder job reports unseen event types and component names as a warning (FR-4.13); regenerated before release, not gated per-commit |
 | Reviewer sees this as docs bloat | Ship replay-only first (PR 1) so the value is visible before live mode adds surface |
-| Endpoint field enables SSRF-ish misuse | Client-side `EventSource` only, subject to CORS; no server-side fetch introduced |
+| Endpoint field enables SSRF-ish misuse | Reads are client-side `EventSource` only, subject to CORS; no server-side fetch is introduced, so there is no SSRF primitive |
+| Live mode (FR-11) POSTs from the browser to the reader-supplied endpoint | The approve/reject `fetch` `POST /agui/v1/run` goes from the reader's browser to whatever endpoint they typed, carrying `Authorization: Bearer` when a token is set. It is not server-side, so still no SSRF, but a mistyped or hostile endpoint receives the decision and the token. Mitigations: the endpoint defaults to loopback, the token lives in memory only and is never persisted, CAO checks `Origin` and `CAO_CORS_ORIGINS` on the POST, and a resume needs `cao:write`. The stream's `?access_token=` can also land in proxy and server access logs (README caution) |
 | Duplicating the viewer during refactor | Generate both outputs from `dojo-src/` in the same PR; never leave two hand-maintained copies |
 | **Regenerating `examples/ag-ui/ag-ui-eventsource-viewer/index.html` from shared parts touches a file the currently-green `AG-UI demo (shift-left recording)` job depends on** (`.github/workflows/ci.yml:259`; `record-demo.mjs` navigates to that page and screenshots it) | The regeneration commit must run the recorder job before merge and diff the produced GIF; the DOM ids and class names the recorder relies on are treated as a contract and asserted by the same Playwright spec that carries the FR-5 gate. If the job goes red, the regeneration lands as its own commit and is reverted independently |
 | Removing `ALLOWED_COMPONENTS` reads as weakening a security control | The gate never prevented injection; `textContent`-only insertion does, and Property 4 asserts it over hostile generated strings. Stated in the docs and in the PR description, not left implicit |
