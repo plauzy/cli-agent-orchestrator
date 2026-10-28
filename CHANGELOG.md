@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   release or upgrade the interpreter. The docusaurus lock also moves `qs` to 6.17.0 (CVE-2026-110816), and
   its override floor is now `^6.16.1`.
 
+- **`POST /agui/v1/run` refuses a `resume[]` it cannot process** (#1107 follow-up). When the server
+  started with the AG-UI surface off and it was turned on later, no approval bridge exists, so the run
+  skipped every `resume[]` entry and still reported `RUN_FINISHED` `success`. The route now answers
+  HTTP 404 "Approval bridge not initialized", as `POST /agui/v1/interrupts/{id}/resume` does. A run
+  without `resume[]` is unchanged. The documented request bodies now include the required `messages`
+  and the AG-UI 1.0 resume entry shape, and the docs no longer say the run plane streams live frames.
+
 - **`POST /agui/v1/run` now ends its response after `RUN_FINISHED`** (#1106, ag-ui-protocol/ag-ui#2216). A
   run with nothing pending, or one whose `resume[]` resolved the last pending interrupt, used to stay
   open forever. The route handed the run plane the whole-fleet SSE bus, which never ends, and nothing
