@@ -197,3 +197,58 @@ def test_codex_approval_request_still_offers_edit(construct):
     interrupt = construct.on_provider_waiting("t-1", "codex", "Approve execution? (y/n)")
     assert interrupt.reason == "codex:approval_request"
     assert interrupt.options == ["approve", "deny", "edit"]
+
+
+# (v) an edit that arrives while an approve is in flight joins it ------------
+
+
+@pytest.mark.asyncio
+async def test_edit_during_in_flight_approve_joins_it_without_typing():
+    """First decision wins: a later edit joins the in-flight approve.
+
+    The edit is not validated against the options here, because ``resume`` joins
+    an in-flight delivery before it validates. It returns the approve outcome,
+    which names the decision that was delivered, and nothing is typed for it.
+    """
+    import asyncio
+    import threading
+
+    first_in_delivery = threading.Event()
+    release_first = threading.Event()
+
+    class _PausingDelivery(_RecordingDelivery):
+        def send_special_key(self, terminal_id: str, key: str) -> bool:
+            first_in_delivery.set()
+            release_first.wait()
+            return super().send_special_key(terminal_id, key)
+
+    delivery = _PausingDelivery()
+    construct = AgentHandoffWithApproval(emitter=RecordingUiEmitter(), answer_delivery=delivery)
+    interrupt = construct.on_provider_waiting("t-1", "claude_code", _CLAUDE_PERMISSION_PROMPT)
+
+    approve = asyncio.create_task(construct.resume(interrupt.id, ApprovalDecision.APPROVE))
+    await asyncio.to_thread(first_in_delivery.wait)
+
+    edit = asyncio.create_task(
+        construct.resume(interrupt.id, ApprovalDecision.EDIT, edited_text="other text")
+    )
+    await asyncio.sleep(0.05)  # give the edit a chance to (wrongly) type or raise
+    assert not edit.done()
+
+    release_first.set()
+    edit_result = await edit
+    approve_result = await approve
+
+    assert edit_result.outcome == "approve"
+    assert approve_result.outcome == "approve"
+    assert delivery.calls == [("key", "t-1", "Enter")]
+    assert not any(kind == "input" for kind, _, _ in delivery.calls)
+    final = construct.get_interrupt(interrupt.id)
+    assert final.resolved
+    assert final.outcome == "approve"
+
+
+def test_claude_code_trust_prompt_options_unchanged(construct):
+    interrupt = construct.on_provider_waiting("t-1", "claude_code", "Yes, I trust this folder")
+    assert interrupt.reason == "claude-code:trust_prompt"
+    assert interrupt.options == ["approve", "deny"]
