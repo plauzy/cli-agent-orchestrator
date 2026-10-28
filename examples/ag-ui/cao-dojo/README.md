@@ -28,11 +28,14 @@ and adds the answerable approval card described in #1109.
    python3 -m http.server 8790 --bind 127.0.0.1
    ```
 
-2. **Start `cao-server` with AG-UI on and the page's origin allowed.** Use a port that is
-   not your working fleet's, and keep it on loopback: `cao-server` runs commands for
-   whoever can reach it.
+2. **Start `cao-server` with AG-UI on and the page's origin allowed.** Give it its own
+   `CAO_HOME_DIR` and a port that is not your working fleet's, and keep it on loopback:
+   `cao-server` runs commands for whoever can reach it. The port alone is not enough:
+   `cao-server` locks `$CAO_HOME_DIR/server.lock`, so a second server on your default
+   home refuses to start next to your fleet.
 
    ```bash
+   export CAO_HOME_DIR="$(mktemp -d)"; echo "$CAO_HOME_DIR"   # reuse this in step 3
    CAO_AGUI_ENABLED=1 CAO_CORS_ORIGINS=http://localhost:8790 \
      cao-server --host 127.0.0.1 --port 9890
    ```
@@ -40,7 +43,11 @@ and adds the answerable approval card described in #1109.
 3. **Give an agent something to ask about, in a throwaway directory.** The bundled
    `dojo-approver` profile asks permission to write one file and does nothing else.
 
+   Run this in a second shell with the **same** `CAO_HOME_DIR` as step 2, so the profile
+   lands in that server's agent store and not in your real one.
+
    ```bash
+   export CAO_HOME_DIR=<the directory step 2 printed>
    export CAO_API_HOST=127.0.0.1 CAO_API_PORT=9890
    cao install examples/ag-ui/cao-dojo/dojo-approver.md
    cao launch --agents dojo-approver --session-name dojo-demo \
@@ -59,10 +66,10 @@ and adds the answerable approval card described in #1109.
    Approve writes `approved-by-dojo.txt` in the agent's directory; Reject leaves none.
 
 6. **Tear down.** `cao shutdown --session cao-dojo-demo`, then stop `cao-server` and the
-   http server (Ctrl-C, or `kill <pid>`).
+   http server (Ctrl-C, or `kill <pid>`), and remove the `CAO_HOME_DIR` from step 2.
 
 The endpoint field defaults to `http://localhost:9889`, CAO's default port. You can also
-pass it in the URL: `index.html?endpoint=http://127.0.0.1:9890`.
+pass it in the URL: `index.html?endpoint=http://127.0.0.1:9890`. The page accepts a URL endpoint only for a loopback host (`127.0.0.1`, `localhost`, `[::1]`), so a crafted link cannot point it, and a token you type, at another server.
 
 ## What goes over the wire
 
@@ -70,7 +77,7 @@ pass it in the URL: `index.html?endpoint=http://127.0.0.1:9890`.
 |---|---|---|
 | Live (`EventSource`) | `GET /agui/v1/stream?since=<10 min ago>` | Fleet state and `GENERATIVE_UI` frames. `since` replays a card raised before the page opened. |
 | Run (`fetch`, SSE body) | `POST /agui/v1/run` with a `RunAgentInput` | Collects open approvals. Ends `RUN_FINISHED` with outcome `interrupt` (and the interrupts) or `success`. |
-| Run, resuming | same, plus `resume: [{interruptId, status: "resolved", payload: {approved: true \| false}}]` | Answers one approval. Ends `RUN_FINISHED` (success) once CAO has delivered it, or `RUN_ERROR` (for example an unknown interrupt). |
+| Run, resuming | same, plus `resume: [{interruptId, status: "resolved", payload: {approved: true \| false}}]` | Answers one approval. Ends `RUN_FINISHED` once CAO has delivered it: outcome `success` when nothing else is waiting, or `interrupt` listing the approvals still open. Ends `RUN_ERROR` for a resume CAO cannot process (for example an unknown interrupt). |
 
 The run list can also show two results that are not AG-UI events, both raised by the
 page itself:

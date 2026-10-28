@@ -408,21 +408,24 @@ async function pagePhase() {
     `data: ${JSON.stringify({ type: "RUN_STARTED" })}\n\n` +
     `data: ${JSON.stringify({ type: "RUN_FINISHED", outcome })}\n\n`;
   let runBody = finished({ type: "success" });
+  // When set, the stubbed run response waits for this promise, so a test can
+  // push stream frames while a run is still in flight.
+  let holdRun = null;
   const cors = {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
     "Access-Control-Allow-Methods": "POST",
   };
-  await page.route("http://*.test/agui/v1/run", (route) =>
-    route.request().method() === "OPTIONS"
-      ? route.fulfill({ status: 204, headers: cors })
-      : route.fulfill({
-          status: 200,
-          contentType: "text/event-stream",
-          headers: cors,
-          body: runBody,
-        }),
-  );
+  await page.route("http://*.test/agui/v1/run", async (route) => {
+    if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers: cors });
+    if (holdRun) await holdRun;
+    return route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      headers: cors,
+      body: runBody,
+    });
+  });
   const card = (id) => ({
     component: "approval_card",
     props: { interrupt_id: id, reason: "claude-code:permission_request", options: ["approve", "reject"] },
@@ -532,6 +535,43 @@ async function pagePhase() {
     );
     const rec2 = await page.locator("#components .gtitle", { hasText: /^rec-2$/ }).count();
     expect(rec2 === 1, `a re-sent record is still dropped (rec-2 cards: ${rec2})`);
+
+    // 9. The server reads its pending list once per run. A card that arrives
+    // while the run is in flight is newer than that list and must stay pending;
+    // a card that was open when the run started and is not listed is settled.
+    await connect();
+    await emit("GENERATIVE_UI", card("early"), "c-early");
+    let release;
+    holdRun = new Promise((r) => { release = r; });
+    runBody = finished({ type: "success" });
+    await page.locator("#send").click();
+    await page.waitForTimeout(200);
+    await emit("GENERATIVE_UI", card("late"), "c-late");
+    release();
+    holdRun = null;
+    await page
+      .locator('[data-testid="run-result"]')
+      .first()
+      .waitFor({ timeout: 5_000 })
+      .catch(() => {});
+    expect((await stateOf("early")) === "settled", `a card open before the run and not listed is settled (got ${await stateOf("early")})`);
+    expect((await stateOf("late")) === "pending", `a card that arrived during the run stays pending (got ${await stateOf("late")})`);
+    expect(
+      await page.locator('[data-interrupt-id="late"] [data-testid="approval-approve"]').isEnabled(),
+      "the late card's Approve stays enabled",
+    );
+
+    // 10. Session-end closer frames have no id: line either. After a record
+    // they report its id, and must still reach the log.
+    await connect();
+    await emit("GENERATIVE_UI", record(10), "evt-10");
+    await emit("TOOL_CALL_END", { toolCallId: "t1", message: "closer-one" });
+    await emit("TOOL_CALL_END", { toolCallId: "t2", message: "closer-two" });
+    const logText = await page.locator("#log").innerText();
+    expect(
+      /closer-one/.test(logText) && /closer-two/.test(logText),
+      "frames without an id: line after a record are logged, not dropped",
+    );
   } catch (error) {
     expect(false, `driver error: ${error.message.split("\n")[0]}`);
   } finally {

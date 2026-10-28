@@ -172,8 +172,9 @@
   // How far back the stream replays on connect, so a card raised before the
   // page opened still shows. The server's ring buffer bounds what comes back.
   var REPLAY_WINDOW_MS = 10 * 60 * 1000;
-  // The server ends a run within its own 120 s follow deadline; this is only a
-  // backstop so the page can never sit in a run forever.
+  // A run ends after its resume step and the snapshot (the run plane has no
+  // follow deadline since #1107, and resume delivery has no hard timeout); this
+  // is only a backstop so the page can never sit in a run forever.
   var RUN_TIMEOUT_MS = 150 * 1000;
 
   var els = {
@@ -194,6 +195,9 @@
   var es = null;
   var fleetState = null;
   var seenIds = new Set();
+  // The previous frame's EventSource lastEventId. A frame sent without an `id:`
+  // line keeps the previous value, so only a changed value is the frame's own id.
+  var prevStreamId = "";
   var cards = new Map();          // interrupt_id -> card element
   // interrupt_id -> final state, kept across reconnects: the stream's replay
   // window resends an answered card's frame, which must not reopen it.
@@ -506,8 +510,13 @@
     // EventSource keeps lastEventId across events and reconnects, so deduping
     // them on it would drop every snapshot after a reconnect and every delta
     // that follows a record.
+    // Frames from the server's session-end close (TOOL_CALL_END) have no `id:`
+    // line either; reading lastEventId for them would drop them as duplicates.
     var stateFrame = type === "STATE_SNAPSHOT" || type === "STATE_DELTA";
-    var id = stateFrame ? null : ev.lastEventId || data.event_id;
+    var sseId = ev.lastEventId || "";
+    var ownId = sseId && sseId !== prevStreamId ? sseId : "";
+    prevStreamId = sseId;
+    var id = stateFrame ? null : data.event_id || ownId;
     if (id) {
       if (seenIds.has(id)) return;
       seenIds.add(id);
@@ -543,6 +552,7 @@
   function resetView() {
     fleetState = null;
     seenIds = new Set();
+    prevStreamId = "";
     cards = new Map();
     clear(els.fleet);
     els.fleet.appendChild(el("p", "empty", "Waiting for the first snapshot."));
@@ -618,14 +628,28 @@
       terminal_id: meta.terminalId,
     };
   }
-  // Bring the cards in line with what the server says is still open.
-  function reconcile(openIds) {
+  // Ids of the cards that are pending or sending right now.
+  function openCardIds() {
+    var ids = [];
     cards.forEach(function (card, id) {
+      var state = card.getAttribute("data-state");
+      if (state === "pending" || state === "sending") ids.push(id);
+    });
+    return ids;
+  }
+  // Bring the cards in line with what the server says is still open. The server
+  // reads its pending list once per run, so only cards that were already open
+  // when the run started can be judged by it: a card that arrived during the
+  // run is newer than that list and stays pending.
+  function reconcile(openIds, openAtStart) {
+    openAtStart.forEach(function (id) {
+      var card = cards.get(id);
+      if (!card) return;
       var state = card.getAttribute("data-state");
       if ((state === "pending" || state === "sending") && openIds.indexOf(id) < 0) setCardState(card, "settled");
     });
   }
-  function onRunFinished(data, decided) {
+  function onRunFinished(data, decided, openAtStart) {
     var outcome = data.outcome && data.outcome.type;
     if (decided) setCardState(decided.card, decided.approved ? "approved" : "rejected", "RUN_FINISHED");
     if (outcome === "interrupt") {
@@ -634,10 +658,10 @@
         if (card && card.getAttribute("data-state") !== "pending") setCardState(card, "pending");
         return String(intr.id);
       });
-      reconcile(open);
+      reconcile(open, openAtStart);
       addRunResult("RUN_FINISHED", outcome, open.length + " approval(s) waiting");
     } else {
-      reconcile([]);
+      reconcile([], openAtStart);
       addRunResult("RUN_FINISHED", outcome || "—", decided
         ? (decided.approved ? "approval delivered to the agent" : "rejection delivered to the agent")
         : "nothing is waiting for approval");
@@ -670,6 +694,7 @@
       return;
     }
     setRunInFlight(true);
+    var openAtStart = openCardIds();
     var ended = null;
     var abort = new AbortController();
     var timer = setTimeout(function () { abort.abort(); }, RUN_TIMEOUT_MS);
@@ -710,7 +735,7 @@
             renderFleet();
           } else if (type === "RUN_FINISHED") {
             ended = type;
-            onRunFinished(data, decided);
+            onRunFinished(data, decided, openAtStart);
           } else if (type === "RUN_ERROR") {
             ended = type;
             addRunResult("RUN_ERROR", null, data.message || "");
@@ -759,8 +784,12 @@
   window.__caoDojo = { resume: function (id, payload) { return resume(id, payload, null); } };
 
   try {
+    // Seed the endpoint from the URL only for a loopback server: a crafted link
+    // must not point the page, and a token typed into it, at another host.
     var seeded = new URL(window.location.href).searchParams.get("endpoint");
-    if (seeded) els.endpoint.value = seeded;
+    if (seeded && ["127.0.0.1", "localhost", "[::1]"].indexOf(new URL(seeded).hostname) >= 0) {
+      els.endpoint.value = seeded;
+    }
   } catch (e) { /* not a parseable URL in some test hosts */ }
 })();
 </script>
