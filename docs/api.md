@@ -313,7 +313,10 @@ and `RunStepRequest` (`POST /terminals/run-step`).
   behaves exactly as before, with no persistence overhead.
 - A step-level `detail.kind` distinguishes worker failures (`error` -> 502),
   in-band provider refusals (`provider_error` -> 502), and timeouts (`timeout` ->
-  504); callers branch on `kind`, not the numeric status alone.
+  504); callers branch on `kind`, not the numeric status alone. A reused Kiro
+  terminal (`reuse_terminal_id`) whose identity check is still running answers
+  `identity_pending` -> 409 with `retryable: true`: nothing was typed, so retry
+  the same call once it is ready.
 - `GET /handoff-results/{job_id}` retrieves the persisted record for that
   `job_id`. `state` is one of `running` (step still in progress), `completed`
   (result in `last_message`), or `error` (failure in `error_message`). `404`
@@ -424,6 +427,23 @@ enabled**. With no IdP and no `CAO_AUTH_LOCAL_TOKEN` configured — the default 
 that check is inert.
 
 See [Workflows](workflows.md).
+
+### Fleet
+
+Read-only views of a CAO cluster's workers, reached through the fleet's worker broker
+(`CAO_ELASTIC_BROKER_URL` / `CAO_ELASTIC_BROKER_TOKEN` in cao-server's environment). No
+broker configured, unreachable, or erroring is a `503` carrying the broker's message.
+Releasing workers and shutting the fleet down stay CLI actions (`cao worker release`,
+`cao fleet shutdown`).
+
+- `GET /fleet/status` mirrors `cao fleet status`: `{broker, live, cleanup_pending, states}`.
+- `GET /fleet/workers` mirrors `cao worker list` (`?all=true` for `--all`):
+  `{broker, workers: [{worker_id, state, reason, agent_profile, provider, age_seconds,
+  workload_present, cleanup_pending, lease_tracked}]}`. Only those fields are returned.
+- `GET /fleet/workers/{worker_id}` mirrors `cao worker status`:
+  `{worker_id, lease, terminal, terminal_error, last_output}`. `terminal` carries
+  `{id, name, session_name, agent_profile, provider, status}`; `last_output` is capped at
+  4000 characters. A malformed id is `400`; no lease and no answering worker is `404`.
 
 ### Memory and graph
 
