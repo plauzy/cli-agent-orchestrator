@@ -12,7 +12,7 @@ import struct
 import subprocess
 import termios
 from contextlib import asynccontextmanager
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import (
@@ -3786,9 +3786,77 @@ def _launch_options(plan: LaunchPlan | None) -> dict[str, Any]:
 
 
 def _claimed_ephemeral(agent_profile: str | None, claim_id: str | None) -> bool:
-    # A claimed ephemeral launch has its own decision path, so delegation sites skip it.
+    # A claimed ephemeral launch is asked only when its stored spec declared auto (#1068).
     # A claim on an installed profile claims nothing, so that launch is routed as usual.
     return claim_id is not None and profile_source(agent_profile) is TargetKind.EPHEMERAL
+
+
+async def _prepare_delegation(
+    req: DelegationRequest, claim_id: str | None, caller_id: str | None
+) -> LaunchPlan | None:
+    """#1068 D2 (provisional M7): decide after the claim and before the bind."""
+    if not _claimed_ephemeral(req.agent_profile, claim_id):
+        return await prepare_launch(req)
+    from cli_agent_orchestrator.services import ephemeral_service
+
+    assert req.agent_profile is not None and claim_id is not None
+    if req.model is not None:
+        return None  # The launch refuses a per-call model and ends the claim; nothing is asked.
+    name = req.agent_profile
+    try:
+        inputs = ephemeral_service.decision_inputs(name, claim_id, caller_id, req.provider)
+        if inputs is None:
+            return None
+        # Q2 (provisional): the decided model applies only through this launch plan.
+        plan = await prepare_launch(
+            replace(
+                req,
+                target_kind=TargetKind.EPHEMERAL,
+                field_states=inputs.field_states,
+                policy=inputs.policy,
+                purpose=inputs.purpose,
+                description=inputs.description,
+            )
+        )
+        if plan is not None:
+            # The operator may have changed the policy while the decider ran: recheck the
+            # launched tier before the bind, whatever the outcome.
+            try:
+                model = ephemeral_service.recheck_decided(
+                    name, claim_id, caller_id, _recorded_tier(plan), plan.model
+                )
+            except BaseException:
+                _bind_unlaunched(plan)
+                raise
+            if model is not None and model != plan.model:
+                plan = replace(plan, model=model)
+    except DecisionInputError as error:
+        raise ephemeral_service.decision_refusal(name, claim_id, caller_id, error) from None
+    except BaseException:
+        ephemeral_service.end_claim(name, claim_id)
+        raise
+    if plan is not None:
+        ephemeral_service.record_decided(name, claim_id, plan.record_ids)
+    return plan
+
+
+def _recorded_tier(plan: LaunchPlan) -> str | None:
+    """The tier an on-mode answer's record says it applied to this plan, if there is one."""
+    for record_id in plan.record_ids:
+        try:
+            row = app.state.decision_engine.store.get(record_id)
+        except Exception:
+            # No record content and no traceback: the error can carry the row's values.
+            logger.warning("Decision record read failed")
+            return None
+        if row and row["point"] == "model.route" and row["outcome"] in ("applied", "capped"):
+            value = row["applied_value"]
+            return value if isinstance(value, str) else None
+    # No applied/capped record: either nothing was applied, or the store couldn't write or
+    # read one (its warning is the signal). Either way, recheck_decided reverse-maps the
+    # plan's own model through the settings snapshot it validates: an installed target
+    # already applies this way regardless of the record.
+    return None
 
 
 def _bind_unlaunched(plan: LaunchPlan | None) -> None:
@@ -4309,12 +4377,8 @@ async def create_terminal_in_session(
                     ),
                 )
 
-        if (
-            body
-            and body.delegation_message is not None
-            and not _claimed_ephemeral(agent_profile, claim_id)
-        ):
-            launch_plan = await prepare_launch(
+        if body and body.delegation_message is not None:
+            launch_plan = await _prepare_delegation(
                 DelegationRequest(
                     kind="handoff" if body.delegation_kind else "assign",
                     provider=resolved_provider,
@@ -4324,7 +4388,9 @@ async def create_terminal_in_session(
                     use_worktree=use_worktree,
                     owner=launch_owner("create_terminal_in_session", body),
                     target_kind=profile_source(agent_profile),
-                )
+                ),
+                claim_id,
+                caller_id,
             )
         result = await terminal_service.create_terminal(
             provider=resolved_provider,
@@ -5367,12 +5433,10 @@ async def run_step(
             # EXECUTE falls through — the step runs normally.
 
         owner = launch_owner("run_step", body)
-        if (
-            body.reuse_terminal_id is None
-            and not _claimed_ephemeral(body.agent, body.claim_id)
-            and (body.orchestration_type is not None or owner == WORKFLOW_STEP)
+        if body.reuse_terminal_id is None and (
+            body.orchestration_type is not None or owner == WORKFLOW_STEP
         ):
-            launch_plan = await prepare_launch(
+            launch_plan = await _prepare_delegation(
                 DelegationRequest(
                     kind="handoff",
                     provider=body.provider,
@@ -5386,7 +5450,9 @@ async def run_step(
                     use_worktree=body.use_worktree,
                     owner=owner,
                     target_kind=profile_source(body.agent),
-                )
+                ),
+                body.claim_id,
+                body.caller_id,
             )
         result = await run_agent_step(
             provider=body.provider,
