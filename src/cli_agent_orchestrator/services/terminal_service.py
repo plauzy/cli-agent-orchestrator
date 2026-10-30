@@ -45,12 +45,20 @@ from cli_agent_orchestrator.backends.registry import get_backend
 # ``fmt: skip`` stops black from wrapping it, which would move both pragmas off the name.
 from cli_agent_orchestrator.clients.database import delete_terminals_by_session  # noqa: F401  # isort: skip  # fmt: skip
 from cli_agent_orchestrator.clients.database import (
+    LAUNCH_TARGET_KINDS,
     count_runtime_allocated_terminals,
     create_inbox_message,
 )
+from cli_agent_orchestrator.clients.database import create_launch_record as db_create_launch_record
 from cli_agent_orchestrator.clients.database import create_terminal as db_create_terminal
 from cli_agent_orchestrator.clients.database import delete_idempotency_key
 from cli_agent_orchestrator.clients.database import delete_terminal as db_delete_terminal
+from cli_agent_orchestrator.clients.database import (
+    finalize_launch_record_if_terminal_gone as db_finalize_launch_record_if_terminal_gone,
+)
+from cli_agent_orchestrator.clients.database import (
+    finalize_launch_records as db_finalize_launch_records,
+)
 from cli_agent_orchestrator.clients.database import (
     get_idempotency_record,
     get_session_incarnation,
@@ -287,6 +295,106 @@ def _bind_decision_launch(plan: "LaunchPlan | None", **values: Any) -> None:
             bind_launch(plan, **values)
         except Exception:
             logger.warning("Decision launch bind failed", exc_info=True)
+
+
+def _classify_launch_target_kind(
+    source: "agent_profiles.ProfileSource", env_vars: Optional[dict] = None
+) -> str:
+    """Issue #1082's target_kind vocabulary (installed/ephemeral/workflow).
+
+    Deliberately independent of ``decisions/targets.py``'s ``TargetKind``,
+    which still has no ``workflow`` member at #1076 (merged at 2192bd43): it
+    labels a workflow step's own decision record with the bare string
+    ``"workflow"``, outside the enum. For installed/ephemeral the two stay
+    equivalent by construction -- both resolve from the same reserved-name
+    check (``routes_to_ephemeral_store``) -- but this function reuses only
+    the already-resolved profile ``source`` the launch path computed for
+    itself, rather than re-deriving it from the name.
+
+    This function's ``"workflow"`` is WIDER than #1076's: it fires on any
+    terminal launched with ``CAO_WORKFLOW_RUN_ID`` in its env, which also
+    covers YAML engine steps (``services/workflow_service.py``), not only a
+    live script run's own step (``launch_owner("run_step", ...)`` ->
+    ``script_step_of``). The two vocabularies are not merged; this is a
+    provisional choice for issue #1082, which leaves the question open.
+
+    The result is always a member of ``LAUNCH_TARGET_KINDS``; callers that
+    write it still check that against the database module's tuple rather
+    than trusting this function's return type, so a future change to this
+    classifier that drifted from that vocabulary would fail closed instead
+    of writing silently.
+    """
+    if env_vars and env_vars.get("CAO_WORKFLOW_RUN_ID"):
+        return "workflow"
+    if source is agent_profiles.ProfileSource.EPHEMERAL:
+        return "ephemeral"
+    return "installed"
+
+
+# Issue #1082, provisional: the end reason of a launch whose terminal row a
+# teardown removed before the launch record existed. That teardown had nothing
+# to stamp and its own reason is no longer known, so CAO closes the record as
+# its own cleanup of state nobody owns any more.
+_UNSTAMPED_TEARDOWN_END_REASON = "stale_cleanup"
+
+
+def _record_launch_best_effort(**values: Any) -> Optional[int]:
+    """Write issue #1082's content-free launch record. Never raises or blocks.
+
+    Returns the new record's id, or None if nothing was written. A failure
+    here must never fail or alter the launch it describes.
+    ``db_create_launch_record`` already swallows its own exceptions; this
+    wrapper additionally protects against a bad caller-side value (e.g. a
+    non-JSON-serializable ``record_ids``) blowing up before that function's
+    own try/except is reached.
+
+    Also the one place that checks ``target_kind`` against
+    ``LAUNCH_TARGET_KINDS`` before it reaches the row. An unknown value fails
+    closed: it is logged and the row is written with no kind (``None``)
+    rather than with a value the vocabulary does not recognize.
+    """
+    target_kind = values.get("target_kind")
+    if target_kind is not None and target_kind not in LAUNCH_TARGET_KINDS:
+        logger.warning(
+            f"Launch record target_kind {target_kind!r} is not one of "
+            f"LAUNCH_TARGET_KINDS {LAUNCH_TARGET_KINDS}; recording no kind"
+        )
+        values["target_kind"] = None
+    try:
+        record_id = db_create_launch_record(**values)
+    except Exception:
+        logger.warning("Launch record create failed", exc_info=True)
+        return None
+    return record_id if isinstance(record_id, int) else None
+
+
+def _close_launch_if_row_gone_best_effort(record_id: int) -> None:
+    """Close a just-written launch record whose row a teardown removed first.
+
+    Issue #1082. ``db_finalize_launch_record_if_terminal_gone`` already
+    swallows its own exceptions; this second layer matters because the call
+    sits inside the create's ``try``, where any exception would roll back a
+    launch that succeeded.
+    """
+    try:
+        db_finalize_launch_record_if_terminal_gone(
+            record_id, end_reason=_UNSTAMPED_TEARDOWN_END_REASON
+        )
+    except Exception:
+        logger.warning("Launch record finalize failed for record %s", record_id, exc_info=True)
+
+
+def _finalize_launch_best_effort(terminal_id: str, *, end_reason: str) -> None:
+    """Finalize a launch record outside a row delete (issue #1082).
+
+    ``db_finalize_launch_records`` already swallows its own exceptions; this
+    second layer keeps a bad value from failing the caller, as
+    ``_record_launch_best_effort`` does for the write.
+    """
+    try:
+        db_finalize_launch_records([terminal_id], end_reason)
+    except Exception:
+        logger.warning("Launch record finalize failed for %s", terminal_id, exc_info=True)
 
 
 def resolve_launch_model(
@@ -693,7 +801,7 @@ def _roll_back_cancelled_create(
                 session_name, window_name, created_session=created_session
             )
         try:
-            db_delete_terminal(terminal_id)
+            db_delete_terminal(terminal_id, end_reason="launch_failed")
         except Exception:
             logger.exception(
                 f"Rollback: failed to delete registry row {terminal_id} " "after a cancelled create"
@@ -844,7 +952,7 @@ def _roll_back_failed_create(
             ephemeral_service.release(terminal_id, "launch_failed")
         try:
             if terminal_id is not None:
-                db_delete_terminal(terminal_id)
+                db_delete_terminal(terminal_id, end_reason="launch_failed")
         except Exception:
             pass  # Ignore cleanup errors
     elif terminal_id is not None:
@@ -2420,6 +2528,18 @@ async def _create_terminal_unguarded(
         # the skill catalog here; Kiro (skill:// resources) and OpenCode
         # (OPENCODE_CONFIG_DIR/skills symlink) discover skills natively;
         # Copilot gets the catalog baked at install time.
+        #
+        # Issue #1082 (provisional): a fresh (non-resume) Claude Code launch
+        # gets a CAO-generated session id, stored on the launch record so a
+        # later usage adapter can join provider-native session logs to this
+        # terminal without CAO reading any transcript itself. Only Claude Code
+        # exposes a caller-chosen session id today; every other provider's
+        # stored id stays None.
+        fresh_claude_session_id: Optional[str] = (
+            str(uuid.uuid4())
+            if provider == ProviderType.CLAUDE_CODE.value and not resume_session_id
+            else None
+        )
         provider_instance = provider_manager.create_provider(
             provider,
             terminal_id,
@@ -2431,6 +2551,7 @@ async def _create_terminal_unguarded(
             model=launch_model,
             engine=resolved_engine,
             resume_session_id=resume_session_id,
+            session_id=fresh_claude_session_id,
         )
 
         # Deferred-init path: return fast so callers (e.g. MCP assign) do not
@@ -2557,6 +2678,31 @@ async def _create_terminal_unguarded(
             launch_status="launched",
             not_honored=decision_not_honored,
         )
+        # Issue #1082: on the synchronous path the provider is up by now; on
+        # the deferred path init is only scheduled, and a failed init later
+        # finalizes this record as ``launch_failed``. Deliberately not
+        # offloaded with ``to_thread``: no await may separate scheduling the
+        # deferred init from this write, or a fast init failure could finalize
+        # before the record exists and leave it open for good.
+        launch_record_id = _record_launch_best_effort(
+            terminal_id=terminal.id,
+            session_name=session_name,
+            provider=provider,
+            target_name=agent_profile,
+            target_kind=_classify_launch_target_kind(source, env_vars),
+            launched_model=launch_model,
+            model_honored=model_honored,
+            provider_session_id=resume_session_id or fresh_claude_session_id,
+            record_ids=launch_plan.record_ids if launch_plan is not None else (),
+            caller_id=caller_id,
+        )
+        # A teardown does not wait for a create: one that deleted the row
+        # before the record existed (during init, or between the row commit
+        # and this write) had nothing to stamp. Re-read the row once the
+        # record exists and close the record if the row is gone. A teardown
+        # after this check finds the record and stamps its own reason.
+        if launch_record_id is not None:
+            _close_launch_if_row_gone_best_effort(launch_record_id)
         return terminal
 
     except Exception as e:
@@ -2712,7 +2858,7 @@ def _notify_caller_of_deferred_failure(
         try:
             # Pass registry so post_kill_terminal hooks fire — parity with the
             # DELETE endpoint and agent_step teardown.
-            delete_terminal(terminal_id, registry=registry)
+            delete_terminal(terminal_id, registry=registry, end_reason="launch_failed")
         except Exception as exc:  # noqa: BLE001 — teardown is best-effort
             logger.warning(
                 "Deferred-init failure: teardown of worker %s failed (zombie "
@@ -3007,7 +3153,7 @@ def _purge_stale_session_rows_for_recreate(session_name: str) -> None:
                 session_name,
             )
             continue
-        delete_terminal_row(terminal_id, metadata, registry=None)
+        delete_terminal_row(terminal_id, metadata, registry=None, end_reason="stale_cleanup")
 
 
 def _resolve_existing_session_incarnation_locked(session_name: str) -> str:
@@ -3631,6 +3777,15 @@ async def _surface_deferred_init_failure(
     if not terminal_missing:
         await asyncio.to_thread(
             _persist_initial_delivery, terminal_id, "failed", kind=kind, message=message
+        )
+    if not terminal_missing:
+        # Issue #1082: the launch ended here, whoever owns the row's teardown.
+        # A retained external-owner tombstone (or a deferred Grok cleanup)
+        # would otherwise keep the record open until some later delete stamped
+        # an unrelated reason. First reason wins, so the CAO-owned teardown
+        # below cannot overwrite it.
+        await asyncio.to_thread(
+            _finalize_launch_best_effort, terminal_id, end_reason="launch_failed"
         )
     notification = _sanitize_deferred_failure_message(message)
     if delete_worker:
@@ -5985,6 +6140,8 @@ def delete_terminal_row(
     terminal_id: str,
     metadata: Optional[Dict],
     registry: PluginRegistry | None = None,
+    *,
+    end_reason: str,
 ) -> bool:
     """Drop a terminal's registry row and emit ``post_kill_terminal``.
 
@@ -6000,13 +6157,16 @@ def delete_terminal_row(
     that no third-party plugin ever runs inside its critical section; the
     single-terminal ``delete_terminal`` path holds no such lock and passes its
     registry straight through.
+
+    ``end_reason`` (one of ``database.LAUNCH_END_REASONS``) is stamped on the
+    terminal's launch record (issue #1082); the caller names why it ended.
     """
     # Serialize row deletion with fallback publication. Otherwise a deferred
     # init task can exhaust DB retries, a concurrent DELETE can remove the row
     # and existing sidecars, and then the background task can publish a new
     # orphan sidecar after DELETE has already returned.
     with _DEFERRED_INIT_SIDECAR_LOCK:
-        deleted = db_delete_terminal(terminal_id)
+        deleted = db_delete_terminal(terminal_id, end_reason=end_reason)
         # Sidecars are keyed by terminal id and are safe to remove even when the
         # DB row was already deleted by another lifecycle owner.
         _delete_deferred_failure_fallback(terminal_id)
@@ -6027,7 +6187,9 @@ def delete_terminal_row(
     return deleted
 
 
-def delete_terminal(terminal_id: str, registry: PluginRegistry | None = None) -> bool:
+def delete_terminal(
+    terminal_id: str, registry: PluginRegistry | None = None, *, end_reason: str
+) -> bool:
     """Delete terminal and kill its tmux window.
 
     Single-terminal teardown: all three thirds back to back, in the order they
@@ -6036,6 +6198,7 @@ def delete_terminal(terminal_id: str, registry: PluginRegistry | None = None) ->
 
     Returns False when the teardown was deferred (see
     ``dismantle_terminal_runtime``), leaving the row in place for a retry.
+    ``end_reason`` is passed through to ``delete_terminal_row``.
     """
     try:
         metadata = capture_terminal_snapshot(terminal_id)
@@ -6044,7 +6207,7 @@ def delete_terminal(terminal_id: str, registry: PluginRegistry | None = None) ->
                 "Terminal %s cleanup deferred; retaining metadata for a retry", terminal_id
             )
             return False
-        return delete_terminal_row(terminal_id, metadata, registry=registry)
+        return delete_terminal_row(terminal_id, metadata, registry=registry, end_reason=end_reason)
 
     except Exception as e:
         logger.error(f"Failed to delete terminal {terminal_id}: {e}")
