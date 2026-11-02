@@ -1,0 +1,9 @@
+cao-agent-plugin-audit: package agent-plugin/cao-agent-plugin-lifecycle
+schemas: bundled plugin.schema.json and mcp.schema.json hash to the pinned sha256
+schemas: pin agrees with CAO's PIN.json at /Volumes/workplace/open-source/cao-agent-plugin-lifecycle/src/cli_agent_orchestrator/schemas/agent_plugins/1.0.0/PIN.json
+mcp.json: absent (optional)
+skill cao-agent-plugin-audit: name 22 chars, description 966 chars, body 232 lines
+skill cao-agent-plugin-creator: name 24 chars, description 864 chars, body 325 lines
+ADVISORY manifest.description_listing [plugin.json]: declared description: "Skills for the Agent Plugins 1.0.0 package lifecycle: author a new package from an empty directory (the plugin.json manifest, skills/ and an optional mcp.json), and audit an existing one against the vendored schemas and the Agent Skills limits that CAO's own validator does not check. The audit skill bundles a validator that needs no CAO install and no network."; discovered skills: cao-agent-plugin-audit, cao-agent-plugin-creator. Read them side by side; this audit makes no judgement about whether they correspond.
+cao plugin validate: not run (CAO_AGENT_PLUGINS_ENABLED is not set to 1, true or yes)
+summary: 0 fatal, 0 skipped, 0 limit, 0 warning, 1 advisory; exit 0
