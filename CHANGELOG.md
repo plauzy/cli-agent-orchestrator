@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **`GET /agui/v1/capabilities` declares the run plane's AG-UI 1.0 capabilities (#1192).** The body
+  is one `AgentCapabilities` object in the 1.0 schema shape: identity, `transport.streaming`,
+  `tools.clientProvided: false`, `state.snapshots`, and `humanInTheLoop` with `approvals` and
+  `interrupts`. `approveWithEdits` is omitted, because each interrupt's `responseSchema` says whether
+  edit is accepted, and `transport.resumable` is never declared. The route sits behind
+  `CAO_AGUI_ENABLED` at the `cao:read` floor, like `POST /agui/v1/run`.
 - **The ambient AG-UI stream sends generative UI as `CUSTOM` `cao.generative_ui`, not
   `GENERATIVE_UI`.** AG-UI 1.0 has no `GENERATIVE_UI` event type, and its processing rules say a
   producer "MUST NOT emit an event type the protocol does not describe" (`CUSTOM` and `RAW` exist

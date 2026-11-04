@@ -2785,6 +2785,33 @@ async def agui_run(
     )
 
 
+# ---------------------------------------------------------------------------
+# Run plane capabilities (AG-UI 1.0 AgentCapabilities, #1192)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/agui/v1/capabilities")
+async def agui_capabilities(
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict[str, Any]:
+    """Return the run plane's AG-UI 1.0 capabilities (GET /agui/v1/capabilities).
+
+    The body is one ``AgentCapabilities`` object in the 1.0 schema shape. AG-UI
+    leaves retrieval to the implementation, so CAO serves it beside
+    ``POST /agui/v1/run``, at the same ``cao:read`` floor. The declaration is
+    informative; the run's own events stay authoritative. It omits
+    ``humanInTheLoop.approveWithEdits`` (each interrupt's ``responseSchema``
+    says whether edit is accepted) and never declares ``transport.resumable``.
+
+    Returns 404 when the AG-UI surface is disabled.
+    """
+    _require_agui_enabled()
+
+    from cli_agent_orchestrator.services.agui.capabilities import build_capabilities
+
+    return build_capabilities()
+
+
 # Topology widget static bundle at /widgets/topology/ — the vanilla SSE-driven
 # view consumed alongside the /events stream above. The mount is default-off
 # (no-op unless CAO_MCP_APPS_ENABLED is set) and idempotent, so re-importing this
