@@ -174,7 +174,8 @@ def test_step_frames_carry_the_terminal_in_metadata(agui_type):
         agui_type, {"step_id": "t1", "step_name": "worker"}, "th", "r", EventEncoder()
     )
     (event,) = _data([encoded])
-    assert event["metadata"] == {"cao.terminalId": "t1"}
+    # One nested ``cao`` object, the shape the ambient stream uses for CAO fields.
+    assert event["metadata"] == {"cao": {"terminalId": "t1"}}
     assert "stepId" not in event
 
 

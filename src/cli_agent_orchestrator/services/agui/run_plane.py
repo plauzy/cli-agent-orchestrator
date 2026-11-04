@@ -499,19 +499,19 @@ async def run_plane_stream(
         yield _emit(run_finished)
 
 
-# The metadata key that carries the CAO terminal behind a STEP_* frame. AG-UI 1.0
-# steps define only ``stepName``; the open ``metadata`` object is where
-# integration-specific detail belongs, under a vendor-prefixed key (the ``ag-ui``
-# key is reserved for the protocol).
-_CAO_TERMINAL_METADATA_KEY = "cao.terminalId"
+# AG-UI 1.0 steps define only ``stepName``; the open ``metadata`` object is where
+# integration-specific detail belongs (the ``ag-ui`` key is reserved for the
+# protocol). CAO's own fields live under ONE nested ``cao`` object with camelCase
+# keys, the same shape the ambient stream uses, so both planes agree.
+_CAO_METADATA_KEY = "cao"
 
 
 def _terminal_metadata(data: Dict[str, Any]) -> Dict[str, Any]:
-    """``{"metadata": {"cao.terminalId": ...}}`` when the frame names a terminal."""
+    """``{"metadata": {"cao": {"terminalId": ...}}}`` when the frame names a terminal."""
     terminal_id = data.get("step_id") or data.get("terminal_id")
     if not terminal_id:
         return {}
-    return {"metadata": {_CAO_TERMINAL_METADATA_KEY: terminal_id}}
+    return {"metadata": {_CAO_METADATA_KEY: {"terminalId": terminal_id}}}
 
 
 def _fallback_step_name(data: Dict[str, Any]) -> Optional[str]:
