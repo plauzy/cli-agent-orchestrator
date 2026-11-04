@@ -13,9 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one resume answers them all, on that run's `threadId`. A run that only collects starts a fresh
   thread, so it never continues past an interrupt it does not answer. The page never abandons a
   prompt on the operator's behalf, because on CAO an abandoned (`cancelled`) entry is a deny.
-- **Run-plane interrupts carry `expiresAt` when CAO knows the deadline.** The AG-UI 1.0 `Interrupt`
-  field mirrors CAO's `Interrupt.expires_at`. CAO expires an interrupt when its terminal leaves the
-  waiting state, so today's providers set no deadline in advance and the key stays absent.
+- **The run plane passes `Interrupt.expiresAt` through when set.** The AG-UI 1.0 field mirrors
+  CAO's `Interrupt.expires_at` and is omitted when that is unset. Nothing in CAO sets it today: an
+  interrupt expires when its terminal leaves the waiting state, with no deadline known in advance, so
+  the key is absent on every current provider. Anything that sets it must use ISO 8601, the schema's
+  documented convention.
 - **Run-plane events carry only the fields the AG-UI 1.0 schema defines.** `POST /agui/v1/run` no
   longer puts `threadId`/`runId` on `STATE_SNAPSHOT`, `STATE_DELTA`, `STEP_*`, `TOOL_CALL_*`,
   `CUSTOM` and `RUN_ERROR`; only `RUN_STARTED` and `RUN_FINISHED` carry them, as the schema says. The
