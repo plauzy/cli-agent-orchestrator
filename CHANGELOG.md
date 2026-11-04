@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Run-plane interrupts carry `expiresAt` when CAO knows the deadline.** The AG-UI 1.0 `Interrupt`
+  field mirrors CAO's `Interrupt.expires_at`. CAO expires an interrupt when its terminal leaves the
+  waiting state, so today's providers set no deadline in advance and the key stays absent.
 - **Run-plane events carry only the fields the AG-UI 1.0 schema defines.** `POST /agui/v1/run` no
   longer puts `threadId`/`runId` on `STATE_SNAPSHOT`, `STATE_DELTA`, `STEP_*`, `TOOL_CALL_*`,
   `CUSTOM` and `RUN_ERROR`; only `RUN_STARTED` and `RUN_FINISHED` carry them, as the schema says. The

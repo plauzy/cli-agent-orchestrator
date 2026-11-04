@@ -397,6 +397,11 @@ async def run_plane_stream(
                     message=p.message,
                     metadata=ag_meta,
                     response_schema=_response_schema(p.options),
+                    # AG-UI 1.0 Interrupt.expiresAt, ISO 8601 by convention. CAO
+                    # expires an interrupt when its terminal leaves the waiting
+                    # state, so most interrupts have no deadline known ahead of
+                    # time; the key is sent only when one is set.
+                    expires_at=p.expires_at,
                 )
                 ag_interrupts.append(ag_intr)
 

@@ -195,3 +195,33 @@ def test_step_frame_without_a_terminal_has_no_metadata():
     )
     (event,) = _data([encoded])
     assert "metadata" not in event
+
+
+# ---------------------------------------------------------------------------
+# W5 (A-O4): the interrupt's expiry reaches the wire as ``expiresAt``
+# ---------------------------------------------------------------------------
+
+
+def _interrupts(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    finished = events[-1]
+    assert finished["type"] == "RUN_FINISHED" and finished["outcome"]["type"] == "interrupt"
+    return finished["outcome"]["interrupts"]
+
+
+@pytest.mark.asyncio
+async def test_interrupt_carries_expires_at_when_cao_knows_it():
+    """``Interrupt.expiresAt`` (ISO 8601 by convention) mirrors CAO's ``expires_at``."""
+    construct = _construct()
+    pending = _raise(construct)
+    pending.expires_at = "2026-11-04T18:00:00+00:00"
+    (intr,) = _interrupts(await _stream(construct))
+    assert intr["expiresAt"] == "2026-11-04T18:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_interrupt_omits_expires_at_when_unknown():
+    """Absent means absent: no deadline, no key (never ``null``)."""
+    construct = _construct()
+    _raise(construct)
+    (intr,) = _interrupts(await _stream(construct))
+    assert "expiresAt" not in intr
