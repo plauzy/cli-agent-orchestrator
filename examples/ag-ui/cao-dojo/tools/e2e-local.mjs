@@ -522,8 +522,15 @@ async function pagePhase() {
     "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
     "Access-Control-Allow-Methods": "POST",
   };
+  // Every POST body the page sent to the stubbed run plane, parsed.
+  const runRequests = [];
   await page.route("http://*.test/agui/v1/run", async (route) => {
     if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers: cors });
+    try {
+      runRequests.push(JSON.parse(route.request().postData() ?? "null"));
+    } catch {
+      runRequests.push(null);
+    }
     if (holdRun) await holdRun;
     return route.fulfill({
       status: 200,
@@ -717,6 +724,58 @@ async function pagePhase() {
     expect(
       /closer-one/.test(logText) && /closer-two/.test(logText),
       "frames without an id: line after a record are logged, not dropped",
+    );
+
+    // 12. AG-UI 1.0 basic/run-input.mdx: "a consumer implementing this version
+    // MUST declare the version it speaks here". Every run body says 1.0.
+    await connect();
+    runRequests.length = 0;
+    runBody = finished({ type: "success" });
+    await page.locator("#send").click();
+    await page.locator('[data-testid="run-result"]').first().waitFor({ timeout: 5_000 }).catch(() => {});
+    expect(
+      runRequests.length === 1 && runRequests[0]?.protocolVersion === "1.0",
+      `the run input declares protocolVersion "1.0" (got ${JSON.stringify(runRequests[0]?.protocolVersion)})`,
+    );
+
+    // 13. basic/patterns/interrupt-resume.mdx: "The resume list MUST cover every
+    // interrupt of the run being continued". With two interrupts open, deciding
+    // one sends nothing; deciding the second sends one resume covering both.
+    await connect();
+    const interrupt = (id) => ({
+      id,
+      reason: "claude-code:permission_request",
+      metadata: { options: ["approve", "deny"], provider: "claude_code", terminalId: "t-" + id },
+    });
+    runBody = finished({ type: "interrupt", interrupts: [interrupt("multi-a"), interrupt("multi-b")] });
+    await page.locator("#send").click();
+    await page
+      .locator('[data-interrupt-id="multi-b"][data-state="pending"]')
+      .waitFor({ timeout: 5_000 })
+      .catch(() => {});
+    runRequests.length = 0;
+    runBody = finished({ type: "success" });
+    await page.locator('[data-interrupt-id="multi-a"] [data-testid="approval-approve"]').click();
+    await page.waitForTimeout(300);
+    expect(runRequests.length === 0, `deciding one of two interrupts sends nothing yet (sent ${runRequests.length})`);
+    expect((await stateOf("multi-a")) === "held", `the decided card is held (got ${await stateOf("multi-a")})`);
+    await page.locator('[data-interrupt-id="multi-b"] [data-testid="approval-reject"]').click();
+    await page
+      .locator('[data-interrupt-id="multi-b"][data-state="rejected"]')
+      .waitFor({ timeout: 5_000 })
+      .catch(() => {});
+    const sent = runRequests.length === 1 ? runRequests[0].resume : null;
+    expect(
+      JSON.stringify(sent) ===
+        JSON.stringify([
+          { interruptId: "multi-a", status: "resolved", payload: { approved: true } },
+          { interruptId: "multi-b", status: "resolved", payload: { approved: false } },
+        ]),
+      `one resume covers both interrupts, in order (got ${JSON.stringify(runRequests.map((r) => r?.resume))})`,
+    );
+    expect(
+      (await stateOf("multi-a")) === "approved" && (await stateOf("multi-b")) === "rejected",
+      `both cards settle as decided (got ${await stateOf("multi-a")}, ${await stateOf("multi-b")})`,
     );
   } catch (error) {
     expect(false, `driver error: ${error.message.split("\n")[0]}`);

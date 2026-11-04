@@ -88,6 +88,7 @@
   .gcard[data-state="rejected"] { border-color: var(--err); }
   .gcard[data-state="settled"] { opacity: 0.6; }
   .gcard[data-state="skipped"] { opacity: 0.6; border-style: dashed; }
+  .gcard[data-state="held"] { border-style: dotted; }
   .fields { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; font-size: 13px; }
   .fields dt { color: var(--muted); }
   .fields dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
@@ -182,6 +183,9 @@
   // follow deadline since #1107, and resume delivery has no hard timeout); this
   // is only a backstop so the page can never sit in a run forever.
   var RUN_TIMEOUT_MS = 150 * 1000;
+  // The AG-UI version this page speaks, declared on every RunAgentInput
+  // (AG-UI 1.0 basic/run-input: a consumer MUST declare it).
+  var PROTOCOL_VERSION = "1.0";
 
   var els = {
     endpoint: document.getElementById("endpoint"),
@@ -210,6 +214,13 @@
   var resolved = new Map();
   var runInFlight = false;
   var threadId = "cao-dojo-" + randomId();
+  // The interrupt ids of the most recent run that ended with the interrupt
+  // outcome. AG-UI 1.0 interrupt-resume: "The resume list MUST cover every
+  // interrupt of the run being continued", so a resume is sent only once each of
+  // these has a decision. Cleared when a run ends any other way.
+  var lastInterrupted = [];
+  // interrupt_id -> {card, approved}: decisions made but not sent yet.
+  var decisions = new Map();
 
   function randomId() {
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -341,11 +352,12 @@
     rejected: "rejected",
     settled: "no longer pending",
     skipped: "answer not used",
+    held: "decided",
   };
   function setCardState(card, state, note) {
     card.setAttribute("data-state", state);
     var id = card.getAttribute("data-interrupt-id");
-    if (state === "pending" || state === "sending") resolved.delete(id);
+    if (state === "pending" || state === "sending" || state === "held") resolved.delete(id);
     else resolved.set(id, state);
     card._state.textContent = STATE_LABEL[state] + (note ? " — " + note : "");
     var live = state === "pending";
@@ -642,7 +654,7 @@
     var ids = [];
     cards.forEach(function (card, id) {
       var state = card.getAttribute("data-state");
-      if (state === "pending" || state === "sending") ids.push(id);
+      if (state === "pending" || state === "sending" || state === "held") ids.push(id);
     });
     return ids;
   }
@@ -655,7 +667,10 @@
       var card = cards.get(id);
       if (!card) return;
       var state = card.getAttribute("data-state");
-      if ((state === "pending" || state === "sending") && openIds.indexOf(id) < 0) setCardState(card, "settled");
+      if ((state === "pending" || state === "sending" || state === "held") && openIds.indexOf(id) < 0) {
+        decisions.delete(id);
+        setCardState(card, "settled");
+      }
     });
   }
   // Ids of the resume entries CAO did not use, from RUN_FINISHED.result
@@ -676,24 +691,34 @@
       var card = cards.get(id);
       if (card) setCardState(card, "skipped", "this prompt was no longer pending");
     });
-    var decidedSkipped = decided && skipped.indexOf(decided.card.getAttribute("data-interrupt-id")) >= 0;
-    if (decided && !decidedSkipped) {
-      setCardState(decided.card, decided.approved ? "approved" : "rejected", "answer sent");
-    }
+    decided = decided || [];
+    var decidedSkipped = decided.length > 0 && decided.every(function (d) {
+      return skipped.indexOf(d.card.getAttribute("data-interrupt-id")) >= 0;
+    });
+    decided.forEach(function (d) {
+      var id = d.card.getAttribute("data-interrupt-id");
+      decisions.delete(id);
+      if (skipped.indexOf(id) < 0) setCardState(d.card, d.approved ? "approved" : "rejected", "answer sent");
+    });
     if (outcome === "interrupt") {
+      lastInterrupted = (data.outcome.interrupts || []).map(function (intr) { return String(intr.id); });
       var open = (data.outcome.interrupts || []).map(function (intr) {
         var card = addApprovalCard(interruptToProps(intr));
-        if (card && card.getAttribute("data-state") !== "pending") setCardState(card, "pending");
+        var state = card && card.getAttribute("data-state");
+        if (card && state !== "pending" && state !== "held") setCardState(card, "pending");
         return String(intr.id);
       });
       reconcile(open, openAtStart);
       addRunResult("RUN_FINISHED", outcome, open.length + " approval(s) waiting" + skippedNote(skipped), skipped);
     } else {
+      lastInterrupted = [];
       reconcile([], openAtStart);
       var detail = decidedSkipped
         ? "answer not used: this prompt was no longer pending"
-        : decided
-          ? (decided.approved ? "approval sent" : "rejection sent") + skippedNote(skipped)
+        : decided.length
+          ? (decided.length > 1
+            ? decided.length + " answers sent"
+            : (decided[0].approved ? "approval sent" : "rejection sent")) + skippedNote(skipped)
           : skipped.length
             ? skipped.length + " answer(s) not used: no longer pending"
             : "nothing is waiting for approval";
@@ -708,6 +733,7 @@
   function runAgentInput(extra) {
     var prompt = (els.prompt.value || "").trim();
     var body = {
+      protocolVersion: PROTOCOL_VERSION,
       threadId: threadId,
       runId: randomId(),
       state: {},
@@ -728,7 +754,7 @@
     var base = baseUrl();
     if (!base) {
       addRunResult("HTTP_ERROR", null, "enter a cao-server URL");
-      if (decided) setCardState(decided.card, "pending", "not sent: enter a cao-server URL");
+      undecide(decided, "not sent: enter a cao-server URL");
       return;
     }
     setRunInFlight(true);
@@ -747,7 +773,7 @@
         try { detail = (await res.json()).detail || ""; } catch (e) { detail = ""; }
         ended = "HTTP_ERROR";
         addRunResult("HTTP_ERROR", null, "HTTP " + res.status + (detail ? ": " + detail : ""));
-        if (decided) setCardState(decided.card, "pending", "not sent (HTTP " + res.status + ")");
+        undecide(decided, "not sent (HTTP " + res.status + ")");
         return;
       }
       var reader = res.body.getReader();
@@ -777,14 +803,14 @@
           } else if (type === "RUN_ERROR") {
             ended = type;
             addRunResult("RUN_ERROR", null, data.message || "");
-            if (decided) setCardState(decided.card, "pending", "RUN_ERROR: " + (data.message || ""));
+            undecide(decided, "RUN_ERROR: " + (data.message || ""));
           }
         }
       }
       if (!ended) {
         ended = "NO_END";
         addRunResult("NO_END", null, "the stream closed without RUN_FINISHED or RUN_ERROR");
-        if (decided) setCardState(decided.card, "pending", "run ended without a result");
+        undecide(decided, "run ended without a result");
       }
     } catch (e) {
       if (!ended) {
@@ -792,25 +818,72 @@
         addRunResult("HTTP_ERROR", null, abort.signal.aborted
           ? "no RUN_FINISHED within " + RUN_TIMEOUT_MS / 1000 + " s"
           : "request failed: " + e.message + " (is this page's origin in CAO_CORS_ORIGINS?)");
-        if (decided) setCardState(decided.card, "pending", "not sent");
+        undecide(decided, "not sent");
       }
     } finally {
       clearTimeout(timer);
       setRunInFlight(false);
     }
   }
+  // Put the cards of a resume that was not used back to pending, and forget
+  // their decisions, so the operator decides again.
+  function undecide(decided, note) {
+    (decided || []).forEach(function (d) {
+      decisions.delete(d.card.getAttribute("data-interrupt-id"));
+      setCardState(d.card, "pending", note);
+    });
+  }
+  // The page's buildResumeArray (as upstream @ag-ui/client's): one entry per
+  // interrupt, in order, refusing a missing answer or one for an id not listed.
+  // ag-ui's ResumeEntry requires status; without it the run stream breaks
+  // before RUN_STARTED instead of answering RUN_ERROR.
+  function buildResumeArray(ids, responses) {
+    var missing = ids.filter(function (id) { return !responses.has(id); });
+    if (missing.length) throw new Error("missing responses for open interrupts: " + missing.join(", "));
+    var unknown = [];
+    responses.forEach(function (_v, id) { if (ids.indexOf(id) < 0) unknown.push(id); });
+    if (unknown.length) throw new Error("responses reference unknown interrupt ids: " + unknown.join(", "));
+    return ids.map(function (id) {
+      return { interruptId: id, status: "resolved", payload: { approved: responses.get(id).approved } };
+    });
+  }
+  // A raw single-entry resume, for the test seam only: it deliberately skips the
+  // coverage rule so the e2e can send an id CAO never raised.
   function resume(interruptId, payload, decided) {
-    // ag-ui's ResumeEntry requires status; without it the run stream breaks
-    // before RUN_STARTED instead of answering RUN_ERROR.
     var entry = { interruptId: String(interruptId), status: "resolved", payload: payload };
     return run(runAgentInput({ resume: [entry] }), decided);
   }
+  // Record a decision. The resume goes out once every interrupt of the most
+  // recent interrupted run has one (AG-UI 1.0: the list MUST cover them all);
+  // until then the card is held. The page never abandons a prompt for the
+  // operator: on CAO an abandoned (cancelled) entry is a deny typed into the CLI.
+  // A card known only from the stream, with no interrupted run outstanding, is
+  // answered on its own.
   function decide(card, approved) {
     if (runInFlight || card.getAttribute("data-state") !== "pending") return;
-    setCardState(card, "sending");
-    card._approve.disabled = true;
-    card._reject.disabled = true;
-    resume(card.getAttribute("data-interrupt-id"), { approved: approved }, { card: card, approved: approved });
+    var id = card.getAttribute("data-interrupt-id");
+    decisions.set(id, { card: card, approved: approved });
+    var waiting = lastInterrupted.filter(function (i) { return !decisions.has(i); });
+    if (waiting.length) {
+      setCardState(card, "held", "waiting for your answer to " + waiting.length + " other prompt(s)");
+      return;
+    }
+    var ids = lastInterrupted.slice();
+    decisions.forEach(function (_d, i) { if (ids.indexOf(i) < 0) ids.push(i); });
+    var entries;
+    try {
+      entries = buildResumeArray(ids, decisions);
+    } catch (e) {
+      addRunResult("NOT_SENT", null, e.message);
+      return;
+    }
+    var decided = ids.map(function (i) { return decisions.get(i); });
+    decided.forEach(function (d) {
+      setCardState(d.card, "sending");
+      d.card._approve.disabled = true;
+      d.card._reject.disabled = true;
+    });
+    run(runAgentInput({ resume: entries }), decided);
   }
 
   els.connect.addEventListener("click", connect);
