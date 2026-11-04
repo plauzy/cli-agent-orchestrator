@@ -10,8 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The CAO Dojo page follows the AG-UI 1.0 consumer rules.** Every `RunAgentInput` it sends
   declares `protocolVersion: "1.0"`. Its resume list covers every interrupt of the run it continues:
   when that run listed several approvals, a decided card is held until each has an answer, and then
-  one resume answers them all. The page never abandons a prompt on the operator's behalf, because on
-  CAO an abandoned (`cancelled`) entry is a deny.
+  one resume answers them all, on that run's `threadId`. A run that only collects starts a fresh
+  thread, so it never continues past an interrupt it does not answer. The page never abandons a
+  prompt on the operator's behalf, because on CAO an abandoned (`cancelled`) entry is a deny.
 - **Run-plane interrupts carry `expiresAt` when CAO knows the deadline.** The AG-UI 1.0 `Interrupt`
   field mirrors CAO's `Interrupt.expires_at`. CAO expires an interrupt when its terminal leaves the
   waiting state, so today's providers set no deadline in advance and the key stays absent.

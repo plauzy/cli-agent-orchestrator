@@ -213,12 +213,14 @@
   // window resends an answered card's frame, which must not reopen it.
   var resolved = new Map();
   var runInFlight = false;
-  var threadId = "cao-dojo-" + randomId();
   // The interrupt ids of the most recent run that ended with the interrupt
-  // outcome. AG-UI 1.0 interrupt-resume: "The resume list MUST cover every
-  // interrupt of the run being continued", so a resume is sent only once each of
-  // these has a decision. Cleared when a run ends any other way.
+  // outcome, and that run's threadId. AG-UI 1.0 interrupt-resume: "The resume
+  // list MUST cover every interrupt of the run being continued", so a resume is
+  // sent only once each of these has a decision, on that run's thread. A run
+  // that only collects starts a fresh thread, so it never continues past an
+  // interrupt it does not answer. Both are cleared when a run ends any other way.
   var lastInterrupted = [];
+  var lastInterruptedThread = null;
   // interrupt_id -> {card, approved}: decisions made but not sent yet.
   var decisions = new Map();
 
@@ -682,7 +684,7 @@
       .filter(function (s) { return s && typeof s.interruptId === "string"; })
       .map(function (s) { return s.interruptId; });
   }
-  function onRunFinished(data, decided, openAtStart) {
+  function onRunFinished(data, decided, openAtStart, runThreadId) {
     var outcome = data.outcome && data.outcome.type;
     var skipped = skippedIds(data);
     // A skipped answer was not used, so the card is neither approved nor
@@ -702,6 +704,14 @@
     });
     if (outcome === "interrupt") {
       lastInterrupted = (data.outcome.interrupts || []).map(function (intr) { return String(intr.id); });
+      lastInterruptedThread = runThreadId || null;
+      // A decision for an interrupt this run no longer lists cannot be sent:
+      // drop it, and put a still-held card back to pending.
+      decisions.forEach(function (d, id) {
+        if (lastInterrupted.indexOf(id) >= 0) return;
+        decisions.delete(id);
+        if (d.card.getAttribute("data-state") === "held") setCardState(d.card, "pending");
+      });
       var open = (data.outcome.interrupts || []).map(function (intr) {
         var card = addApprovalCard(interruptToProps(intr));
         var state = card && card.getAttribute("data-state");
@@ -712,6 +722,7 @@
       addRunResult("RUN_FINISHED", outcome, open.length + " approval(s) waiting" + skippedNote(skipped), skipped);
     } else {
       lastInterrupted = [];
+      lastInterruptedThread = null;
       reconcile([], openAtStart);
       var detail = decidedSkipped
         ? "answer not used: this prompt was no longer pending"
@@ -734,7 +745,7 @@
     var prompt = (els.prompt.value || "").trim();
     var body = {
       protocolVersion: PROTOCOL_VERSION,
-      threadId: threadId,
+      threadId: "cao-dojo-" + randomId(),
       runId: randomId(),
       state: {},
       messages: prompt ? [{ id: randomId(), role: "user", content: prompt }] : [],
@@ -799,7 +810,7 @@
             renderFleet();
           } else if (type === "RUN_FINISHED") {
             ended = type;
-            onRunFinished(data, decided, openAtStart);
+            onRunFinished(data, decided, openAtStart, body.threadId);
           } else if (type === "RUN_ERROR") {
             ended = type;
             addRunResult("RUN_ERROR", null, data.message || "");
@@ -824,6 +835,8 @@
       clearTimeout(timer);
       setRunInFlight(false);
     }
+    // Held decisions may now cover every interrupt of the latest interrupted run.
+    if (decisions.size) sendIfCovered();
   }
   // Put the cards of a resume that was not used back to pending, and forget
   // their decisions, so the operator decides again.
@@ -851,7 +864,9 @@
   // coverage rule so the e2e can send an id CAO never raised.
   function resume(interruptId, payload, decided) {
     var entry = { interruptId: String(interruptId), status: "resolved", payload: payload };
-    return run(runAgentInput({ resume: [entry] }), decided);
+    var extra = { resume: [entry] };
+    if (lastInterruptedThread) extra.threadId = lastInterruptedThread;
+    return run(runAgentInput(extra), decided);
   }
   // Record a decision. The resume goes out once every interrupt of the most
   // recent interrupted run has one (AG-UI 1.0: the list MUST cover them all);
@@ -861,11 +876,18 @@
   // answered on its own.
   function decide(card, approved) {
     if (runInFlight || card.getAttribute("data-state") !== "pending") return;
-    var id = card.getAttribute("data-interrupt-id");
-    decisions.set(id, { card: card, approved: approved });
+    decisions.set(card.getAttribute("data-interrupt-id"), { card: card, approved: approved });
+    sendIfCovered();
+  }
+  // Send the held decisions as one resume once they cover every interrupt of the
+  // latest interrupted run, on that run's thread; otherwise show them held.
+  function sendIfCovered() {
+    if (runInFlight || !decisions.size) return;
     var waiting = lastInterrupted.filter(function (i) { return !decisions.has(i); });
     if (waiting.length) {
-      setCardState(card, "held", "waiting for your answer to " + waiting.length + " other prompt(s)");
+      decisions.forEach(function (d) {
+        setCardState(d.card, "held", "waiting for your answer to " + waiting.length + " other prompt(s)");
+      });
       return;
     }
     var ids = lastInterrupted.slice();
@@ -883,7 +905,9 @@
       d.card._approve.disabled = true;
       d.card._reject.disabled = true;
     });
-    run(runAgentInput({ resume: entries }), decided);
+    var extra = { resume: entries };
+    if (lastInterruptedThread) extra.threadId = lastInterruptedThread;
+    run(runAgentInput(extra), decided);
   }
 
   els.connect.addEventListener("click", connect);

@@ -753,6 +753,7 @@ async function pagePhase() {
       .locator('[data-interrupt-id="multi-b"][data-state="pending"]')
       .waitFor({ timeout: 5_000 })
       .catch(() => {});
+    const multiThread = runRequests.at(-1)?.threadId;
     runRequests.length = 0;
     runBody = finished({ type: "success" });
     await page.locator('[data-interrupt-id="multi-a"] [data-testid="approval-approve"]').click();
@@ -774,8 +775,60 @@ async function pagePhase() {
       `one resume covers both interrupts, in order (got ${JSON.stringify(runRequests.map((r) => r?.resume))})`,
     );
     expect(
+      typeof multiThread === "string" && runRequests[0]?.threadId === multiThread,
+      "the resume continues the interrupted run's thread",
+    );
+    expect(
       (await stateOf("multi-a")) === "approved" && (await stateOf("multi-b")) === "rejected",
       `both cards settle as decided (got ${await stateOf("multi-a")}, ${await stateOf("multi-b")})`,
+    );
+
+    // 14. A collecting run sent while a decision is held starts a fresh thread
+    // (it must not continue past the interrupts it does not answer), and when its
+    // interrupt outcome replaces the list, decisions for ids still listed are
+    // kept and the rest dropped; the resume then covers the new list on the new
+    // run's thread.
+    await connect();
+    runRequests.length = 0;
+    runBody = finished({ type: "interrupt", interrupts: [interrupt("keep-a"), interrupt("gone-b")] });
+    await page.locator("#send").click();
+    await page
+      .locator('[data-interrupt-id="gone-b"][data-state="pending"]')
+      .waitFor({ timeout: 5_000 })
+      .catch(() => {});
+    const firstThread = runRequests.at(-1)?.threadId;
+    await page.locator('[data-interrupt-id="keep-a"] [data-testid="approval-approve"]').click();
+    expect((await stateOf("keep-a")) === "held", `the decided card is held (got ${await stateOf("keep-a")})`);
+    runRequests.length = 0;
+    runBody = finished({ type: "interrupt", interrupts: [interrupt("keep-a"), interrupt("new-c")] });
+    await page.locator("#send").click();
+    await page
+      .locator('[data-interrupt-id="new-c"][data-state="pending"]')
+      .waitFor({ timeout: 5_000 })
+      .catch(() => {});
+    const secondThread = runRequests[0]?.threadId;
+    expect(
+      runRequests.length === 1 && !runRequests[0].resume && typeof secondThread === "string" && secondThread !== firstThread,
+      `the collecting run uses a fresh threadId, not the interrupted run's (${secondThread} vs ${firstThread})`,
+    );
+    expect((await stateOf("keep-a")) === "held", `a decision for an id still listed is kept (got ${await stateOf("keep-a")})`);
+    expect((await stateOf("gone-b")) === "settled", `a card the new list dropped is settled (got ${await stateOf("gone-b")})`);
+    runRequests.length = 0;
+    runBody = finished({ type: "success" });
+    await page.locator('[data-interrupt-id="new-c"] [data-testid="approval-reject"]').click();
+    await page
+      .locator('[data-interrupt-id="new-c"][data-state="rejected"]')
+      .waitFor({ timeout: 5_000 })
+      .catch(() => {});
+    expect(
+      runRequests.length === 1 &&
+        runRequests[0].threadId === secondThread &&
+        JSON.stringify(runRequests[0].resume) ===
+          JSON.stringify([
+            { interruptId: "keep-a", status: "resolved", payload: { approved: true } },
+            { interruptId: "new-c", status: "resolved", payload: { approved: false } },
+          ]),
+      `the resume covers the new list on its thread (got ${JSON.stringify(runRequests.map((r) => [r?.threadId, r?.resume]))})`,
     );
   } catch (error) {
     expect(false, `driver error: ${error.message.split("\n")[0]}`);
