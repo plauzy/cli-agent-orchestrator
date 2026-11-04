@@ -1,4 +1,4 @@
-"""Every run-plane event carries only the fields the AG-UI 1.0 schema defines (A-M13).
+"""Every run-plane event validates against the AG-UI 1.0 JSON Schema (A-M13).
 
 AG-UI 1.0 ``architecture.mdx`` (Design Principles, "Tolerant reader, strict
 writer"): "A producer MUST emit only what the schema defines". The schema closes
@@ -6,6 +6,14 @@ every event (``unevaluatedProperties: false``), while the SDK models are
 ``extra="allow"``, so a ``thread_id=`` or ``run_id=`` passed to an event that
 does not define them reaches the wire as an undescribed key. Only
 ``RUN_STARTED`` and ``RUN_FINISHED`` carry ``threadId``/``runId``.
+
+Each frame is validated with a Draft 2020-12 validator against the vendored
+``spec/1.0/schema.json`` (``#/$defs/Event``), not with the SDK models, because
+``extra="allow"`` would accept the very keys under test.
+
+``_translate_live_frame`` is reached only when the run plane is given a
+``bus_subscribe_fn``; ``POST /agui/v1/run`` passes none today, so those tests
+cover the function, not the wire.
 """
 
 from __future__ import annotations
@@ -17,7 +25,8 @@ import pytest
 
 pytest.importorskip("ag_ui")
 
-from ag_ui.core import events as agui_events  # noqa: E402
+from test.services.agui.agui_schema import schema_errors  # noqa: E402
+
 from ag_ui.encoder import EventEncoder  # noqa: E402
 
 from cli_agent_orchestrator.services.agui.base import RecordingUiEmitter  # noqa: E402
@@ -31,26 +40,6 @@ from cli_agent_orchestrator.services.agui.run_plane import (  # noqa: E402
 
 _KIRO_PROMPT = ("kiro_cli", "Allow this action? [y/n/t]:")
 _SELECTOR_PROMPT = ("claude_code", "\u2191/\u2193 to navigate")
-
-# AG-UI event type -> SDK model, for every type the run plane can emit.
-_MODELS = {
-    "RUN_STARTED": agui_events.RunStartedEvent,
-    "RUN_FINISHED": agui_events.RunFinishedEvent,
-    "RUN_ERROR": agui_events.RunErrorEvent,
-    "STATE_SNAPSHOT": agui_events.StateSnapshotEvent,
-    "STATE_DELTA": agui_events.StateDeltaEvent,
-    "STEP_STARTED": agui_events.StepStartedEvent,
-    "STEP_FINISHED": agui_events.StepFinishedEvent,
-    "TOOL_CALL_START": agui_events.ToolCallStartEvent,
-    "TOOL_CALL_END": agui_events.ToolCallEndEvent,
-    "CUSTOM": agui_events.CustomEvent,
-}
-
-
-def _undescribed_keys(event: Dict[str, Any]) -> List[str]:
-    model = _MODELS[event["type"]]
-    allowed = {f.alias or name for name, f in model.model_fields.items()} | set(model.model_fields)
-    return sorted(set(event) - allowed)
 
 
 def _data(frames: List[str]) -> List[Dict[str, Any]]:
@@ -123,7 +112,7 @@ async def test_interrupt_run_emits_only_described_fields():
     events = await _stream(construct)
     assert [e["type"] for e in events] == ["RUN_STARTED", "STATE_SNAPSHOT", "RUN_FINISHED"]
     for event in events:
-        assert _undescribed_keys(event) == [], event
+        assert schema_errors(event) == [], event
 
 
 @pytest.mark.asyncio
@@ -131,7 +120,7 @@ async def test_success_run_emits_only_described_fields():
     events = await _stream(_construct())
     assert [e["type"] for e in events] == ["RUN_STARTED", "STATE_SNAPSHOT", "RUN_FINISHED"]
     for event in events:
-        assert _undescribed_keys(event) == [], event
+        assert schema_errors(event) == [], event
 
 
 @pytest.mark.asyncio
@@ -152,7 +141,7 @@ async def test_run_error_exits_emit_only_described_fields(prompt, delivery, payl
     )
     assert events[-1]["type"] == "RUN_ERROR", events
     for event in events:
-        assert _undescribed_keys(event) == [], event
+        assert schema_errors(event) == [], event
 
 
 @pytest.mark.parametrize(
@@ -175,7 +164,7 @@ def test_live_frames_emit_only_described_fields(agui_type, data):
     encoded = _translate_live_frame(agui_type, data, "thread-m13", "run-m13", EventEncoder())
     assert encoded is not None
     (event,) = _data([encoded])
-    assert _undescribed_keys(event) == [], event
+    assert schema_errors(event) == [], event
 
 
 @pytest.mark.parametrize("agui_type", ["STEP_STARTED", "STEP_FINISHED"])
@@ -225,3 +214,10 @@ async def test_interrupt_omits_expires_at_when_unknown():
     _raise(construct)
     (intr,) = _interrupts(await _stream(construct))
     assert "expiresAt" not in intr
+
+
+def test_the_schema_check_rejects_an_undescribed_event_key():
+    """Guard for the guard: the old ``threadId`` on RUN_ERROR fails the schema."""
+    assert schema_errors({"type": "RUN_ERROR", "message": "x", "threadId": "t"})
+    assert schema_errors({"type": "STEP_STARTED", "stepName": "s", "stepId": "t1"})
+    assert schema_errors({"type": "RUN_ERROR", "message": "x"}) == []

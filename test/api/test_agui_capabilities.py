@@ -8,6 +8,7 @@ CAO serves it beside the run plane, at the same scope floor.
 
 from __future__ import annotations
 
+from test.services.agui.agui_schema import schema_errors
 from typing import Any, Dict
 
 import pytest
@@ -32,16 +33,6 @@ def _auth_off(monkeypatch):
     monkeypatch.setattr("cli_agent_orchestrator.security.auth.is_auth_enabled", lambda: False)
 
 
-def _assert_no_extra(model: Any, path: str = "") -> None:
-    """Fail if any model in the tree kept a key the schema does not define."""
-    extra = getattr(model, "model_extra", None) or {}
-    assert not extra, f"undescribed capability key(s) at {path or '<root>'}: {sorted(extra)}"
-    for name in type(model).model_fields:
-        child = getattr(model, name)
-        if hasattr(child, "model_fields"):
-            _assert_no_extra(child, f"{path}.{name}" if path else name)
-
-
 def test_capabilities_route_returns_the_declaration():
     resp = client.get(ROUTE)
     assert resp.status_code == 200
@@ -56,15 +47,22 @@ def test_capabilities_404_when_agui_disabled(monkeypatch):
 
 
 def test_capabilities_body_is_the_1_0_schema_shape():
-    """Every key validates against the SDK's AgentCapabilities, with nothing extra."""
-    pytest.importorskip("ag_ui")
-    from ag_ui.core import AgentCapabilities
-
+    """The body validates against ``#/$defs/AgentCapabilities`` in the vendored 1.0
+    schema (Draft 2020-12). The schema closes every group with
+    ``unevaluatedProperties: false``, so an undescribed key fails here; the SDK
+    models are ``extra="allow"`` and would not catch it."""
     body = client.get(ROUTE).json()
-    model = AgentCapabilities.model_validate(body)
-    _assert_no_extra(model)
-    # Round trip: the wire form is exactly the model's camelCase, None-free form.
-    assert model.model_dump(by_alias=True, exclude_none=True) == body
+    assert schema_errors(body, "AgentCapabilities") == []
+
+
+def test_the_schema_check_rejects_an_undescribed_capability():
+    """Guard for the guard: an extra key, or a wrong type, fails the schema."""
+    body = client.get(ROUTE).json()
+    body["humanInTheLoop"]["editWithArgs"] = True
+    assert schema_errors(body, "AgentCapabilities")
+    body = client.get(ROUTE).json()
+    body["humanInTheLoop"]["interrupts"] = "yes"
+    assert schema_errors(body, "AgentCapabilities")
 
 
 def test_capabilities_omit_approve_with_edits_and_resumable():
