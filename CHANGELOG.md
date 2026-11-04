@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Run-plane events carry only the fields the AG-UI 1.0 schema defines.** `POST /agui/v1/run` no
+  longer puts `threadId`/`runId` on `STATE_SNAPSHOT`, `STATE_DELTA`, `STEP_*`, `TOOL_CALL_*`,
+  `CUSTOM` and `RUN_ERROR`; only `RUN_STARTED` and `RUN_FINISHED` carry them, as the schema says. The
+  undescribed `stepId` on `STEP_STARTED`/`STEP_FINISHED` is gone too: the terminal id now travels as
+  `metadata["cao.terminalId"]`. A client that read `threadId` or `runId` from those events should take
+  them from the enclosing `RUN_STARTED`.
 - **`GET /agui/v1/capabilities` declares the run plane's AG-UI 1.0 capabilities (#1192).** The body
   is one `AgentCapabilities` object in the 1.0 schema shape: identity, `transport.streaming`,
   `tools.clientProvided: false`, `state.snapshots`, and `humanInTheLoop` with `approvals` and

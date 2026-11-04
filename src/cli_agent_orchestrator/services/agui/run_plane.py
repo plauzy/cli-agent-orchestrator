@@ -309,8 +309,6 @@ async def run_plane_stream(
             if decision_str is None:
                 err = RunErrorEvent(
                     type="RUN_ERROR",
-                    thread_id=thread_id,
-                    run_id=run_id,
                     message=(
                         f"Ambiguous resume payload for interrupt {interrupt_id}: "
                         f"payload must include 'approved' (boolean) or 'editedArgs'"
@@ -332,8 +330,6 @@ async def run_plane_stream(
             except (KeyError, ValueError) as e:
                 err = RunErrorEvent(
                     type="RUN_ERROR",
-                    thread_id=thread_id,
-                    run_id=run_id,
                     message=f"Resume failed for interrupt {interrupt_id}: {e}",
                 )
                 yield _emit(err)
@@ -345,8 +341,6 @@ async def run_plane_stream(
                 # finishing the run as a success (P1).
                 err = RunErrorEvent(
                     type="RUN_ERROR",
-                    thread_id=thread_id,
-                    run_id=run_id,
                     message=f"Delivery failed for interrupt {interrupt_id} (retryable): {e}",
                 )
                 yield _emit(err)
@@ -378,8 +372,6 @@ async def run_plane_stream(
                     snapshot = snapshot_fn()
                     snap_evt = StateSnapshotEvent(
                         type="STATE_SNAPSHOT",
-                        thread_id=thread_id,
-                        run_id=run_id,
                         snapshot=snapshot,
                     )
                     yield _emit(snap_evt)
@@ -430,8 +422,6 @@ async def run_plane_stream(
             snapshot = snapshot_fn()
             snap_evt = StateSnapshotEvent(
                 type="STATE_SNAPSHOT",
-                thread_id=thread_id,
-                run_id=run_id,
                 snapshot=snapshot,
             )
             yield _emit(snap_evt)
@@ -497,6 +487,21 @@ async def run_plane_stream(
         yield _emit(run_finished)
 
 
+# The metadata key that carries the CAO terminal behind a STEP_* frame. AG-UI 1.0
+# steps define only ``stepName``; the open ``metadata`` object is where
+# integration-specific detail belongs, under a vendor-prefixed key (the ``ag-ui``
+# key is reserved for the protocol).
+_CAO_TERMINAL_METADATA_KEY = "cao.terminalId"
+
+
+def _terminal_metadata(data: Dict[str, Any]) -> Dict[str, Any]:
+    """``{"metadata": {"cao.terminalId": ...}}`` when the frame names a terminal."""
+    terminal_id = data.get("step_id") or data.get("terminal_id")
+    if not terminal_id:
+        return {}
+    return {"metadata": {_CAO_TERMINAL_METADATA_KEY: terminal_id}}
+
+
 def _translate_live_frame(
     agui_type: str,
     data: Dict[str, Any],
@@ -507,6 +512,12 @@ def _translate_live_frame(
     """Translate a CAO internal AG-UI frame into a stock SDK event and encode it.
 
     Returns the encoded SSE string or None if the frame type is not mappable.
+
+    ``thread_id`` and ``run_id`` are not put on the events: AG-UI 1.0 lets only
+    ``RUN_STARTED`` and ``RUN_FINISHED`` carry them, and "A producer MUST emit
+    only what the schema defines" (``architecture.mdx``). The SDK models accept
+    extra keys silently, so passing them here would put undescribed fields on
+    the wire. The parameters stay for the callers' signature.
     """
     if not AG_UI_AVAILABLE:  # pragma: no cover - optional [agui] extra absent
         return None
@@ -517,8 +528,6 @@ def _translate_live_frame(
             snapshot_value = data.get("snapshot") or data
             evt = StateSnapshotEvent(
                 type="STATE_SNAPSHOT",
-                thread_id=thread_id,
-                run_id=run_id,
                 snapshot=snapshot_value,
             )
             return encoder.encode(evt)
@@ -527,33 +536,25 @@ def _translate_live_frame(
             delta = data.get("delta") or data.get("ops") or []
             evt = StateDeltaEvent(
                 type="STATE_DELTA",
-                thread_id=thread_id,
-                run_id=run_id,
                 delta=delta,
             )
             return encoder.encode(evt)
 
         elif agui_type == _AGUI_STEP_STARTED:
-            step_id = data.get("step_id") or data.get("terminal_id") or str(uuid.uuid4())
             step_name = data.get("step_name") or data.get("provider") or "step"
             evt = StepStartedEvent(
                 type="STEP_STARTED",
-                thread_id=thread_id,
-                run_id=run_id,
-                step_id=step_id,
                 step_name=step_name,
+                **_terminal_metadata(data),
             )
             return encoder.encode(evt)
 
         elif agui_type == _AGUI_STEP_FINISHED:
-            step_id = data.get("step_id") or data.get("terminal_id") or "unknown"
             step_name = data.get("step_name") or "step"
             evt = StepFinishedEvent(
                 type="STEP_FINISHED",
-                thread_id=thread_id,
-                run_id=run_id,
-                step_id=step_id,
                 step_name=step_name,
+                **_terminal_metadata(data),
             )
             return encoder.encode(evt)
 
@@ -562,8 +563,6 @@ def _translate_live_frame(
             tool_call_name = data.get("tool_call_name") or "unknown"
             evt = ToolCallStartEvent(
                 type="TOOL_CALL_START",
-                thread_id=thread_id,
-                run_id=run_id,
                 tool_call_id=tool_call_id,
                 tool_call_name=tool_call_name,
             )
@@ -573,8 +572,6 @@ def _translate_live_frame(
             tool_call_id = data.get("tool_call_id") or "unknown"
             evt = ToolCallEndEvent(
                 type="TOOL_CALL_END",
-                thread_id=thread_id,
-                run_id=run_id,
                 tool_call_id=tool_call_id,
             )
             return encoder.encode(evt)
@@ -585,8 +582,6 @@ def _translate_live_frame(
             # with its own name and value, so the value is not nested twice.
             evt = CustomEvent(
                 type="CUSTOM",
-                thread_id=thread_id,
-                run_id=run_id,
                 name=data.get("name") or CAO_GENERATIVE_UI_EVENT_NAME,
                 value=data.get("value"),
             )
@@ -595,8 +590,6 @@ def _translate_live_frame(
         elif agui_type == _AGUI_TEXT_MESSAGE_CONTENT:
             evt = CustomEvent(
                 type="CUSTOM",
-                thread_id=thread_id,
-                run_id=run_id,
                 name="cao.message_delivery",
                 value=data,
             )
@@ -605,8 +598,6 @@ def _translate_live_frame(
         elif agui_type == _AGUI_RAW:
             evt = CustomEvent(
                 type="CUSTOM",
-                thread_id=thread_id,
-                run_id=run_id,
                 name="cao.raw",
                 value=data,
             )
@@ -616,8 +607,6 @@ def _translate_live_frame(
             message = data.get("message") or "unknown error"
             evt = RunErrorEvent(
                 type="RUN_ERROR",
-                thread_id=thread_id,
-                run_id=run_id,
                 message=message,
             )
             return encoder.encode(evt)
@@ -626,8 +615,6 @@ def _translate_live_frame(
             # Unmapped type -> custom event with the raw data
             evt = CustomEvent(
                 type="CUSTOM",
-                thread_id=thread_id,
-                run_id=run_id,
                 name=f"cao.{agui_type.lower()}",
                 value=data,
             )
