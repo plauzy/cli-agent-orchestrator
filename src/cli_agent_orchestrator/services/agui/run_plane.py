@@ -472,12 +472,19 @@ async def run_plane_stream(
                 frame = _translate_live_frame(ftype, fdata, thread_id, run_id, encoder)
                 if frame is not None:
                     yield frame
+                    if ftype == _AGUI_RUN_ERROR:
+                        # lifecycle.mdx: "A producer MUST NOT emit anything after
+                        # RUN_ERROR except RUN_STARTED." The run ends here: no
+                        # further live frames, no closers, no RUN_FINISHED.
+                        finished = True
+                        break
 
-        # Close any remaining open tool calls
-        for ftype, fdata in tracker.close_all():
-            frame = _translate_live_frame(ftype, fdata, thread_id, run_id, encoder)
-            if frame is not None:
-                yield frame
+        # Close any remaining open tool calls (not after a RUN_ERROR)
+        if not finished:
+            for ftype, fdata in tracker.close_all():
+                frame = _translate_live_frame(ftype, fdata, thread_id, run_id, encoder)
+                if frame is not None:
+                    yield frame
 
     # ── 6. RUN_FINISHED (success) ───────────────────────────────────────
     if not finished:
@@ -505,6 +512,17 @@ def _terminal_metadata(data: Dict[str, Any]) -> Dict[str, Any]:
     if not terminal_id:
         return {}
     return {"metadata": {_CAO_TERMINAL_METADATA_KEY: terminal_id}}
+
+
+def _fallback_step_name(data: Dict[str, Any]) -> Optional[str]:
+    """A per-terminal step name for a STEP_* frame that carries none.
+
+    lifecycle.mdx: "A producer MUST NOT open a step whose name is already open".
+    A shared constant would collide across terminals, so the fallback names the
+    terminal; STEP_FINISHED derives the same name, so it closes its own step.
+    """
+    terminal_id = data.get("step_id") or data.get("terminal_id")
+    return f"step-{terminal_id}" if terminal_id else None
 
 
 def _translate_live_frame(
@@ -546,7 +564,9 @@ def _translate_live_frame(
             return encoder.encode(evt)
 
         elif agui_type == _AGUI_STEP_STARTED:
-            step_name = data.get("step_name") or data.get("provider") or "step"
+            step_name = (
+                data.get("step_name") or _fallback_step_name(data) or f"step-{uuid.uuid4().hex}"
+            )
             evt = StepStartedEvent(
                 type="STEP_STARTED",
                 step_name=step_name,
@@ -555,7 +575,12 @@ def _translate_live_frame(
             return encoder.encode(evt)
 
         elif agui_type == _AGUI_STEP_FINISHED:
-            step_name = data.get("step_name") or "step"
+            step_name = data.get("step_name") or _fallback_step_name(data)
+            if not step_name:
+                # lifecycle.mdx: a producer "MUST NOT finish a step that was
+                # never opened"; with no name and no terminal there is nothing
+                # this frame could close.
+                return None
             evt = StepFinishedEvent(
                 type="STEP_FINISHED",
                 step_name=step_name,

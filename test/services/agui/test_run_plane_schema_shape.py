@@ -221,3 +221,61 @@ def test_the_schema_check_rejects_an_undescribed_event_key():
     assert schema_errors({"type": "RUN_ERROR", "message": "x", "threadId": "t"})
     assert schema_errors({"type": "STEP_STARTED", "stepName": "s", "stepId": "t1"})
     assert schema_errors({"type": "RUN_ERROR", "message": "x"}) == []
+
+
+# ---------------------------------------------------------------------------
+# NB-4: the live-projection path (function-level; not reachable from the wire)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_nothing_follows_a_live_run_error():
+    """lifecycle.mdx: "A producer MUST NOT emit anything after RUN_ERROR except
+    RUN_STARTED." A RUN_ERROR from the live projection ends the run there."""
+
+    async def bus():
+        yield {"id": "e1", "kind": "error", "terminal_id": None, "session_name": "s", "detail": {}}
+        yield {
+            "id": "e2",
+            "kind": "launch",
+            "terminal_id": "t9",
+            "session_name": "s",
+            "detail": {"agent_name": "worker"},
+        }
+
+    frames = [
+        f
+        async for f in run_plane_stream(
+            input_data=_input(), bus_subscribe_fn=bus, heartbeat_interval=5.0
+        )
+    ]
+    types = [e["type"] for e in _data(frames)]
+    assert types[-1] == "RUN_ERROR", types
+    assert "RUN_FINISHED" not in types and "STEP_STARTED" not in types, types
+
+
+def test_step_without_a_name_gets_a_unique_one():
+    """lifecycle.mdx: "A producer MUST NOT open a step whose name is already open".
+    The fallback name is per terminal, never one shared constant."""
+    names = {
+        _data([_translate_live_frame("STEP_STARTED", {"step_id": t}, "th", "r", EventEncoder())])[
+            0
+        ]["stepName"]
+        for t in ("t1", "t2")
+    }
+    assert len(names) == 2, names
+
+
+def test_step_finish_without_a_name_closes_the_step_it_opened():
+    started = _data(
+        [_translate_live_frame("STEP_STARTED", {"step_id": "t1"}, "th", "r", EventEncoder())]
+    )
+    finished = _data(
+        [_translate_live_frame("STEP_FINISHED", {"step_id": "t1"}, "th", "r", EventEncoder())]
+    )
+    assert started[0]["stepName"] == finished[0]["stepName"]
+
+
+def test_step_finish_with_nothing_to_match_emits_nothing():
+    """lifecycle.mdx: a producer "MUST NOT finish a step that was never opened"."""
+    assert _translate_live_frame("STEP_FINISHED", {}, "th", "r", EventEncoder()) is None
