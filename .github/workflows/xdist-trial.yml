@@ -50,7 +50,7 @@ jobs:
       - name: Build the attempt matrix
         id: plan
         env:
-          MODE: ${{ inputs.mode || 'serial' }}
+          MODE: ${{ inputs.mode || 'xdist' }}
           ATTEMPTS: ${{ inputs.attempts || '20' }}
         run: |
           if [ "$MODE" = "xdist" ]; then
