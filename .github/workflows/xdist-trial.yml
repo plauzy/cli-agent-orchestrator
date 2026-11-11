@@ -27,6 +27,10 @@ on:
         type: string
   push:
     branches: [exp/xdist-trial]
+  # pull_request runs the head branch's copy of this file and has no dispatch
+  # inputs, so `inputs.mode || 'serial'` makes it a single serial run.
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
