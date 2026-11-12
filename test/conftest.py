@@ -265,7 +265,8 @@ def _adopt_controller_isolation() -> None:
 
     A worker's argv is xdist's own bootstrap, not the command line, so it cannot
     re-decide. It inherited the controller's environment: when the controller
-    isolated, HOME is already its fake home and the handoff variable says so;
+    isolated, the handoff variable names its fake home, and the worker takes a
+    subdirectory of it as its own HOME;
     when the controller kept the real HOME (e2e), there is no handoff and the
     worker keeps the inherited HOME too.
     """
@@ -275,7 +276,14 @@ def _adopt_controller_isolation() -> None:
     if not raw:
         return
     state = json.loads(raw)
-    _ISOLATED_HOME["path"] = state["home"]
+    # One fake home per worker, under the controller's (whose atexit removes it):
+    # workers that shared one home also shared CAO_HOME_DIR, so its DB, the
+    # per-terminal MCP files and the workflow and vault stores collided across
+    # workers. A subprocess still inherits its own worker's HOME.
+    home = os.path.join(state["home"], os.environ["PYTEST_XDIST_WORKER"])
+    os.makedirs(home, exist_ok=True)
+    os.environ["HOME"] = home
+    _ISOLATED_HOME["path"] = home
     _REAL_HOME_ENV.update(state["real"])
     _PINNED_ROOT_ENV.update(state["pinned"])
 
