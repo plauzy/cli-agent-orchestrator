@@ -1,0 +1,1 @@
+inspector-e2e: PASS rows=22 with-timestamp=2 types=REQUEST,RUN_STARTED,STATE_SNAPSHOT,RUN_FINISHED,CUSTOM

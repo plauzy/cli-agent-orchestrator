@@ -1,0 +1,7 @@
+# mutation check on head 37d84559474f05f6200f540f4c3c74d85a5fbebe: page edited to render rows in reverse order (edit reverted after)
+$ node tools/inspector-e2e.mjs
+inspector-e2e: FAIL row 1 type: page "RUN_FINISHED", trace "REQUEST"
+inspector-e2e: FAIL row 1 dir: page "out", trace "request"
+inspector-e2e: FAIL row 1 capture: page "reject", trace "none"
+inspector-e2e: FAIL row 1 seq: page "9", trace "1"
+exit=1

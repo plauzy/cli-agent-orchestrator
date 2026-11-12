@@ -1,0 +1,12 @@
+# base 3853aa50 + tests only; cmd: uv run pytest test/examples/test_cao_dojo_inspector.py -q --no-cov -rs -p no:cacheprovider -W ignore
+FFF                                                                      [100%]
+E       AssertionError: examples/ag-ui/cao-dojo/inspector.html is missing
+E       assert False
+E        +  where False = is_file()
+E        +    where is_file = PosixPath('examples/ag-ui/cao-dojo/inspector.html').is_file
+E       FileNotFoundError: [Errno 2] No such file or directory: 'examples/ag-ui/cao-dojo/inspector.html'
+E       AssertionError: inspector-e2e: FAIL inspector.html did not load (status 404)
+E         
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args=['<node> <repo>/examples/ag-ui/cao-dojo/tools/inspector-e2e.mjs'], returncode=1, stdout='', stderr='inspector-e2e: FAIL inspector.html did not load (status 404)\n').returncode
+3 failed in 0.75s
