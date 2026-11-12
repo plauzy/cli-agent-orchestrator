@@ -433,6 +433,22 @@ def _isolated_home(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _restore_cors_origins():
+    """Undo any ``add_local_cors_origins`` a test triggers (cao-server's ``main()`` does).
+
+    ``CORS_ORIGINS`` is one process-wide list that is mutated in place, so an
+    added ``http://localhost:9889`` used to outlive the test and make the
+    origin checks in later tests on the same worker trust a plain-http Origin.
+    It is restored in place too: the CORS middleware holds this list object.
+    """
+    from cli_agent_orchestrator import constants
+
+    saved = list(constants.CORS_ORIGINS)
+    yield
+    constants.CORS_ORIGINS[:] = saved
+
+
+@pytest.fixture(autouse=True)
 def _isolated_tmux():
     """Keep ``TMUX`` and ``TMUX_PANE`` unset and ``TMUX_TMPDIR`` on the private dir.
 
