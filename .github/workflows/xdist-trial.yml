@@ -127,6 +127,8 @@ jobs:
             --cov-report=term-missing \
             --durations=50 \
             --junitxml=junit.xml \
+            -o junit_logging=all \
+            --log-level=WARNING \
             -v 2>&1 | tee pytest.log
 
       - name: Summarise coverage
