@@ -1,0 +1,153 @@
+name: xDist Trial (fork only)
+
+# Fork-only measurement workflow for the parallel-test-workers plan (plan item D,
+# stages 0 and 1). It is not part of the upstream CI and must not be merged.
+#
+# - serial mode: one run of the same pytest command as the 3.11 leg of ci.yml,
+#   plus --durations=50, to measure where the time goes.
+# - xdist mode: the same command with -n 4 --dist loadgroup, one job per attempt.
+#
+# Both modes upload the pytest log, the junit XML and coverage.xml as artifacts.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "serial (one run) or xdist (matrix of attempts)"
+        required: true
+        default: serial
+        type: choice
+        options:
+          - serial
+          - xdist
+      attempts:
+        description: "number of attempts when mode is xdist"
+        required: true
+        default: "20"
+        type: string
+  push:
+    branches: [exp/xdist-trial]
+  # pull_request runs the head branch's copy of this file and has no dispatch
+  # inputs, so `inputs.mode || 'serial'` makes it a single serial run.
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  # Same as ci.yml: the committed uv.lock must match pyproject.toml.
+  UV_LOCKED: "1"
+
+jobs:
+  plan:
+    name: Plan attempts
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Build the attempt matrix
+        id: plan
+        env:
+          MODE: ${{ inputs.mode || 'xdist' }}
+          ATTEMPTS: ${{ inputs.attempts || '20' }}
+        run: |
+          if [ "$MODE" = "xdist" ]; then
+            N="$ATTEMPTS"
+          else
+            N=1
+          fi
+          MATRIX=$(python3 -c "import json,sys; print(json.dumps({'include':[{'attempt':i,'mode':sys.argv[1]} for i in range(1,int(sys.argv[2])+1)]}))" "$MODE" "$N")
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          echo "$MATRIX"
+
+  test:
+    name: Unit tests (${{ matrix.mode }} attempt ${{ matrix.attempt }})
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --locked --all-extras --dev
+
+      - name: Run unit tests with coverage
+        # No CAO_MUST_RUN here, matching the 3.11 leg of ci.yml. That leg does
+        # not install Trivy, so it does not claim the "unit" gate.
+        shell: bash
+        run: |
+          set -o pipefail
+          # xdist mode only. These five tests fail on every run because the
+          # fork's PR-gating trigger makes this workflow a PR-gating workflow
+          # missing from the skill's table. They are trigger artifacts, not
+          # xdist findings, so they are deselected here and nowhere else.
+          # Serial mode keeps them, so the serial baseline is unchanged.
+          DESELECT=()
+          if [ "${{ matrix.mode }}" = "xdist" ]; then
+            WORKERS="-n 4 --dist loadgroup"
+            SKILL=test/test_cao_contributing_skill_accuracy.py::TestOtherPrGatingWorkflowsAreDocumented
+            DESELECT=(
+              --deselect "$SKILL::test_every_pr_gating_workflow_has_a_row"
+              --deselect "$SKILL::test_the_file_named_is_the_real_file[xDist Trial (fork only)]"
+              --deselect "$SKILL::test_the_listed_checks_are_exactly_the_pr_checks[xDist Trial (fork only)]"
+              --deselect "$SKILL::test_the_path_filter_claim_matches_the_trigger[xDist Trial (fork only)]"
+              --deselect "$SKILL::test_the_verdict_matches_job_level_continue_on_error[xDist Trial (fork only)]"
+            )
+          else
+            WORKERS="-p no:randomly"
+          fi
+          # Same paths, ignores, marker and coverage flags as ci.yml's unit job.
+          uv run pytest test/ examples/workflow/tests/ examples/skills/tests/ \
+            --ignore=test/providers/test_kiro_cli_integration.py \
+            --ignore=test/e2e \
+            -m "not e2e" \
+            $WORKERS \
+            "${DESELECT[@]}" \
+            --cov=src/cli_agent_orchestrator \
+            --cov-branch \
+            --cov-report=xml \
+            --cov-fail-under=80 \
+            --cov-report=term-missing \
+            --durations=50 \
+            --junitxml=junit.xml \
+            -o junit_logging=all \
+            --log-level=WARNING \
+            -v 2>&1 | tee pytest.log
+
+      - name: Summarise coverage
+        if: always()
+        shell: bash
+        run: |
+          if [ -f coverage.xml ]; then
+            grep -o '<coverage[^>]*>' coverage.xml | head -1 | tee coverage-summary.txt
+          fi
+
+      - name: Upload pytest log
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pytest-${{ matrix.mode }}-${{ matrix.attempt }}
+          path: |
+            pytest.log
+            junit.xml
+            coverage.xml
+            coverage-summary.txt
+          if-no-files-found: warn
+          retention-days: 30
