@@ -1,0 +1,17 @@
+== npx tsc
+exit=0
+== npm run test:coverage
+ Test Files  13 passed (13)
+      Tests  230 passed (230)
+   Duration  3.16s (environment 47%, tests 30%, import 12%, worker 7%, transform 5%)
+ % Coverage report from v8
+---------------|---------|----------|---------|---------|-------------------
+File           | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+---------------|---------|----------|---------|---------|-------------------
+---------------|---------|----------|---------|---------|-------------------
+== npm run build
+dist/index.html                   0.41 kB │ gzip:  0.28 kB
+dist/assets/index-WLPcz_C5.css    3.56 kB │ gzip:  1.33 kB
+dist/assets/index-DmaeMPPe.js   242.60 kB │ gzip: 76.27 kB
+✓ built in 212ms
+href="/assets/index-WLPcz_C5.css"

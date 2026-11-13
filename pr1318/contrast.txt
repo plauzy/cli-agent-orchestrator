@@ -1,0 +1,36 @@
+light
+  ink/bg                      14.63
+  ink/card                    15.96
+  ink/soft                    15.42
+  ink/warn-bg                 15.34
+  mut/bg                       5.72
+  mut/card                     6.25
+  mut/soft                     6.03
+  mut/warn-bg                  6.00
+  mut/code?                   14.11
+  btn text/bg                  5.58
+  approve text/bg              5.44
+  deny fg/card                 5.60
+  deny fg/bg(alert on card)    5.60
+  disabled                     4.55
+  focus ring/card (>=3)        5.58
+  focus ring/bg                5.11
+  input border/card (>=3)      6.25
+dark
+  ink/bg                      15.43
+  ink/card                    14.12
+  ink/soft                    13.17
+  ink/warn-bg                 12.89
+  mut/bg                       8.43
+  mut/card                     7.71
+  mut/soft                     7.19
+  mut/warn-bg                  7.05
+  mut/code?                   11.06
+  btn text/bg                  7.76
+  approve text/bg              8.46
+  deny fg/card                 8.36
+  deny fg/bg(alert on card)    8.36
+  disabled                     5.37
+  focus ring/card (>=3)        7.00
+  focus ring/bg                7.65
+  input border/card (>=3)      7.71

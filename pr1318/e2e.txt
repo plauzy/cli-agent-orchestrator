@@ -1,0 +1,17 @@
+[e2e] starting cao-server on http://127.0.0.1:52914
+[e2e] PASS empty run: RUN_FINISHED(success), no cards
+[e2e] terminal A e5333e25
+[e2e] PASS approve: 1eb4d56f-7846-4f2d-835d-05a6accd2c60 delivered, pane received "y"
+[e2e] PASS deny: 9376a211-a852-44d8-8081-896e7aad4f35 delivered, pane received "n"
+[e2e] PASS edit refused in the client: no run sent, agent still waiting until denied
+[e2e] terminal B d5cfd0b5
+[e2e] PASS two interrupts: held until both decided, one resume[] with both, A got y and B got n
+[e2e] PASS six components from real emit_ui calls on the ambient stream, EventSource (13 frames)
+[e2e] PASS the same six on the token POST stream (13 frames; status connecting → open → closed)
+[e2e] PASS off-list emit_ui: HTTP 400 "Unknown UI component 'iframe_embed'", and exactly one refusal frame, with no props, on each stream after a 2s settle
+[e2e] PASS the token stream replays across a drop: the reconnect sent forwardedProps.cao.since=2026-11-13T04:51:26.892Z, the component emitted during the drop arrived, and the reopen was reported once
+[e2e] PASS overflow then resync: RUN_ERROR cao.stream_overflow after the held stream was read, the reconnect sent since=2026-11-13T04:51:44.261Z, 843/3000 fillers (none twice) and all 20 markers once (counted in frames), the dropped start was recovered (call 2: open), the held call is listed once as unconfirmed, and 2 TOOL_CALL_START frames gave 2 entries
+[e2e] PASS the app requested only /agui/v1/run, /agui/v1/stream (14 requests), plus the EventSource stream
+[e2e] ALL PASS
+  ✓  1 [chromium] › e2e/timeline.spec.ts:26:1 › the six components and both timeline calls render, and are saved as screenshots (18.7s)
+  1 passed (23.6s)
