@@ -12,4 +12,4 @@ browser is Playwright Chromium, and ffmpeg-static makes the GIF.
 - after-dark-finished-fullpage.png: this commit with prefers-color-scheme: dark.
 - after-run.gif: the whole light run on this commit.
 - contrast.txt: WCAG contrast ratios for the stylesheet's colour pairs, both schemes.
-- unit-build.txt, e2e.txt, gates.txt: command output.
+- unit-build.txt (head) and unit-build-base.txt (base, no stylesheet), e2e.txt, gates.txt: command output.
