@@ -1,0 +1,27 @@
+worktree: 136533a6227e5bf64c462d44dc7105f32fed66c6 detached, parent ab804cde34028cb6849feb3b1f723d1c65f4b57b; untracked: .venv examples/ag-ui/ag-ui-operator-dashboard/node_modules (symlinks to venv and node_modules)
+src inside clean checkout: True
+$ black --check
+1189 files would be left unchanged.
+$ isort --check-only
+rc=0
+$ ruff check
+All checks passed!
+$ mypy_ratchet
+PASS: no new mypy errors, and 59 fewer than the baseline.
+$ sync_skills --check
+OK: 16 shipped skills are in sync.
+$ validate_markdown_links
+rc=0
+$ targeted pytest
+...                                                                      [100%]
+1218 passed, 9 skipped in 8.62s
+$ npm run typecheck
+rc=0
+$ npm run test:coverage
+ Test Files  15 passed (15)
+      Tests  282 passed (282)
+All files      |     100 |      100 |     100 |     100 |                   
+ fleet.ts      |     100 |      100 |     100 |     100 |                   
+(rc=0)
+$ npm run build
+rc=0

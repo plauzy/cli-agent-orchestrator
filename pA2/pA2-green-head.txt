@@ -1,0 +1,8 @@
+........................................................sss............. [ 38%]
+........................................................................ [ 77%]
+..........................................                               [100%]
+=========================== short test summary info ============================
+SKIPPED [1] test/services/test_host_resources.py:706: reads /proc: Linux only (macOS not in CI)
+SKIPPED [1] test/services/test_host_resources.py:718: reads /proc: Linux only (macOS not in CI)
+SKIPPED [1] test/services/test_host_resources.py:736: reads /proc: Linux only (macOS not in CI)
+183 passed, 3 skipped in 0.99s

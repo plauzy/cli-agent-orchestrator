@@ -1,0 +1,14 @@
+gitleaks 8.30.1 (darwin_arm64, sha256 verified against the release checksums file)
+range: 6960d6be92c0366da02e8a32da0bab5443d18c1d..667ccfc5a13d3cb8770155a2802a454a7bfa35e9
+$ gitleaks detect --source . --config .gitleaks.toml --redact --verbose --exit-code 1 --log-opts "BASE..HEAD"
+
+    ○
+    │╲
+    │ ○
+    ○ ░
+    ░    gitleaks
+
+6:26PM INF 2 commits scanned.
+6:26PM INF scanned ~138850 bytes (138.85 KB) in 87.1ms
+6:26PM INF no leaks found
+exit=0

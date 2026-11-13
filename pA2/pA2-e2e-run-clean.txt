@@ -1,0 +1,27 @@
+[e2e] starting cao-server on http://127.0.0.1:9900
+[e2e] PASS empty run: RUN_FINISHED(success), no cards
+[e2e] terminal A 0c10d39d
+[e2e] PASS approve: b8cad6d6-40cd-4aa1-b6e1-62898dc0abcb delivered, pane received "y"
+[e2e] PASS deny: adb6b31b-74fe-40e6-aa4a-35f1a55a6976 delivered, pane received "n"
+[e2e] PASS edit refused in the client: no run sent, agent still waiting until denied
+[e2e] terminal B 9ef712ca
+[e2e] PASS two interrupts: held until both decided, one resume[] with both, A got y and B got n
+[e2e] PASS six components from real emit_ui calls on the ambient stream, EventSource (13 frames)
+[e2e] PASS the same six on the token POST stream (13 frames; status connecting → open → closed)
+[e2e] PASS off-list emit_ui: HTTP 400 "Unknown UI component 'iframe_embed'", and exactly one refusal frame, with no props, on each stream after a 2s settle
+[e2e] PASS the token stream replays across a drop: the reconnect sent forwardedProps.cao.since=2026-11-13T00:54:21.108Z, the component emitted during the drop arrived, and the reopen was reported once
+[e2e] PASS overflow then resync: RUN_ERROR cao.stream_overflow after the held stream was read, the reconnect sent since=2026-11-13T00:54:32.837Z, 844/3000 fillers (none twice) and all 20 markers once (counted in frames), the dropped start was recovered (call 2: open), the held call is listed once as unconfirmed, and 2 TOOL_CALL_START frames gave 2 entries
+[e2e] PASS the app requested only /agui/v1/run, /agui/v1/stream (14 requests), plus the EventSource stream
+[e2e] ALL PASS
+[WebServer] 
+[WebServer]   VITE v8.3.5  ready in 63 ms
+[WebServer] 
+[WebServer]   ➜  Local:   http://127.0.0.1:5173/
+
+Running 3 tests using 1 worker
+
+  ✓  1 [chromium] › e2e/fleet.spec.ts:35:3 › real stream › launched sessions appear under `local` with a card from the catalog (10.1s)
+  ✓  2 [chromium] › e2e/fleet.spec.ts:70:1 › SYNTHETIC runtimes: a terminal on rt-a is grouped apart from local (346ms)
+  ✓  3 [chromium] › e2e/timeline.spec.ts:26:1 › the six components and both timeline calls render, and are saved as screenshots (9.8s)
+
+  3 passed (21.3s)

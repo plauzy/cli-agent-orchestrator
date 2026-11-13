@@ -1,0 +1,45 @@
+
+> ag-ui-operator-dashboard@0.1.0 test:coverage
+> vitest run --coverage
+
+
+ RUN  v5.1.0 <path>
+      Coverage enabled with v8
+
+ ✓ core/__tests__/genui.test.ts (19 tests) 37ms
+ ✓ core/__tests__/ambient.test.ts (16 tests) 57ms
+ ✓ core/__tests__/fleet.test.ts (42 tests) 32ms
+ ✓ core/__tests__/controller.test.ts (26 tests) 55ms
+ ✓ core/__tests__/timeline-resync.test.ts (5 tests) 81ms
+ ✓ core/__tests__/timeline.test.ts (46 tests) 53ms
+ ✓ core/__tests__/interrupts.test.ts (28 tests) 9ms
+ ✓ core/__tests__/sse-routes.test.ts (7 tests) 16ms
+ ✓ core/__tests__/runPlane.test.ts (21 tests) 35ms
+ ✓ core/__tests__/controls.test.ts (17 tests) 8ms
+ ✓ view/__tests__/token.test.ts (25 tests) 6ms
+ ✓ view/__tests__/Root.test.tsx (5 tests) 123ms
+ ✓ view/__tests__/Timeline.test.tsx (6 tests) 205ms
+ ✓ view/__tests__/App.test.tsx (9 tests) 267ms
+ ✓ view/__tests__/Fleet.test.tsx (10 tests) 323ms
+
+ Test Files  15 passed (15)
+      Tests  282 passed (282)
+   Start at  17:53:06
+   Duration  1.08s (environment 44%, tests 31%, import 13%, transform 8%, worker 5%)
+
+ % Coverage report from v8
+---------------|---------|----------|---------|---------|-------------------
+File           | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s 
+---------------|---------|----------|---------|---------|-------------------
+All files      |     100 |      100 |     100 |     100 |                   
+ ambient.ts    |     100 |      100 |     100 |     100 |                   
+ controller.ts |     100 |      100 |     100 |     100 |                   
+ controls.ts   |     100 |      100 |     100 |     100 |                   
+ fleet.ts      |     100 |      100 |     100 |     100 |                   
+ genui.ts      |     100 |      100 |     100 |     100 |                   
+ interrupts.ts |     100 |      100 |     100 |     100 |                   
+ routes.ts     |     100 |      100 |     100 |     100 |                   
+ runPlane.ts   |     100 |      100 |     100 |     100 |                   
+ sse.ts        |     100 |      100 |     100 |     100 |                   
+ timeline.ts   |     100 |      100 |     100 |     100 |                   
+---------------|---------|----------|---------|---------|-------------------

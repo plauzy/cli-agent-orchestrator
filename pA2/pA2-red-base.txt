@@ -1,0 +1,268 @@
+.................F.......................................FFFFFFFFFF..... [ 56%]
+..........................F...........................F                  [100%]
+==================================== ERRORS ====================================
+____________ ERROR collecting test/services/test_host_resources.py _____________
+ImportError while importing test module '<repo>/test/services/test_host_resources.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+<path>:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test/services/test_host_resources.py:29: in <module>
+    from cli_agent_orchestrator.services import host_resources as hr
+E   ImportError: cannot import name 'host_resources' from 'cli_agent_orchestrator.services' (unknown location)
+=================================== FAILURES ===================================
+________________ test_host_projection_entries_carry_runtime_id _________________
+
+    def test_host_projection_entries_carry_runtime_id() -> None:
+        """The host view is a registered projection: every entry has ``runtime_id`` present."""
+>       entries = PROJECTIONS["host resource view (host_resources.sample_host)"]()
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+<repo>/test/services/agui/test_runtime_id_projections.py:392: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    def _host_entries() -> List[Dict[str, Any]]:
+>       from cli_agent_orchestrator.services import host_resources
+E       ImportError: cannot import name 'host_resources' from 'cli_agent_orchestrator.services' (unknown location)
+
+<repo>/test/services/agui/test_runtime_id_projections.py:112: ImportError
+_____ test_l16_host_entry_rejects_anything_but_numbers[hostname-build-box] _____
+
+key = 'hostname', value = 'build-box'
+
+    @pytest.mark.parametrize(
+        "key,value",
+        [
+            ("hostname", "build-box"),  # a key outside the allow-list
+            ("cpu_percent", "12"),  # a string where a number belongs
+            ("cpu_percent", True),
+            ("memory_pressure", "SENTINEL"),
+            ("sampled_at", "yesterday"),
+        ],
+    )
+    def test_l16_host_entry_rejects_anything_but_numbers(key, value):
+        meta, records = split()
+        i = _host_snapshot(records, {**GOOD_HOST, key: value})
+        data = join(meta, records)
+>       assert fired(data, "L16", i + 2, f"$.frame.snapshot.host[0].{key}"), describe(data)
+E       AssertionError: (no findings)
+E       assert False
+E        +  where False = fired(b'{"_meta":{"ag_ui_protocol":"1.0.0","cao_build":"1267fa1b50ccabfdaf6f3e1b173a105a71648d36","cao_build_dirty":false,"c...runId":"reject-run-2","threadId":"cao-dojo-trace","type":"RUN_FINISHED"},"plane":"run","run":"reject-run-2","seq":9}\n', 'L16', (7 + 2), '$.frame.snapshot.host[0].hostname')
+
+test/examples/test_cao_dojo_trace_leaks.py:350: AssertionError
+_______ test_l16_host_entry_rejects_anything_but_numbers[cpu_percent-12] _______
+
+key = 'cpu_percent', value = '12'
+
+    @pytest.mark.parametrize(
+        "key,value",
+        [
+            ("hostname", "build-box"),  # a key outside the allow-list
+            ("cpu_percent", "12"),  # a string where a number belongs
+            ("cpu_percent", True),
+            ("memory_pressure", "SENTINEL"),
+            ("sampled_at", "yesterday"),
+        ],
+    )
+    def test_l16_host_entry_rejects_anything_but_numbers(key, value):
+        meta, records = split()
+        i = _host_snapshot(records, {**GOOD_HOST, key: value})
+        data = join(meta, records)
+>       assert fired(data, "L16", i + 2, f"$.frame.snapshot.host[0].{key}"), describe(data)
+E       AssertionError: (no findings)
+E       assert False
+E        +  where False = fired(b'{"_meta":{"ag_ui_protocol":"1.0.0","cao_build":"1267fa1b50ccabfdaf6f3e1b173a105a71648d36","cao_build_dirty":false,"c...runId":"reject-run-2","threadId":"cao-dojo-trace","type":"RUN_FINISHED"},"plane":"run","run":"reject-run-2","seq":9}\n', 'L16', (7 + 2), '$.frame.snapshot.host[0].cpu_percent')
+
+test/examples/test_cao_dojo_trace_leaks.py:350: AssertionError
+______ test_l16_host_entry_rejects_anything_but_numbers[cpu_percent-True] ______
+
+key = 'cpu_percent', value = True
+
+    @pytest.mark.parametrize(
+        "key,value",
+        [
+            ("hostname", "build-box"),  # a key outside the allow-list
+            ("cpu_percent", "12"),  # a string where a number belongs
+            ("cpu_percent", True),
+            ("memory_pressure", "SENTINEL"),
+            ("sampled_at", "yesterday"),
+        ],
+    )
+    def test_l16_host_entry_rejects_anything_but_numbers(key, value):
+        meta, records = split()
+        i = _host_snapshot(records, {**GOOD_HOST, key: value})
+        data = join(meta, records)
+>       assert fired(data, "L16", i + 2, f"$.frame.snapshot.host[0].{key}"), describe(data)
+E       AssertionError: (no findings)
+E       assert False
+E        +  where False = fired(b'{"_meta":{"ag_ui_protocol":"1.0.0","cao_build":"1267fa1b50ccabfdaf6f3e1b173a105a71648d36","cao_build_dirty":false,"c...runId":"reject-run-2","threadId":"cao-dojo-trace","type":"RUN_FINISHED"},"plane":"run","run":"reject-run-2","seq":9}\n', 'L16', (7 + 2), '$.frame.snapshot.host[0].cpu_percent')
+
+test/examples/test_cao_dojo_trace_leaks.py:350: AssertionError
+__ test_l16_host_entry_rejects_anything_but_numbers[memory_pressure-SENTINEL] __
+
+key = 'memory_pressure', value = 'SENTINEL'
+
+    @pytest.mark.parametrize(
+        "key,value",
+        [
+            ("hostname", "build-box"),  # a key outside the allow-list
+            ("cpu_percent", "12"),  # a string where a number belongs
+            ("cpu_percent", True),
+            ("memory_pressure", "SENTINEL"),
+            ("sampled_at", "yesterday"),
+        ],
+    )
+    def test_l16_host_entry_rejects_anything_but_numbers(key, value):
+        meta, records = split()
+        i = _host_snapshot(records, {**GOOD_HOST, key: value})
+        data = join(meta, records)
+>       assert fired(data, "L16", i + 2, f"$.frame.snapshot.host[0].{key}"), describe(data)
+E       AssertionError: (no findings)
+E       assert False
+E        +  where False = fired(b'{"_meta":{"ag_ui_protocol":"1.0.0","cao_build":"1267fa1b50ccabfdaf6f3e1b173a105a71648d36","cao_build_dirty":false,"c...runId":"reject-run-2","threadId":"cao-dojo-trace","type":"RUN_FINISHED"},"plane":"run","run":"reject-run-2","seq":9}\n', 'L16', (7 + 2), '$.frame.snapshot.host[0].memory_pressure')
+
+test/examples/test_cao_dojo_trace_leaks.py:350: AssertionError
+____ test_l16_host_entry_rejects_anything_but_numbers[sampled_at-yesterday] ____
+
+key = 'sampled_at', value = 'yesterday'
+
+    @pytest.mark.parametrize(
+        "key,value",
+        [
+            ("hostname", "build-box"),  # a key outside the allow-list
+            ("cpu_percent", "12"),  # a string where a number belongs
+            ("cpu_percent", True),
+            ("memory_pressure", "SENTINEL"),
+            ("sampled_at", "yesterday"),
+        ],
+    )
+    def test_l16_host_entry_rejects_anything_but_numbers(key, value):
+        meta, records = split()
+        i = _host_snapshot(records, {**GOOD_HOST, key: value})
+        data = join(meta, records)
+>       assert fired(data, "L16", i + 2, f"$.frame.snapshot.host[0].{key}"), describe(data)
+E       AssertionError: (no findings)
+E       assert False
+E        +  where False = fired(b'{"_meta":{"ag_ui_protocol":"1.0.0","cao_build":"1267fa1b50ccabfdaf6f3e1b173a105a71648d36","cao_build_dirty":false,"c...runId":"reject-run-2","threadId":"cao-dojo-trace","type":"RUN_FINISHED"},"plane":"run","run":"reject-run-2","seq":9}\n', 'L16', (7 + 2), '$.frame.snapshot.host[0].sampled_at')
+
+test/examples/test_cao_dojo_trace_leaks.py:350: AssertionError
+_________________ test_l16_also_holds_a_state_delta_host_value _________________
+
+    def test_l16_also_holds_a_state_delta_host_value():
+        """A patch cannot carry what a snapshot may not: the delta's /host value is held too."""
+        meta, records = split()
+        delta = {
+            "type": "STATE_DELTA",
+            "delta": [
+                {"op": "replace", "path": "/host", "value": [{**GOOD_HOST, "cpu_percent": "12"}]}
+            ],
+        }
+        data = join(meta, _appended(records, delta))
+>       assert fired(data, "L16", len(records) + 2, "$.frame.delta[0].value[0].cpu_percent"), describe(
+            data
+        )
+E       AssertionError: (no findings)
+E       assert False
+E        +  where False = fired(b'{"_meta":{"ag_ui_protocol":"1.0.0","cao_build":"1267fa1b50ccabfdaf6f3e1b173a105a71648d36","cao_build_dirty":false,"c...ull,"sampled_at":"2026-11-12T00:00:00+00:00"}]}],"type":"STATE_DELTA"},"plane":"run","run":"approve-run-1","seq":99}\n', 'L16', (22 + 2), '$.frame.delta[0].value[0].cpu_percent')
+E        +    where 22 = len([{'capture': 'none', 'dir': 'request', 'plane': 'run', 'request': {'resume': []}, ...}, {'capture': 'none', 'dir': 'ou...'plane': 'stream', ...}, {'capture': 'approve', 'dir': 'request', 'plane': 'run', 'request': {'resume': []}, ...}, ...])
+
+test/examples/test_cao_dojo_trace_leaks.py:363: AssertionError
+_________ test_l16_host_replaced_by_a_non_entry_is_a_finding[SENTINEL] _________
+
+value = 'SENTINEL'
+
+    @pytest.mark.parametrize("value", ["SENTINEL", 7, {"cpu_percent": 1}, ["SENTINEL"]])
+    def test_l16_host_replaced_by_a_non_entry_is_a_finding(value):
+        """A /host op whose value is a scalar, an object or a list of scalars is not a host list."""
+        meta, records = split()
+        delta = {"type": "STATE_DELTA", "delta": [{"op": "replace", "path": "/host", "value": value}]}
+        data = join(meta, _appended(records, delta))
+>       assert [f for f in trace_leaks.check(data) if f.rule_id == "L16"], describe(data)
+E       AssertionError: (no findings)
+E       assert []
+
+test/examples/test_cao_dojo_trace_leaks.py:381: AssertionError
+____________ test_l16_host_replaced_by_a_non_entry_is_a_finding[7] _____________
+
+value = 7
+
+    @pytest.mark.parametrize("value", ["SENTINEL", 7, {"cpu_percent": 1}, ["SENTINEL"]])
+    def test_l16_host_replaced_by_a_non_entry_is_a_finding(value):
+        """A /host op whose value is a scalar, an object or a list of scalars is not a host list."""
+        meta, records = split()
+        delta = {"type": "STATE_DELTA", "delta": [{"op": "replace", "path": "/host", "value": value}]}
+        data = join(meta, _appended(records, delta))
+>       assert [f for f in trace_leaks.check(data) if f.rule_id == "L16"], describe(data)
+E       AssertionError: (no findings)
+E       assert []
+
+test/examples/test_cao_dojo_trace_leaks.py:381: AssertionError
+__________ test_l16_host_replaced_by_a_non_entry_is_a_finding[value2] __________
+
+value = {'cpu_percent': 1}
+
+    @pytest.mark.parametrize("value", ["SENTINEL", 7, {"cpu_percent": 1}, ["SENTINEL"]])
+    def test_l16_host_replaced_by_a_non_entry_is_a_finding(value):
+        """A /host op whose value is a scalar, an object or a list of scalars is not a host list."""
+        meta, records = split()
+        delta = {"type": "STATE_DELTA", "delta": [{"op": "replace", "path": "/host", "value": value}]}
+        data = join(meta, _appended(records, delta))
+>       assert [f for f in trace_leaks.check(data) if f.rule_id == "L16"], describe(data)
+E       AssertionError: (no findings)
+E       assert []
+
+test/examples/test_cao_dojo_trace_leaks.py:381: AssertionError
+__________ test_l16_host_replaced_by_a_non_entry_is_a_finding[value3] __________
+
+value = ['SENTINEL']
+
+    @pytest.mark.parametrize("value", ["SENTINEL", 7, {"cpu_percent": 1}, ["SENTINEL"]])
+    def test_l16_host_replaced_by_a_non_entry_is_a_finding(value):
+        """A /host op whose value is a scalar, an object or a list of scalars is not a host list."""
+        meta, records = split()
+        delta = {"type": "STATE_DELTA", "delta": [{"op": "replace", "path": "/host", "value": value}]}
+        data = join(meta, _appended(records, delta))
+>       assert [f for f in trace_leaks.check(data) if f.rule_id == "L16"], describe(data)
+E       AssertionError: (no findings)
+E       assert []
+
+test/examples/test_cao_dojo_trace_leaks.py:381: AssertionError
+______________________ test_every_rule_id_has_a_near_miss ______________________
+
+    def test_every_rule_id_has_a_near_miss():
+>       assert set(NEAR_MISSES) == set(RULE_IDS)
+E       AssertionError: assert {'L1', 'L10',...', 'L14', ...} == {'L1', 'L10',...', 'L14', ...}
+E         
+E         Extra items in the left set:
+E         'L16'
+E         Use -v to get more diff
+
+test/examples/test_cao_dojo_trace_leaks.py:624: AssertionError
+____________________ test_the_catalog_is_returned_as_copies ____________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10ffe29e0>
+scans = [1]
+
+    def test_the_catalog_is_returned_as_copies(
+        monkeypatch: pytest.MonkeyPatch, scans: List[int]
+    ) -> None:
+        """The cache is shared across streams: a caller that edits its result must not edit it."""
+        first = main._agui_profile_catalog()
+        # A shallow copy per entry is enough because an entry holds only scalars (the wire shape
+        # is name, source, role, loadable); this pins that, so a nested value forces a deepcopy.
+        assert all(
+            not isinstance(v, (dict, list, set, tuple)) for entry in first for v in entry.values()
+        )
+        first[0]["name"] = "changed"
+        first.append({"name": "extra"})
+        again = main._agui_profile_catalog()
+>       assert [p["name"] for p in again] == ["dev", "sup"]
+E       AssertionError: assert ['changed', 'sup', 'extra'] == ['dev', 'sup']
+E         
+E         At index 0 diff: 'changed' != 'dev'
+E         Left contains one more item: 'extra'
+E         Use -v to get more diff
+
+<repo>/test/services/test_fleet_profile_catalog.py:331: AssertionError
+13 failed, 114 passed, 1 error in 1.08s

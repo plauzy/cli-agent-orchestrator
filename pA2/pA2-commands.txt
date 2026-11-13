@@ -1,0 +1,1 @@
+timeout 280 .venv/bin/python -m pytest test/services/test_host_resources.py test/services/agui/test_runtime_id_projections.py test/examples/test_cao_dojo_trace_leaks.py test/services/test_fleet_profile_catalog.py -q -p no:cacheprovider --no-header -o addopts= -W ignore -rs

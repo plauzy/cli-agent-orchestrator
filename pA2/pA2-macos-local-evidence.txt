@@ -1,0 +1,11 @@
+# macOS local comparison, 27.2.1, 10 logical CPUs
+$ sysctl vm.loadavg
+vm.loadavg: { 2.58 2.72 2.85 }
+$ sysctl -n kern.memorystatus_vm_pressure_level
+2
+$ top -l 2 -n 0 -s 2 | grep -E "CPU usage|PhysMem"
+CPU usage: 9.55% user, 6.10% sys, 84.33% idle 
+PhysMem: 30G used (3832M wired, 14G compressor), 814M unused.
+$ sampler (two samples 31s apart is the real cadence; here the readers directly)
+cpu_percent over 2s: 10
+load_per_core: 0.2  memory_used_percent: 78  pressure: warn

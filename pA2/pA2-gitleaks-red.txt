@@ -1,0 +1,27 @@
+gitleaks 8.30.1 (darwin_arm64, sha256 verified against the release checksums file)
+range: 6960d6be92c0366da02e8a32da0bab5443d18c1d..136533a6227e5bf64c462d44dc7105f32fed66c6
+$ gitleaks detect --source . --config .gitleaks.toml --redact --verbose --exit-code 1 --log-opts "BASE..HEAD"
+
+    ○
+    │╲
+    │ ○
+    ○ ░
+    ░    gitleaks
+
+Finding:     L16_KEYS = REDACTED | {"runtime_id", "s...
+Secret:      REDACTED
+RuleID:      generic-api-key
+Entropy:     3.750000
+File:        examples/ag-ui/cao-dojo/tools/trace_leaks.py
+Line:        85
+Commit:      136533a6227e5bf64c462d44dc7105f32fed66c6
+Author:      plauzy
+Email:       4451274+plauzy@users.noreply.github.com
+Date:        2026-11-13T00:20:02Z
+Fingerprint: 136533a6227e5bf64c462d44dc7105f32fed66c6:examples/ag-ui/cao-dojo/tools/trace_leaks.py:generic-api-key:85
+Link:        https://github.com/plauzy/cli-agent-orchestrator/blob/136533a6227e5bf64c462d44dc7105f32fed66c6/examples/ag-ui/cao-dojo/tools/trace_leaks.py#L85
+
+6:25PM INF 2 commits scanned.
+6:25PM INF scanned ~138771 bytes (138.77 KB) in 93.3ms
+6:25PM WRN leaks found: 1
+exit=1

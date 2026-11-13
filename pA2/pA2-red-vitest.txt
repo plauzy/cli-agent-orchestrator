@@ -1,0 +1,1126 @@
+
+ RUN  v5.1.0 <repo>/examples/ag-ui/ag-ui-operator-dashboard
+
+ ❯ core/__tests__/fleet.test.ts (42 tests | 4 failed) 22ms
+   ✓ the captured ambient stream (made before runtime_id existed) (2)
+     ✓ folds the snapshot and its deltas into the live terminals 1ms
+     ✓ a row without a runtime_id key is local (null), never undefined 0ms
+   ✓ grouping by runtime (4)
+     ✓ puts local first, then the runtimes by id 0ms
+     ✓ counts waiting terminals per group 0ms
+     ✓ keys sessions by (runtime, session name): two runtimes may both own `main` 0ms
+     ✓ an empty fleet has no groups 0ms
+   ✓ STATE_DELTA (14)
+     ✓ replaces whole keys and per-key counts 0ms
+     ✓ add and remove on a counts key 0ms
+     ✓ a delta before any snapshot changes nothing 0ms
+     ✓ ignores frames that are not fleet state 0ms
+     ✓ move is ignored, not thrown, and marks the fleet stale 0ms
+     ✓ copy is ignored, not thrown, and marks the fleet stale 0ms
+     ✓ test is ignored, not thrown, and marks the fleet stale 0ms
+     ✓ an op that is not RFC 6902 is ignored, not thrown, and marks the fleet stale 0ms
+     ✓ an unknown path is ignored, not thrown, and marks the fleet stale 0ms
+     ✓ a path with no leading slash is ignored, not thrown, and marks the fleet stale 0ms
+     ✓ no path is ignored, not thrown, and marks the fleet stale 0ms
+     ✓ the next snapshot clears stale 0ms
+     ✓ a non-array delta is ignored and stale 0ms
+     ✓ malformed rows are dropped, not rendered 0ms
+   ✓ the profile catalog and the agent_card (5)
+     ✓ holds only the four catalog fields 0ms
+     ✓ composes the card client-side from terminal and catalog 0ms
+     ✓ a profile that is not in the catalog still gets a card, without catalog fields 0ms
+     ✓ a terminal with no profile is named by its id 0ms
+     ✓ a catalog change arrives as a whole-key replace 0ms
+   ✓ the controller feeds the fleet (1)
+     ✓ folds ambient frames and reports them through onChange 14ms
+   ✓ every shape the server may send, and the wrong ones (10)
+     ✓ fills in what a session row leaves out, and drops one with no id 0ms
+     ✓ drops a terminal whose id is not text and a profile with no name 0ms
+     ✓ keeps only finite numbers in counts 0ms
+     ✓ terminals: replace sets it and remove empties it 0ms
+     ✓ sessions: replace sets it and remove empties it 0ms
+     ✓ profiles: replace sets it and remove empties it 0ms
+     ✓ counts: whole-object replace and remove, and `scopes` is accepted and ignored 0ms
+     ✓ a counts key needs a finite number, and an escaped key is unescaped 0ms
+     ✓ a top-level key the server does not send is not understood 0ms
+     ✓ a path deeper than the server sends is not understood 0ms
+   ✓ ordering of runtimes (1)
+     ✓ sorts ids against each other, in either arrival order 0ms
+   ✓ the card for a catalog entry that says less (1)
+     ✓ leaves out an unset role and says `no` for an unloadable profile 0ms
+   ❯ host resources (4)
+     × folds the host list from a snapshot; a field the server omitted is null, never 0 3ms
+     × a snapshot with no host key (older server, or not reported) is an empty list 0ms
+     × applies a whole-key replace of /host and a remove, and keeps the rest of the fleet 0ms
+     × drops junk entries and an unknown pressure level 1ms
+ ❯ view/__tests__/Fleet.test.tsx (10 tests | 3 failed) 201ms
+   ✓ the fleet panel (7)
+     ✓ says so when no fleet has arrived 51ms
+     ✓ groups the captured local fleet under `local` 83ms
+     ✓ groups synthetic runtimes, local first 8ms
+     ✓ shows the profile behind a terminal as an agent_card from the catalog 7ms
+     ✓ renders hostile strings as text 4ms
+     ✓ has no controls 5ms
+     ✓ says when the stream's deltas could not be applied 5ms
+   ❯ Host resources strip (3)
+     × shows the local numbers, and no control 17ms
+     × a missing field is a dash, never 0 12ms
+     × an empty or missing host says not reported 10ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  core/__tests__/fleet.test.ts > host resources > folds the host list from a snapshot; a field the server omitted is null, never 0
+AssertionError: expected undefined to deeply equal [ { runtimeId: null, …(5) } ]
+
+- Expected:
+[
+  {
+    "cpuPercent": null,
+    "loadPerCore": 0.5,
+    "memoryPressure": "warn",
+    "memoryUsedPercent": 40,
+    "runtimeId": null,
+    "sampledAt": "2026-11-12T00:00:00+00:00",
+  },
+]
+
++ Received:
+undefined
+
+ ❯ core/__tests__/fleet.test.ts:329:24
+    327|   it("folds the host list from a snapshot; a field the server omitted …
+    328|     const fleet = fold([snapshot({ terminals: [], host: [host({ cpu_pe…
+    329|     expect(fleet.host).toEqual([
+       |                        ^
+    330|       {
+    331|         runtimeId: null,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  core/__tests__/fleet.test.ts > host resources > a snapshot with no host key (older server, or not reported) is an empty list
+AssertionError: expected undefined to deeply equal []
+
+- Expected:
+[]
+
++ Received:
+undefined
+
+ ❯ core/__tests__/fleet.test.ts:342:54
+    340|
+    341|   it("a snapshot with no host key (older server, or not reported) is a…
+    342|     expect(fold([snapshot({ terminals: [] })]).host).toEqual([]);
+       |                                                      ^
+    343|     expect(fold([snapshot({ terminals: [], host: "x" })]).host).toEqua…
+    344|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  core/__tests__/fleet.test.ts > host resources > applies a whole-key replace of /host and a remove, and keeps the rest of the fleet
+TypeError: Cannot read properties of undefined (reading '0')
+ ❯ core/__tests__/fleet.test.ts:349:21
+    347|     const base = snapshot({ terminals: [term("a")], host: [host()] });
+    348|     const replaced = fold([base, delta({ op: "replace", path: "/host",…
+    349|     expect(replaced.host[0].cpuPercent).toBe(90);
+       |                     ^
+    350|     expect(replaced.terminals).toHaveLength(1);
+    351|     expect(replaced.stale).toBe(false);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  core/__tests__/fleet.test.ts > host resources > drops junk entries and an unknown pressure level
+AssertionError: Target cannot be null or undefined.
+ ❯ core/__tests__/fleet.test.ts:357:24
+    355|   it("drops junk entries and an unknown pressure level", () => {
+    356|     const fleet = fold([snapshot({ terminals: [], host: [7, null, host…
+    357|     expect(fleet.host).toHaveLength(1);
+       |                        ^
+    358|     expect(fleet.host[0].memoryPressure).toBeNull();
+    359|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  view/__tests__/Fleet.test.tsx > Host resources strip > shows the local numbers, and no control
+TestingLibraryElementError: Unable to find an accessible element with the role "region" and name "Host resources"
+
+Here are the accessible roles:
+
+  main:
+
+  Name "":
+  <main />
+
+  --------------------------------------------------
+  banner:
+
+  Name "":
+  <header />
+
+  --------------------------------------------------
+  heading:
+
+  Name "CAO operator dashboard":
+  <h1 />
+
+  Name "Approvals (run plane)":
+  <h2 />
+
+  Name "Fleet (ambient stream)":
+  <h2 />
+
+  Name "local":
+  <h3 />
+
+  Name "Session main (unknown)":
+  <h4 />
+
+  Name "a: idle":
+  <h5 />
+
+  Name "Generative UI (ambient stream)":
+  <h2 />
+
+  Name "Session timeline (ambient stream)":
+  <h2 />
+
+  --------------------------------------------------
+  paragraph:
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  --------------------------------------------------
+  code:
+
+  Name "":
+  <code />
+
+  --------------------------------------------------
+  button:
+
+  Name "Check for approvals":
+  <button
+    type="button"
+  />
+
+  --------------------------------------------------
+  region:
+
+  Name "Approvals":
+  <section
+    aria-label="Approvals"
+  />
+
+  Name "Fleet":
+  <section
+    aria-label="Fleet"
+  />
+
+  Name "Runtime local":
+  <section
+    aria-label="Runtime local"
+  />
+
+  Name "Generative UI":
+  <section
+    aria-label="Generative UI"
+  />
+
+  Name "Session timeline":
+  <section
+    aria-label="Session timeline"
+  />
+
+  --------------------------------------------------
+  list:
+
+  Name "":
+  <ul />
+
+  Name "":
+  <ul />
+
+  Name "":
+  <ol />
+
+  Name "":
+  <ol />
+
+  --------------------------------------------------
+  listitem:
+
+  Name "":
+  <li />
+
+  --------------------------------------------------
+  article:
+
+  Name "agent_card":
+  <article
+    aria-label="agent_card"
+  />
+
+  --------------------------------------------------
+  term:
+
+  Name "":
+  <dt />
+
+  Name "":
+  <dt />
+
+  Name "":
+  <dt />
+
+  --------------------------------------------------
+  definition:
+
+  Name "":
+  <dd />
+
+  Name "":
+  <dd />
+
+  Name "":
+  <dd />
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <main>
+      <header>
+        <h1>
+          CAO operator dashboard
+        </h1>
+        <p>
+          Server 
+          <code>
+            http://127.0.0.1:9894
+          </code>
+          . Ambient stream: 
+          open
+          .
+        </p>
+        <button
+          type="button"
+        >
+          Check for approvals
+        </button>
+      </header>
+      <section
+        aria-label="Approvals"
+      >
+        <h2>
+          Approvals (run plane)
+        </h2>
+        <p>
+          No approvals listed. Use "Check for approvals".
+        </p>
+        <ul />
+        <p>
+          "Delivered" means the server accepted a decision for that id. The run plane does not report which decision was applied: another client may have answered first.
+        </p>
+      </section>
+      <section
+        aria-label="Fleet"
+      >
+        <h2>
+          Fleet (ambient stream)
+        </h2>
+        <p>
+          The agents this server can see, grouped by the runtime each one runs on. A terminal with no runtime is local. Cards come from the CAO profile catalog, not from anything an agent wrote. This panel has no controls.
+        </p>
+        <section
+          aria-label="Runtime local"
+        >
+          <h3>
+            local
+          </h3>
+          <p>
+            1
+             
+            terminal
+          </p>
+          <div>
+            <h4>
+              Session 
+              main
+               
+              <small>
+                (
+                unknown
+                )
+              </small>
+            </h4>
+            <ul>
+              <li>
+                <article
+                  aria-label="agent_card"
+                >
+                  <h5>
+                    a
+                    : 
+                    idle
+                  </h5>
+                  <dl>
+                    <div>
+                      <dt>
+                        name
+                      </dt>
+                      <dd>
+                        dev
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>
+                        provider
+                      </dt>
+                      <dd>
+                        kiro_cli
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>
+                        status
+                      </dt>
+                      <dd>
+                        idle
+                      </dd>
+                    </div>
+                  </dl>
+                </article>
+              </li>
+            </ul>
+          </div>
+        </section>
+      </section>
+      <section
+        aria-label="Generative UI"
+      >
+        <h2>
+          Generative UI (ambient stream)
+        </h2>
+        <p>
+          Agent-authored content, shown as text. This panel has no controls.
+        </p>
+        <p>
+          No components yet.
+        </p>
+        <ol />
+      </section>
+      <section
+        aria-label="Session timeline"
+      >
+        <h2>
+          Session timeline (ambient stream)
+        </h2>
+        <p>
+          Calls between agents, from the stream's metadata: who called whom, and whether the call is open, completed or ended. A call completes when the receiver's work ends, and ends as superseded when a newer call goes to the same receiver. After a reconnect, a call that was still open is shown as unconfirmed: its end may have happened while the stream was down, and the stream does not resend it. No message text is shown, and this panel has no controls.
+        </p>
+        <p>
+          No calls yet.
+        </p>
+        <ol />
+      </section>
+    </main>
+  </div>
+</body>
+ ❯ Object.getElementError ../../../../../..<repo>/examples/ag-ui/ag-ui-operator-dashboard/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../../../../../..<repo>/examples/ag-ui/ag-ui-operator-dashboard/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../../../../../..<repo>/examples/ag-ui/ag-ui-operator-dashboard/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../../../../../..<repo>/examples/ag-ui/ag-ui-operator-dashboard/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ strip view/__tests__/Fleet.test.tsx:115:30
+    113|
+    114| describe("Host resources strip", () => {
+    115|   const strip = () => screen.getByRole("region", { name: "Host resourc…
+       |                              ^
+    116|   const snap = (host: unknown): Frame => ({
+    117|     type: "STATE_SNAPSHOT",
+ ❯ view/__tests__/Fleet.test.tsx:128:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+ FAIL  view/__tests__/Fleet.test.tsx > Host resources strip > a missing field is a dash, never 0
+TestingLibraryElementError: Unable to find an accessible element with the role "region" and name "Host resources"
+
+Here are the accessible roles:
+
+  main:
+
+  Name "":
+  <main />
+
+  --------------------------------------------------
+  banner:
+
+  Name "":
+  <header />
+
+  --------------------------------------------------
+  heading:
+
+  Name "CAO operator dashboard":
+  <h1 />
+
+  Name "Approvals (run plane)":
+  <h2 />
+
+  Name "Fleet (ambient stream)":
+  <h2 />
+
+  Name "local":
+  <h3 />
+
+  Name "Session main (unknown)":
+  <h4 />
+
+  Name "a: idle":
+  <h5 />
+
+  Name "Generative UI (ambient stream)":
+  <h2 />
+
+  Name "Session timeline (ambient stream)":
+  <h2 />
+
+  --------------------------------------------------
+  paragraph:
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  --------------------------------------------------
+  code:
+
+  Name "":
+  <code />
+
+  --------------------------------------------------
+  button:
+
+  Name "Check for approvals":
+  <button
+    type="button"
+  />
+
+  --------------------------------------------------
+  region:
+
+  Name "Approvals":
+  <section
+    aria-label="Approvals"
+  />
+
+  Name "Fleet":
+  <section
+    aria-label="Fleet"
+  />
+
+  Name "Runtime local":
+  <section
+    aria-label="Runtime local"
+  />
+
+  Name "Generative UI":
+  <section
+    aria-label="Generative UI"
+  />
+
+  Name "Session timeline":
+  <section
+    aria-label="Session timeline"
+  />
+
+  --------------------------------------------------
+  list:
+
+  Name "":
+  <ul />
+
+  Name "":
+  <ul />
+
+  Name "":
+  <ol />
+
+  Name "":
+  <ol />
+
+  --------------------------------------------------
+  listitem:
+
+  Name "":
+  <li />
+
+  --------------------------------------------------
+  article:
+
+  Name "agent_card":
+  <article
+    aria-label="agent_card"
+  />
+
+  --------------------------------------------------
+  term:
+
+  Name "":
+  <dt />
+
+  Name "":
+  <dt />
+
+  Name "":
+  <dt />
+
+  --------------------------------------------------
+  definition:
+
+  Name "":
+  <dd />
+
+  Name "":
+  <dd />
+
+  Name "":
+  <dd />
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <main>
+      <header>
+        <h1>
+          CAO operator dashboard
+        </h1>
+        <p>
+          Server 
+          <code>
+            http://127.0.0.1:9894
+          </code>
+          . Ambient stream: 
+          open
+          .
+        </p>
+        <button
+          type="button"
+        >
+          Check for approvals
+        </button>
+      </header>
+      <section
+        aria-label="Approvals"
+      >
+        <h2>
+          Approvals (run plane)
+        </h2>
+        <p>
+          No approvals listed. Use "Check for approvals".
+        </p>
+        <ul />
+        <p>
+          "Delivered" means the server accepted a decision for that id. The run plane does not report which decision was applied: another client may have answered first.
+        </p>
+      </section>
+      <section
+        aria-label="Fleet"
+      >
+        <h2>
+          Fleet (ambient stream)
+        </h2>
+        <p>
+          The agents this server can see, grouped by the runtime each one runs on. A terminal with no runtime is local. Cards come from the CAO profile catalog, not from anything an agent wrote. This panel has no controls.
+        </p>
+        <section
+          aria-label="Runtime local"
+        >
+          <h3>
+            local
+          </h3>
+          <p>
+            1
+             
+            terminal
+          </p>
+          <div>
+            <h4>
+              Session 
+              main
+               
+              <small>
+                (
+                unknown
+                )
+              </small>
+            </h4>
+            <ul>
+              <li>
+                <article
+                  aria-label="agent_card"
+                >
+                  <h5>
+                    a
+                    : 
+                    idle
+                  </h5>
+                  <dl>
+                    <div>
+                      <dt>
+                        name
+                      </dt>
+                      <dd>
+                        dev
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>
+                        provider
+                      </dt>
+                      <dd>
+                        kiro_cli
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>
+                        status
+                      </dt>
+                      <dd>
+                        idle
+                      </dd>
+                    </div>
+                  </dl>
+                </article>
+              </li>
+            </ul>
+          </div>
+        </section>
+      </section>
+      <section
+        aria-label="Generative UI"
+      >
+        <h2>
+          Generative UI (ambient stream)
+        </h2>
+        <p>
+          Agent-authored content, shown as text. This panel has no controls.
+        </p>
+        <p>
+          No components yet.
+        </p>
+        <ol />
+      </section>
+      <section
+        aria-label="Session timeline"
+      >
+        <h2>
+          Session timeline (ambient stream)
+        </h2>
+        <p>
+          Calls between agents, from the stream's metadata: who called whom, and whether the call is open, completed or ended. A call completes when the receiver's work ends, and ends as superseded when a newer call goes to the same receiver. After a reconnect, a call that was still open is shown as unconfirmed: its end may have happened while the stream was down, and the stream does not resend it. No message text is shown, and this panel has no controls.
+        </p>
+        <p>
+          No calls yet.
+        </p>
+        <ol />
+      </section>
+    </main>
+  </div>
+</body>
+ ❯ Object.getElementError ../../../../../..<repo>/examples/ag-ui/ag-ui-operator-dashboard/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../../../../../..<repo>/examples/ag-ui/ag-ui-operator-dashboard/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../../../../../..<repo>/examples/ag-ui/ag-ui-operator-dashboard/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../../../../../..<repo>/examples/ag-ui/ag-ui-operator-dashboard/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ strip view/__tests__/Fleet.test.tsx:115:30
+    113|
+    114| describe("Host resources strip", () => {
+    115|   const strip = () => screen.getByRole("region", { name: "Host resourc…
+       |                              ^
+    116|   const snap = (host: unknown): Frame => ({
+    117|     type: "STATE_SNAPSHOT",
+ ❯ view/__tests__/Fleet.test.tsx:140:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯
+
+ FAIL  view/__tests__/Fleet.test.tsx > Host resources strip > an empty or missing host says not reported
+TestingLibraryElementError: Unable to find an accessible element with the role "region" and name "Host resources"
+
+Here are the accessible roles:
+
+  main:
+
+  Name "":
+  <main />
+
+  --------------------------------------------------
+  banner:
+
+  Name "":
+  <header />
+
+  --------------------------------------------------
+  heading:
+
+  Name "CAO operator dashboard":
+  <h1 />
+
+  Name "Approvals (run plane)":
+  <h2 />
+
+  Name "Fleet (ambient stream)":
+  <h2 />
+
+  Name "local":
+  <h3 />
+
+  Name "Session main (unknown)":
+  <h4 />
+
+  Name "a: idle":
+  <h5 />
+
+  Name "Generative UI (ambient stream)":
+  <h2 />
+
+  Name "Session timeline (ambient stream)":
+  <h2 />
+
+  --------------------------------------------------
+  paragraph:
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  Name "":
+  <p />
+
+  --------------------------------------------------
+  code:
+
+  Name "":
+  <code />
+
+  --------------------------------------------------
+  button:
+
+  Name "Check for approvals":
+  <button
+    type="button"
+  />
+
+  --------------------------------------------------
+  region:
+
+  Name "Approvals":
+  <section
+    aria-label="Approvals"
+  />
+
+  Name "Fleet":
+  <section
+    aria-label="Fleet"
+  />
+
+  Name "Runtime local":
+  <section
+    aria-label="Runtime local"
+  />
+
+  Name "Generative UI":
+  <section
+    aria-label="Generative UI"
+  />
+
+  Name "Session timeline":
+  <section
+    aria-label="Session timeline"
+  />
+
+  --------------------------------------------------
+  list:
+
+  Name "":
+  <ul />
+
+  Name "":
+  <ul />
+
+  Name "":
+  <ol />
+
+  Name "":
+  <ol />
+
+  --------------------------------------------------
+  listitem:
+
+  Name "":
+  <li />
+
+  --------------------------------------------------
+  article:
+
+  Name "agent_card":
+  <article
+    aria-label="agent_card"
+  />
+
+  --------------------------------------------------
+  term:
+
+  Name "":
+  <dt />
+
+  Name "":
+  <dt />
+
+  Name "":
+  <dt />
+
+  --------------------------------------------------
+  definition:
+
+  Name "":
+  <dd />
+
+  Name "":
+  <dd />
+
+  Name "":
+  <dd />
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+<body>
+  <div>
+    <main>
+      <header>
+        <h1>
+          CAO operator dashboard
+        </h1>
+        <p>
+          Server 
+          <code>
+            http://127.0.0.1:9894
+          </code>
+          . Ambient stream: 
+          open
+          .
+        </p>
+        <button
+          type="button"
+        >
+          Check for approvals
+        </button>
+      </header>
+      <section
+        aria-label="Approvals"
+      >
+        <h2>
+          Approvals (run plane)
+        </h2>
+        <p>
+          No approvals listed. Use "Check for approvals".
+        </p>
+        <ul />
+        <p>
+          "Delivered" means the server accepted a decision for that id. The run plane does not report which decision was applied: another client may have answered first.
+        </p>
+      </section>
+      <section
+        aria-label="Fleet"
+      >
+        <h2>
+          Fleet (ambient stream)
+        </h2>
+        <p>
+          The agents this server can see, grouped by the runtime each one runs on. A terminal with no runtime is local. Cards come from the CAO profile catalog, not from anything an agent wrote. This panel has no controls.
+        </p>
+        <section
+          aria-label="Runtime local"
+        >
+          <h3>
+            local
+          </h3>
+          <p>
+            1
+             
+            terminal
+          </p>
+          <div>
+            <h4>
+              Session 
+              main
+               
+              <small>
+                (
+                unknown
+                )
+              </small>
+            </h4>
+            <ul>
+              <li>
+                <article
+                  aria-label="agent_card"
+                >
+                  <h5>
+                    a
+                    : 
+                    idle
+                  </h5>
+                  <dl>
+                    <div>
+                      <dt>
+                        name
+                      </dt>
+                      <dd>
+                        dev
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>
+                        provider
+                      </dt>
+                      <dd>
+                        kiro_cli
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>
+                        status
+                      </dt>
+                      <dd>
+                        idle
+                      </dd>
+                    </div>
+                  </dl>
+                </article>
+              </li>
+            </ul>
+          </div>
+        </section>
+      </section>
+      <section
+        aria-label="Generative UI"
+      >
+        <h2>
+          Generative UI (ambient stream)
+        </h2>
+        <p>
+          Agent-authored content, shown as text. This panel has no controls.
+        </p>
+        <p>
+          No components yet.
+        </p>
+        <ol />
+      </section>
+      <section
+        aria-label="Session timeline"
+      >
+        <h2>
+          Session timeline (ambient stream)
+        </h2>
+        <p>
+          Calls between agents, from the stream's metadata: who called whom, and whether the call is open, completed or ended. A call completes when the receiver's work ends, and ends as superseded when a newer call goes to the same receiver. After a reconnect, a call that was still open is shown as unconfirmed: its end may have happened while the stream was down, and the stream does not resend it. No message text is shown, and this panel has no controls.
+        </p>
+        <p>
+          No calls yet.
+        </p>
+        <ol />
+      </section>
+    </main>
+  </div>
+</body>
+ ❯ Object.getElementError ../../../../../..<repo>/examples/ag-ui/ag-ui-operator-dashboard/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../../../../../..<repo>/examples/ag-ui/ag-ui-operator-dashboard/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../../../../../..<repo>/examples/ag-ui/ag-ui-operator-dashboard/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../../../../../..<repo>/examples/ag-ui/ag-ui-operator-dashboard/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ strip view/__tests__/Fleet.test.tsx:115:30
+    113|
+    114| describe("Host resources strip", () => {
+    115|   const strip = () => screen.getByRole("region", { name: "Host resourc…
+       |                              ^
+    116|   const snap = (host: unknown): Frame => ({
+    117|     type: "STATE_SNAPSHOT",
+ ❯ view/__tests__/Fleet.test.tsx:150:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  7 failed | 45 passed (52)
+   Start at  17:55:06
+   Duration  673ms (environment 49%, tests 33%, import 12%, transform 6%, worker 1%)
+
