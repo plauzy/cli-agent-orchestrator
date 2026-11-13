@@ -1,0 +1,1 @@
+CAO Dojo (real dark styling) on a live private CAO server: mock_cli agents assign and hand off, an approval card arrives and is approved, fleet statuses and the event log update live (1.3x speed; a worker shows "unknown" for a moment during its deferred start).

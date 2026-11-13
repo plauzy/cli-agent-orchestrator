@@ -1,0 +1,1 @@
+Operator dashboard after the run, styled by the shipped stylesheet: two assigns and a handoff completed in the session timeline, and agent-emitted Generative UI cards (progress, agent_card, metric) rendered as text outside the compact grid.

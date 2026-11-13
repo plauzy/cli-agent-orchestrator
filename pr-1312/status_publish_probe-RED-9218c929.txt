@@ -1,0 +1,14 @@
+worker 914cf559 created; no further lifecycle event is sent
++     6 ms STATE_DELTA replace /terminals -> worker 914cf559 status=None
+          excerpt: {"type": "STATE_DELTA", "delta": [{"op": "replace", "path": "/terminals", "value": ["...", {"id": "914cf559", "agent_profile": "api-developer", "status": null, "runner_id": null}, "..."]}]}
++  2017 ms STATE_DELTA replace /terminals -> worker 914cf559 status='processing'
+          excerpt: {"type": "STATE_DELTA", "delta": [{"op": "replace", "path": "/terminals", "value": ["...", {"id": "914cf559", "agent_profile": "api-developer", "status": "processing", "runner_id": null}, "..."]}]}
++  4811 ms STATE_DELTA replace /terminals -> worker 914cf559 status='unknown'
+          excerpt: {"type": "STATE_DELTA", "delta": [{"op": "replace", "path": "/terminals", "value": ["...", {"id": "914cf559", "agent_profile": "api-developer", "status": "unknown", "runner_id": null}, "..."]}]}
+first non-unknown status for the worker on the stream: +2017 ms after its POST returned
+GET /terminals/914cf559 at +0 ms: unknown
+GET /terminals/914cf559 at +1015 ms: processing
+GET /terminals/914cf559 at +3037 ms: unknown
+GET /terminals/914cf559 at +4048 ms: processing
+GET /terminals/914cf559 at +5059 ms: completed
+fresh stream STATE_SNAPSHOT at +40 s: worker status = ['completed']

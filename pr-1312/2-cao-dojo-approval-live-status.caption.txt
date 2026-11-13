@@ -1,0 +1,1 @@
+CAO Dojo during the live run: approval card waiting, fleet with live statuses (idle, waiting_user_answer, completed) and the event log.

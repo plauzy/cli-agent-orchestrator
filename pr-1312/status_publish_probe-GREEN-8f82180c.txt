@@ -1,0 +1,18 @@
+worker eba09643 created; no further lifecycle event is sent
++     6 ms STATE_DELTA replace /terminals -> worker eba09643 status=None
+          excerpt: {"type": "STATE_DELTA", "delta": [{"op": "replace", "path": "/terminals", "value": ["...", {"id": "eba09643", "agent_profile": "api-developer", "status": null, "runner_id": null}, "..."]}]}
++  2008 ms STATE_DELTA replace /terminals -> worker eba09643 status='processing'
+          excerpt: {"type": "STATE_DELTA", "delta": [{"op": "replace", "path": "/terminals", "value": ["...", {"id": "eba09643", "agent_profile": "api-developer", "status": "processing", "runner_id": null}, "..."]}]}
++  4011 ms STATE_DELTA replace /terminals -> worker eba09643 status='unknown'
+          excerpt: {"type": "STATE_DELTA", "delta": [{"op": "replace", "path": "/terminals", "value": ["...", {"id": "eba09643", "agent_profile": "api-developer", "status": "unknown", "runner_id": null}, "..."]}]}
++  4796 ms STATE_DELTA replace /terminals -> worker eba09643 status='unknown'
+          excerpt: {"type": "STATE_DELTA", "delta": [{"op": "replace", "path": "/terminals", "value": ["...", {"id": "eba09643", "agent_profile": "api-developer", "status": "unknown", "runner_id": null}, "..."]}]}
++  6803 ms STATE_DELTA replace /terminals -> worker eba09643 status='completed'
+          excerpt: {"type": "STATE_DELTA", "delta": [{"op": "replace", "path": "/terminals", "value": ["...", {"id": "eba09643", "agent_profile": "api-developer", "status": "completed", "runner_id": null}, "..."]}]}
+first non-unknown status for the worker on the stream: +2008 ms after its POST returned
+GET /terminals/eba09643 at +0 ms: unknown
+GET /terminals/eba09643 at +1018 ms: processing
+GET /terminals/eba09643 at +3043 ms: unknown
+GET /terminals/eba09643 at +4059 ms: processing
+GET /terminals/eba09643 at +5072 ms: completed
+fresh stream STATE_SNAPSHOT at +40 s: worker status = ['completed']

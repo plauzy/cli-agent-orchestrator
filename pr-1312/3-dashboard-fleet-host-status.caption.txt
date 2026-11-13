@@ -1,0 +1,1 @@
+Operator dashboard Fleet panel, styled by the shipped stylesheet (compact 4-pair grid): real host strip and four terminals with live status (status-change publish), workers completed, plus profile-catalog role, source and loadable.

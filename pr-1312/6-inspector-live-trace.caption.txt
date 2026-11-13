@@ -1,0 +1,1 @@
+Raw event inspector reading the trace recorded from the live CAO Dojo run: 38 records in order (scrubbed and leak-checked; timestamps are the scrubber's synthetic ticks).

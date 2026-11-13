@@ -1,0 +1,11 @@
+=== worker status after init: processing
+=== GET /terminals/897b0643
+   {'id': '897b0643', 'agent_profile': 'release-supervisor', 'status': 'idle', 'runner_id': None}
+=== GET /terminals/d017ea0d
+   {'id': 'd017ea0d', 'agent_profile': 'api-developer', 'status': 'processing', 'runner_id': None}
+=== GET /sessions/cao-probe/terminals
+   {'id': '897b0643', 'agent_profile': 'release-supervisor', 'status': 'idle', 'runner_id': None}
+   {'id': 'd017ea0d', 'agent_profile': 'api-developer', 'status': 'processing', 'runner_id': None}
+=== AG-UI GET /agui/v1/stream first STATE_SNAPSHOT terminals[]
+   {'id': '897b0643', 'agent_profile': 'release-supervisor', 'status': 'idle', 'runner_id': None}
+   {'id': 'd017ea0d', 'agent_profile': 'api-developer', 'status': 'processing', 'runner_id': None}

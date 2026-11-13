@@ -1,0 +1,1 @@
+AG-UI Dojo (ag-ui#2216 CAO integration): an agent on a live CAO fleet waits for approval. Suggestion chips replaced with CAO ones in the recording copy; #2216 itself still ships expense-demo chips.
