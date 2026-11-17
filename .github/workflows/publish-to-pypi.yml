@@ -536,6 +536,12 @@ jobs:
   regenerate-agent-plugin:
     name: Regenerate the committed agent-plugin packages
     needs: publish-pypi
+    # `always()` plus an explicit result check, not the implicit `success()`. The implicit
+    # form is false when any ancestor job was skipped, and a `pypi` dispatch skips
+    # `smoke-test`, so a successful publish still left this job skipped and the committed
+    # packages at the previous release (run 39339505140: 2.5.4 published, packages left at
+    # 2.5.3, #1384). The one dependency that matters is that a PyPI publish SUCCEEDED.
+    if: ${{ always() && needs.publish-pypi.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
