@@ -24,20 +24,13 @@ logger = logging.getLogger(__name__)
 # one — two skills with near-identical descriptions in every agent's catalog,
 # competing for activation.
 #
-# This map is the one-shot retirement step that makes a rename possible, and it
-# is **deliberately empty**. The rename it exists for — ``cao-plugin`` to
-# ``cao-event-plugin``, so the event-plugin authoring skill stops competing with
-# agent-plugin requests — is unresolved maintainer decision **M4**. Activating it
-# is two data edits and no code change:
-#
-#   1. add ``"cao-plugin": "cao-event-plugin"`` here;
-#   2. rename the skill directory and its ``name:`` frontmatter, and update
-#      ``SHIPPED_SKILLS`` in ``scripts/sync_skills.py`` plus the contributor
-#      package's allowlist in ``scripts/build_agent_plugin.py``.
-#
-# The mechanism is built and tested now so that M4, when it lands, is a rename
-# rather than a migration project.
-SKILL_RENAMES: Dict[str, str] = {}
+# This map is the one-shot retirement step that makes a rename possible. It holds
+# ``cao-plugin`` to ``cao-event-plugin`` (decision M4), so the event-plugin
+# authoring skill no longer competes with agent-plugin requests. Adding a rename
+# is a data edit here plus the skill directory, its ``name:`` frontmatter,
+# ``SHIPPED_SKILLS`` in ``scripts/sync_skills.py`` and the contributor package's
+# allowlist in ``scripts/build_agent_plugin.py``.
+SKILL_RENAMES: Dict[str, str] = {"cao-plugin": "cao-event-plugin"}
 
 
 def _retire_renamed_skills() -> List[str]:

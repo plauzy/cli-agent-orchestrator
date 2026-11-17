@@ -2,16 +2,15 @@
 
 **Validates: Requirements 21.4, 21.5**
 
-Two things are asserted here, and neither resolves a maintainer decision.
+Two things are asserted here.
 
 The **docs vocabulary rule** — "event plugin" and "agent plugin" are always
 qualified, bare "plugin" only inside a document whose title already scopes it —
 is checked mechanically, because a rule enforced by review alone decays.
 
-The **retirement step** for renaming ``cao-plugin`` to ``cao-event-plugin`` is
-built and tested while its rename map stays empty. M4 is unresolved, so
-activating it must be a data edit rather than a migration project; the tests
-below drive the mechanism through a synthetic rename to prove that.
+The **retirement step** for renaming ``cao-plugin`` to ``cao-event-plugin``
+(decision M4) is active. The tests below drive the mechanism through a synthetic
+rename, and then through the real upgrade of an install that holds the old name.
 """
 
 from __future__ import annotations
@@ -391,27 +390,106 @@ class TestNoPluginDocIsSilentlyExempt:
     # OpenCode line.
 
 
-class TestRenameRetirementIsPreparedNotActivated:
-    """Requirement 21.5 — the mechanism exists; the decision does not."""
+class TestCaoPluginRenameIsActive:
+    """Decision M4: ``cao-plugin`` is now ``cao-event-plugin``."""
 
-    def test_the_rename_map_is_empty_pending_m4(self):
-        """This document does not settle M4, so nothing is renamed yet."""
-        assert init_module.SKILL_RENAMES == {}
+    def test_the_rename_map_holds_the_m4_pair(self):
+        assert init_module.SKILL_RENAMES == {"cao-plugin": "cao-event-plugin"}
 
-    def test_sync_skills_still_ships_the_current_name(self):
-        """No rename has been applied to the shipped allowlist either."""
+    def test_sync_skills_ships_only_the_new_name(self):
         import sys
 
         sys.path.insert(0, str(REPO_ROOT / "scripts"))
         import sync_skills
 
-        assert "cao-plugin" in sync_skills.SHIPPED_SKILLS
-        assert "cao-event-plugin" not in sync_skills.SHIPPED_SKILLS
+        assert "cao-event-plugin" in sync_skills.SHIPPED_SKILLS
+        assert "cao-plugin" not in sync_skills.SHIPPED_SKILLS
 
     def test_the_coupling_is_documented_where_a_renamer_would_look(self):
         """A future renamer reads the allowlist; the warning has to be there."""
         source = (REPO_ROOT / "scripts" / "sync_skills.py").read_text(encoding="utf-8")
         assert "SKILL_RENAMES" in source
+
+
+class TestUpgradeFromTheOldSkillName:
+    """An install that holds the old ``cao-plugin`` folder ends with the new one."""
+
+    @pytest.fixture
+    def store(self, tmp_path, monkeypatch):
+        path = tmp_path / "skills"
+        path.mkdir()
+        monkeypatch.setattr(init_module, "SKILLS_DIR", path)
+        return path
+
+    @staticmethod
+    def _install_old_copy(store: Path, older_content: bool = False) -> Path:
+        """What a pre-rename ``cao init`` left behind: the same skill under the old name.
+
+        ``older_content`` models a copy seeded by an earlier release, whose text
+        differs from today's by a line.
+        """
+        import shutil
+        from importlib import resources
+
+        with resources.as_file(
+            resources.files("cli_agent_orchestrator.skills") / "cao-event-plugin"
+        ) as packaged:
+            old = store / "cao-plugin"
+            shutil.copytree(packaged, old)
+        skill_md = old / "SKILL.md"
+        text = skill_md.read_text(encoding="utf-8").replace(
+            "name: cao-event-plugin", "name: cao-plugin", 1
+        )
+        if older_content:
+            text += "\nA line the current release does not have.\n"
+        skill_md.write_text(text, encoding="utf-8")
+        return old
+
+    def test_old_folder_is_replaced_and_no_stale_dir_remains(self, store):
+        old = self._install_old_copy(store)
+
+        init_module.seed_default_skills()
+
+        assert (store / "cao-event-plugin" / "SKILL.md").is_file()
+        assert not old.exists()
+        assert not (store / "cao-plugin").exists()
+
+    def test_the_rename_is_idempotent(self, store):
+        self._install_old_copy(store)
+
+        init_module.seed_default_skills()
+        first = sorted(p.name for p in store.iterdir())
+        assert init_module.seed_default_skills() == 0
+        assert sorted(p.name for p in store.iterdir()) == first
+        assert "cao-plugin" not in first
+
+    def test_a_customized_old_folder_is_kept(self, store, caplog):
+        old = self._install_old_copy(store)
+        (old / "notes.md").write_text("mine", encoding="utf-8")
+
+        with caplog.at_level("WARNING"):
+            init_module.seed_default_skills()
+
+        assert (store / "cao-event-plugin").is_dir()
+        assert (old / "notes.md").is_file()
+        assert "local modifications" in caplog.text
+
+    def test_an_old_copy_with_older_content_is_kept_with_a_warning(self, store, caplog):
+        """The retirement step cannot tell an earlier release's text from an edit.
+
+        Only a copy that matches today's skill byte for byte (apart from ``name:``)
+        is removed. A copy seeded by an earlier release differs, so both folders stay
+        and the operator is told to remove the old one. Changing that needs a
+        maintainer decision, so this test pins the current behaviour.
+        """
+        old = self._install_old_copy(store, older_content=True)
+
+        with caplog.at_level("WARNING"):
+            init_module.seed_default_skills()
+
+        assert (store / "cao-event-plugin" / "SKILL.md").is_file()
+        assert (old / "SKILL.md").is_file()
+        assert "cao-plugin" in caplog.text and "local modifications" in caplog.text
 
 
 class TestRetirementMechanism:
@@ -507,7 +585,8 @@ class TestRetirementMechanism:
 
         assert init_module._retire_renamed_skills() == []  # logged, not raised
 
-    def test_an_empty_map_is_a_no_op(self, skills_dir):
+    def test_an_empty_map_is_a_no_op(self, skills_dir, monkeypatch):
+        monkeypatch.setattr(init_module, "SKILL_RENAMES", {})
         self._write(skills_dir / "cao-plugin", "cao-plugin")
 
         assert init_module._retire_renamed_skills() == []

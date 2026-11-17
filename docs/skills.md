@@ -26,7 +26,7 @@ python-testing/
 └── SKILL.md
 ```
 
-A skill may also carry a `references/` folder of Markdown pages that `SKILL.md` links to, for detail the agent reads only when it needs it. `cao-provider`, `cao-plugin` and `cao-contributing` are built-in skills that do this. `cao skills add` copies the whole folder, so these pages install with the skill.
+A skill may also carry a `references/` folder of Markdown pages that `SKILL.md` links to, for detail the agent reads only when it needs it. `cao-provider`, `cao-event-plugin` and `cao-contributing` are built-in skills that do this. `cao skills add` copies the whole folder, so these pages install with the skill.
 
 `SKILL.md` has two required frontmatter fields — `name` and `description` — followed by the skill content in Markdown:
 
@@ -92,6 +92,8 @@ After removal, all providers pick up the change automatically — Copilot CLI ag
 ### Builtin skill seeding
 
 Builtin skills are auto-seeded when `cao-server` starts — no manual step required. If a skill with the same name already exists, it is skipped — preserving any edits you've made. After a CAO upgrade, restarting the server will seed any new builtin skills without overwriting your changes. You can also run `cao init` to seed them manually.
+
+**Renamed built-in skills.** The event-plugin authoring skill `cao-plugin` is now `cao-event-plugin`. On upgrade, `cao init` removes the old `cao-plugin` folder only if it matches the current skill apart from its `name:` line. A copy edited locally, or seeded by an earlier release whose text differs, is kept with a warning, and both folders then appear in the catalog until you remove the old one (`cao skills remove cao-plugin`). An agent profile that lists the skill by exact name (`skills: ["cao-plugin"]`) must change to `cao-event-plugin`; a glob such as `cao-*` still matches.
 
 CAO ships with built-in skills including:
 
