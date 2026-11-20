@@ -5,7 +5,7 @@ or a membership, and the plugin store is one directory per server. So this file 
 not prove a tenant boundary. It pins what the surface does **today**, for a server
 with one operator, so that a future tenant model has to change these tests on purpose:
 
-* with ``CAO_AGENT_PLUGINS_ENABLED`` unset the routes answer 404 with the same body to
+* with ``CAO_AGENT_PLUGINS_ENABLED=0`` the routes answer 404 with the same body to
   every caller, and ``cao plugin`` refuses, whatever tenant-looking header the caller
   sends;
 * with the flag set, the installed set is one store shared by every caller: a plugin
@@ -58,8 +58,8 @@ def client(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("method,path,body", PLUGIN_ROUTES)
 def test_surface_off_answers_every_caller_the_same_404(client, monkeypatch, method, path, body):
-    """Flag unset: 404, and the same bytes for both callers (no tenant-dependent output)."""
-    monkeypatch.delenv(ENV_VAR, raising=False)
+    """Switched off: 404, and the same bytes for both callers (no tenant-dependent output)."""
+    monkeypatch.setenv(ENV_VAR, "0")
     kwargs = {"json": body} if body else {}
 
     responses = [getattr(client, method)(path, headers=h, **kwargs) for h in (TENANT_A, TENANT_B)]
@@ -69,8 +69,8 @@ def test_surface_off_answers_every_caller_the_same_404(client, monkeypatch, meth
 
 
 def test_surface_off_cli_refuses_regardless_of_tenant_environment(monkeypatch):
-    """Flag unset: ``cao plugin`` refuses; a tenant-looking environment variable is not read."""
-    monkeypatch.delenv(ENV_VAR, raising=False)
+    """Switched off: ``cao plugin`` refuses; a tenant-looking environment variable is not read."""
+    monkeypatch.setenv(ENV_VAR, "0")
     monkeypatch.setenv("CAO_TENANT", "tenant-b")
 
     result = CliRunner().invoke(cli, ["plugin", "list"])

@@ -57,7 +57,7 @@ _COMMANDS: tuple[tuple[str, str, str, str, bool], ...] = (
         _PKG + "agent_plugin",
         "agent_plugin",
         "Manage agent plugins (Agent Plugins 1.0.0).",
-        True,
+        False,
     ),
     ("profile", _PKG + "profile", "profile", "Manage agent profiles.", False),
     ("schedule", _PKG + "schedule", "schedule", "Manage scheduled agent flows.", False),

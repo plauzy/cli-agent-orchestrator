@@ -4396,18 +4396,18 @@ async def get_skill_content(
 # =============================================================================
 # Added inline next to the /skills and /settings/skill-dirs handlers because
 # api/main.py is flat (no routers package). The naming is decision M1, recorded
-# by the issue author in #573; the surface does not ship to end users until it
-# graduates (#1244), so every route below is gated on
-# CAO_AGENT_PLUGINS_ENABLED (default off) and 404s without it — the routes are
-# constructed but not executable, mirroring the AG-UI gate above. The scope
+# by the issue author in #573. The surface graduated (#1393), so every route below
+# answers by default; an operator can still close it with
+# CAO_AGENT_PLUGINS_ENABLED=0 (or false/no/off), after which every route 404s as an
+# unregistered path would. The scope
 # dependencies are authorization, not the gate: they are a no-op when auth is
 # disabled.
 
 
 def _require_plugins_enabled() -> None:
-    """Raise 404 when the agent-plugin surface is disabled (default-off).
+    """Raise 404 when the agent-plugin surface is disabled (default-on, kill switch).
 
-    Requirement 16.5's ship-gate. Shares one predicate with the CLI group so the
+    Requirement 16.5's execution gate. Shares one predicate with the CLI group so the
     two surfaces cannot disagree about whether the surface is live.
 
     Applied as a **route dependency**, not as the handler's first statement, and

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **`cao plugin` and the `/plugins*` routes are on by default** (#1393). `cao plugin` is
+  listed in `cao --help`, and `GET/POST /plugins`, `POST /plugins/validate` and
+  `DELETE /plugins/{name}` answer without setting anything. `CAO_AGENT_PLUGINS_ENABLED`
+  is now a kill switch: `0`, `false`, `no` or `off` closes the surface (routes 404, every
+  subcommand refuses), and any other value or none leaves it open. The web Plugins tab
+  and the TUI rows are not changed. Operators who do not want the install path reachable
+  should set `CAO_AGENT_PLUGINS_ENABLED=0` before upgrading.
+
 - Add the Qwen Code (`qwen_cli`) provider with profile, skill, MCP and model support.
 
 - **`cao memory show` finds an existing key when recall ranks by BM25** (#1329).

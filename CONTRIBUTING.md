@@ -83,6 +83,33 @@ is visible at the site of the problem rather than in a JSON file nobody reads.
 > section in `pyproject.toml` is shadowed by it and has no effect. Edit `mypy.ini`.
 
 
+## Required status checks
+
+Which checks must pass before a merge to `main` is a maintainer setting in the
+repository's branch protection, not something this repository's files control, so this
+section records what the workflow offers and the open question, not the setting itself.
+When this section was written (2026-11-20), the `protect-main` repository ruleset required
+only the four `CodeQL (<language>)` jobs (`actions`, `javascript-typescript`, `python`,
+`rust`), as #1393 also reports for `5a8dc10f`. A merge with a red unit test is therefore
+possible. Check the ruleset before relying on this.
+
+If a maintainer requires more than CodeQL, start with **Unit Tests**. The job
+(`.github/workflows/ci.yml`, job `test`) is a matrix, and branch protection lists each
+leg by its own name:
+
+| Check name to list | What it runs |
+|---|---|
+| `Unit Tests (3.11)` | `pytest` on Python 3.11, plus `make check-agent-plugins-schemas`, `make check-agent-plugin` and `make check-agent-plugin-links` |
+| `Unit Tests (3.12)` | the same on Python 3.12 |
+
+The cost is exposure to flaky tests, tracked in
+[#1375](https://github.com/awslabs/cli-agent-orchestrator/issues/1375). Decide it
+together with the AG-UI check question in
+[#1233](https://github.com/awslabs/cli-agent-orchestrator/pull/1233). Jobs that record
+demos (`ag-ui-demo`, `ag-ui-construct-demos`, `agent-plugins-dogfood`) gate on drift but
+upload their artifacts with `continue-on-error`, so list them only after deciding that
+a missing recording should block a merge.
+
 ## Developing in GitHub Codespaces
 
 The project runs end-to-end inside a Codespace. See [docs/codespaces.md](docs/codespaces.md)

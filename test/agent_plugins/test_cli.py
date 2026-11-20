@@ -62,7 +62,7 @@ def run(cli_env, *args):
 
 class TestCommandShape:
     def test_the_group_is_registered_on_the_root_cli(self):
-        """Registered and invocable — the ship gate hides it, it does not unwire it."""
+        """Registered and invocable."""
         assert "plugin" in cli.list_commands(None)
         assert cli.get_command(None, "plugin") is agent_plugin
 
@@ -70,18 +70,11 @@ class TestCommandShape:
         assert result.exit_code == 0
         assert "add" in result.output
 
-    def test_it_is_absent_from_the_root_help_pending_m1(self):
-        """Requirement 16.5 — the surface must not ship to end users while gated.
+    def test_it_is_listed_in_the_root_help_after_graduation(self):
+        """#1393: the verb graduated, so ``cao --help`` advertises it.
 
-        M1 is DECIDED (Option A), which removes 16.5's prohibition; it does not open
-        the surface. CAO_AGENT_PLUGINS_ENABLED stays default-off as a separate change,
-        so this still holds.
-
-        Click's only "reachable but not advertised" mechanism is omission from the
-        parent's help listing, so that omission *is* the gate. Asserting it here
-        means flipping ``hidden`` back on cannot pass unnoticed. The assertion is
-        deliberately narrow: it checks the command *listing*, because the word
-        "plugin" legitimately appears elsewhere in ``cao --help`` output.
+        The assertion is deliberately narrow: it checks the command *listing*, because
+        the word "plugin" legitimately appears elsewhere in ``cao --help`` output.
         """
         result = CliRunner().invoke(cli, ["--help"])
         listed = [
@@ -89,7 +82,8 @@ class TestCommandShape:
             for line in result.output.splitlines()
             if line.startswith("  ") and line.strip() and not line.strip().startswith("-")
         ]
-        assert "plugin" not in listed, f"`plugin` must stay hidden while gated: {listed}"
+        assert "plugin" in listed, f"`plugin` must be listed once graduated: {listed}"
+        assert cli.get_command(None, "plugin").hidden is False
 
     def test_it_offers_the_four_capabilities(self):
         result = CliRunner().invoke(agent_plugin, ["--help"])

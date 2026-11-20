@@ -28,15 +28,14 @@ CANONICAL_EXAMPLE_DIR = Path(__file__).parent / "fixtures" / "canonical-example"
 
 
 @pytest.fixture(autouse=True)
-def _enable_agent_plugins_surface(monkeypatch):
-    """Open Requirement 16.5's ship-gate for the suites that exercise the surface.
+def _default_agent_plugins_surface(monkeypatch):
+    """Run the suites against the graduated default (#1393), whatever the shell exports.
 
-    ``CAO_AGENT_PLUGINS_ENABLED`` is default-off in production (review finding F1),
-    so without this every CLI invocation and every ``/plugins*`` request in this
-    package would be refused. ``test_ship_gate.py`` deliberately manages the
-    variable itself so the default-off behaviour stays under test.
+    ``CAO_AGENT_PLUGINS_ENABLED`` is default-on, so removing it exercises the default
+    and keeps a developer's own ``=0`` from closing the surface under test.
+    ``test_ship_gate.py`` manages the variable itself so the kill switch stays covered.
     """
-    monkeypatch.setenv("CAO_AGENT_PLUGINS_ENABLED", "1")
+    monkeypatch.delenv("CAO_AGENT_PLUGINS_ENABLED", raising=False)
 
 
 @pytest.fixture(autouse=True)

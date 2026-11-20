@@ -15,7 +15,7 @@ NOISE = re.compile(r"#\d{2,}\b|\b(?:N?FR|VR|SR)-\d|``|docs/[\w./-]+\.md|maintain
 def _walk(group, path):
     for name in group.list_commands(None):
         cmd = group.get_command(None, name)
-        if cmd is None or cmd.hidden or name == "plugin":
+        if cmd is None or cmd.hidden:
             continue
         yield path + [name], cmd
         if isinstance(cmd, click.Group):

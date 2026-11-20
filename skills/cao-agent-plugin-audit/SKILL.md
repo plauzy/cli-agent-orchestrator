@@ -108,14 +108,17 @@ refuses to run if the two pins disagree. It never fetches a schema: the `$schema
 URL in a manifest is an identifier, compared as a string.
 
 **2. CAO's own validator, `cao plugin validate --json`.** This needs a CAO
-install, and it needs `CAO_AGENT_PLUGINS_ENABLED` set to a truthy value. CAO strips
-the value and lowercases it, then compares it against `1`, `true` and `yes`. The
+install. A release before graduation (#1393) also needs `CAO_AGENT_PLUGINS_ENABLED`
+set to a truthy value (CAO strips and lowercases it, then compares it against `1`,
+`true` and `yes`); a release that includes graduation runs the command by default and
+refuses only when the variable is `0`, `false`, `no` or `off`. The
 bundled validator runs it only when that variable is already set in its
 environment, and reports its verdict on a line of its own. When the variable is
 unset it says so and skips this step; it does not set the variable for you.
 
-**With `CAO_AGENT_PLUGINS_ENABLED` unset, `cao plugin validate` exits 1, prints a
-refusal on stderr, and emits no JSON and no conformance result.** That exit 1 says
+**With the gate closed (an older release with the variable unset, or any release with
+it switched off), `cao plugin validate` exits 1, prints a refusal on stderr, and
+emits no JSON and no conformance result.** That exit 1 says
 nothing about the package.
 
 ### Telling the exit-1 cases apart
@@ -128,7 +131,7 @@ status is not the discriminator. Whether stdout parses as JSON is.**
 | Gate set, package loadable | 0 | JSON, `"loadable": true` |
 | Gate set, a FATAL finding | 1 | JSON, `"loadable": false` |
 | Gate set, path does not exist (observed) | 1 | JSON, `"loadable": false`, finding `plugin.root_invalid` |
-| Gate unset | 1 | nothing; refusal text on stderr |
+| Gate closed (older release unset, or switched off) | 1 | nothing; refusal text on stderr |
 
 If stdout parses, read `loadable` and `findings`. If it does not parse, you know
 only that this was not a FATAL report; do not conclude "the gate was unset" from
