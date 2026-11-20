@@ -14,6 +14,7 @@ import struct
 import subprocess
 import termios
 import time
+import uuid
 import weakref
 from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
@@ -3342,6 +3343,7 @@ async def agui_resume_interrupt(
             detail=f"Invalid decision: {body.decision}",
         )
 
+    already_resolved = bool(getattr(interrupt, "resolved", False))
     try:
         result = await construct.resume(
             interrupt_id=interrupt_id,
@@ -3364,6 +3366,13 @@ async def agui_resume_interrupt(
                 "retryable": True,
             },
         )
+
+    # Post-3.0 preview (#1164): off by default, so a build without the flag writes
+    # nothing. A repeated resume of a resolved interrupt is not a second decision.
+    from cli_agent_orchestrator.services.agui import post3_preview
+
+    if post3_preview.post3_preview_enabled() and not already_resolved:
+        post3_preview.record_decision(interrupt, body.decision, body.edited_text, result.outcome)
 
     return {
         "ok": True,
@@ -3519,6 +3528,101 @@ async def agui_capabilities(
     from cli_agent_orchestrator.services.agui.capabilities import build_capabilities
 
     return build_capabilities()
+
+
+# ---------------------------------------------------------------------------
+# Post-3.0 previews (#1162, #1164, #1194), behind CAO_AGUI_POST3_PREVIEW
+# ---------------------------------------------------------------------------
+
+
+def _require_post3_preview() -> None:
+    """Raise 404 unless the AG-UI surface AND the preview flag are both on."""
+    from cli_agent_orchestrator.services.agui.post3_preview import post3_preview_enabled
+
+    _require_agui_enabled()
+    if not post3_preview_enabled():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AG-UI preview disabled")
+
+
+@app.get("/agui/v1/preview/team-composition", dependencies=[Depends(_require_post3_preview)])
+async def agui_preview_team_composition(
+    scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict[str, Any]:
+    """Read-only team composition for the local tenant: ``agent_card`` and ``metric`` props (#1162)."""
+    from cli_agent_orchestrator.services.agui.post3_preview import build_team_composition
+
+    return build_team_composition(
+        _agui_fleet_snapshot(list(scopes), profiles=False), _agui_profile_catalog()
+    )
+
+
+@app.get("/agui/v1/preview/decisions", dependencies=[Depends(_require_post3_preview)])
+async def agui_preview_decisions(
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_READ, SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict[str, Any]:
+    """Read-only summary of the local approval decision log (#1164)."""
+    from cli_agent_orchestrator.services.agui.post3_preview import (
+        LOCAL_TENANT_ID,
+        get_decision_log,
+    )
+
+    return get_decision_log().summary(LOCAL_TENANT_ID)
+
+
+class A2uiPreviewRequest(BaseModel):
+    component: str = Field(..., description="An emit_ui allow-list component name")
+    props: Dict[str, Any] = Field(default_factory=dict, description="JSON props, under 8 KB")
+    terminal_id: Optional[str] = Field(None, description="Claimed terminal, for the refusal record")
+
+
+@app.post("/agui/v1/preview/a2ui", dependencies=[Depends(_require_post3_preview)])
+async def agui_preview_a2ui(
+    body: A2uiPreviewRequest,
+    _scopes: List[str] = Depends(require_any_scope(SCOPE_WRITE, SCOPE_ADMIN)),
+) -> Dict[str, Any]:
+    """Render one allow-listed ``emit_ui`` component as an A2UI surface (#1194).
+
+    Publishes no UI frame and writes nothing else, with one exception: an off-list component
+    gets the same 400 and the same metadata-only refusal record (``_publish_ui_refusal``) as
+    ``POST /agui/v1/emit_ui``. A listed component the preview cannot render is a 400 too.
+    The allow-list is not widened.
+    """
+    from cli_agent_orchestrator.services.agui.post3_preview import (
+        A2uiRefusal,
+        activity_snapshot,
+        render_text,
+        to_a2ui_operations,
+    )
+    from cli_agent_orchestrator.services.agui_stream import GENERATIVE_UI_COMPONENTS
+
+    if body.component not in GENERATIVE_UI_COMPONENTS:
+        _publish_ui_refusal(body.component, body.terminal_id)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Unknown UI component '{body.component}'. "
+                f"Allowed: {sorted(GENERATIVE_UI_COMPONENTS)}"
+            ),
+        )
+    try:
+        encoded = json.dumps(body.props)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="props must be JSON-serializable"
+        )
+    if len(encoded.encode("utf-8")) > 8 * 1024:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="props payload too large (>8KB)"
+        )
+    try:
+        operations = to_a2ui_operations(body.component, body.props)
+        rendered = render_text(operations)
+    except A2uiRefusal as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return {
+        "frame": activity_snapshot(operations, f"a2ui-{uuid.uuid4().hex[:12]}"),
+        "rendered": rendered,
+    }
 
 
 # Topology widget static bundle at /widgets/topology/ — the vanilla SSE-driven
