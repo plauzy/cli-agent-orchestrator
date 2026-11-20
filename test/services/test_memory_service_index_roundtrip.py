@@ -17,6 +17,7 @@ tags, empty tags, multiple scopes in one index, ISO-8601 timestamp parseability.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -329,21 +330,18 @@ def test_writer_emits_reader_regex_format(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Performance — AC requires < 1s (U3 tasks.md)
+# Performance -- AC requires < 1s (U3 tasks.md)
 # ---------------------------------------------------------------------------
+#
+# A wall-clock budget is not a unit-test property on a shared CI runner: one run
+# took 2.9 s against this 1 s budget and passed on re-run (#1432). The default
+# run therefore asserts the round trip with no clock; the budget is a perf
+# check that runs only when CAO_RUN_PERF_BUDGETS=1 (a quiet machine).
 
 
-def test_roundtrip_runs_under_one_second(tmp_path: Path) -> None:
-    """Full round-trip for 10 entries completes under 1 second.
-
-    Sanity check against the tasks.md AC4 runtime requirement.
-    """
-    import time
-
+def _store_ten_and_parse(tmp_path: Path, prefix: str) -> list[dict]:
     svc = MemoryService(base_dir=tmp_path)
-    ctx = _ctx(cwd="/home/user/proj-u3-perf")
-
-    start = time.perf_counter()
+    ctx = _ctx(cwd=f"/home/user/{prefix}")
     for i in range(10):
         _run(
             svc.store(
@@ -356,8 +354,28 @@ def test_roundtrip_runs_under_one_second(tmp_path: Path) -> None:
             )
         )
     scope_id = svc.resolve_scope_id("global", ctx)
-    index_path = svc.get_index_path("global", scope_id)
-    parsed = svc._parse_index(index_path)
+    return svc._parse_index(svc.get_index_path("global", scope_id))
+
+
+def test_roundtrip_of_ten_entries_recovers_every_key(tmp_path: Path) -> None:
+    """Ten stores round-trip through the index with no timing assertion."""
+    parsed = _store_ten_and_parse(tmp_path, "proj-u3-perf")
+
+    assert {e["key"] for e in parsed if e["key"].startswith("perf-")} == {
+        f"perf-{i:03d}" for i in range(10)
+    }
+
+
+@pytest.mark.skipif(
+    os.environ.get("CAO_RUN_PERF_BUDGETS", "") != "1",
+    reason="Wall-clock budget; set CAO_RUN_PERF_BUDGETS=1 to run it (flaky on shared CI, #1432).",
+)
+def test_roundtrip_runs_under_one_second(tmp_path: Path) -> None:
+    """Full round-trip for 10 entries completes under 1 second (tasks.md AC4)."""
+    import time
+
+    start = time.perf_counter()
+    parsed = _store_ten_and_parse(tmp_path, "proj-u3-perf-budget")
     elapsed = time.perf_counter() - start
 
     assert any(e["key"].startswith("perf-") for e in parsed)

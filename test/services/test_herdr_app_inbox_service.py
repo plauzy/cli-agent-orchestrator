@@ -1,6 +1,7 @@
 """HerdrAppInboxService: herdr-core events drive delivery, status, teardown, naming."""
 
 import asyncio
+import threading
 from unittest.mock import MagicMock
 
 import pytest
@@ -88,8 +89,6 @@ def test_idle_and_done_deliver(env):
 
 
 def test_slow_delivery_does_not_hold_up_other_events(env):
-    import threading
-
     svc, _, deliver, deleted, _, _ = env
     release = threading.Event()
     seen = []
@@ -528,8 +527,15 @@ def test_failed_subscribe_backs_off(env, monkeypatch):
 def test_connect_loads_snapshot_reconciles_and_names(env, monkeypatch):
     svc, backend, deliver, *_ = env
     reconciled = []
+    delivered = threading.Event()
+    deliver.side_effect = lambda tid: delivered.set()
 
     async def fake_sleep(s):
+        # The stream ends right after the last event, so the reconnect backoff
+        # starts while the delivery task may not have reached its worker thread
+        # yet, and start() cancels it on the way out. Wait for the delivery
+        # itself (bounded), so the order is asserted rather than raced (#1432).
+        assert await asyncio.to_thread(delivered.wait, 10), "delivery never ran"
         raise asyncio.CancelledError
 
     monkeypatch.setattr(mod.asyncio, "sleep", fake_sleep)

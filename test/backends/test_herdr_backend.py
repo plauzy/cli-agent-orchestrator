@@ -85,6 +85,19 @@ class TestHerdrBackendABC:
 # --- Command Construction ---
 
 
+def _module_time() -> MagicMock:
+    """A ``time`` stand-in for ``herdr_backend`` alone: real clock, mocked ``sleep``.
+
+    Patching ``herdr_backend.time.sleep`` replaces the process-wide ``time.sleep``, so
+    a thread still sleeping from another test in the same worker (a CI run saw five
+    ``sleep(0.02)`` calls) was counted by ``assert_not_called``. Replacing
+    the module's own ``time`` name leaves every other module's ``time.sleep`` real.
+    """
+    fake = MagicMock(wraps=time)
+    fake.sleep = MagicMock()
+    return fake
+
+
 class TestHerdrBackendCommands:
     """Verify correct herdr CLI command construction for each method."""
 
@@ -175,8 +188,8 @@ class TestHerdrBackendCommands:
             }
         )
 
-    @patch("cli_agent_orchestrator.backends.herdr_backend.time.sleep")
-    def test_focus_web_input_focuses_and_settles_when_elsewhere(self, mock_sleep, backend):
+    @patch("cli_agent_orchestrator.backends.herdr_backend.time", new_callable=_module_time)
+    def test_focus_web_input_focuses_and_settles_when_elsewhere(self, mock_time, backend):
         """A focus change is followed by a settle wait, so the next key is not lost."""
         target = json.dumps(["cao-test", "developer-abcd"])
         with (
@@ -190,10 +203,10 @@ class TestHerdrBackendCommands:
             backend.focus_web_input(target)
 
         assert run.call_args_list[-1].args[0] == ["tab", "focus", "w1:t2"]
-        mock_sleep.assert_called_once()
+        mock_time.sleep.assert_called_once()
 
-    @patch("cli_agent_orchestrator.backends.herdr_backend.time.sleep")
-    def test_focus_web_input_skips_when_already_focused(self, mock_sleep, backend):
+    @patch("cli_agent_orchestrator.backends.herdr_backend.time", new_callable=_module_time)
+    def test_focus_web_input_skips_when_already_focused(self, mock_time, backend):
         """Typing into the focused tab costs no focus command and no wait."""
         target = json.dumps(["cao-test", "developer-abcd"])
         with (
@@ -205,7 +218,7 @@ class TestHerdrBackendCommands:
             backend.focus_web_input(target)
 
         assert run.call_count == 1
-        mock_sleep.assert_not_called()
+        mock_time.sleep.assert_not_called()
 
     def test_focus_web_input_rejects_malformed_target(self, backend):
         with pytest.raises(TerminalBackendError):

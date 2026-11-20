@@ -301,9 +301,31 @@ def _adopt_controller_isolation() -> None:
     if not raw:
         return
     state = json.loads(raw)
-    _ISOLATED_HOME["path"] = state["home"]
     _REAL_HOME_ENV.update(state["real"])
     _PINNED_ROOT_ENV.update(state["pinned"])
+    _ISOLATED_HOME["path"] = _own_worker_home()
+
+
+def _own_worker_home() -> str:
+    """Give this xdist worker a fake home of its own, and point HOME at it.
+
+    Workers used to share the controller's fake home. Everything CAO keeps under
+    ``~/.aws/cli-agent-orchestrator`` (the SQLite database, ``tmp/term-*.mcp.json``,
+    the workflow and ephemeral stores) was then shared by every worker, so tests
+    that are independent in a serial run collided across processes: one worker's
+    cleanup deleted another's ``term-*.mcp.json``, and two workers reused the
+    session name ``cao-test-session`` in one database (#1408). A home per worker
+    keeps each worker serial inside its own state, which is what a serial run is.
+    """
+    import atexit
+    import shutil
+    import tempfile
+
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "worker")
+    home = os.path.realpath(tempfile.mkdtemp(prefix=f"cao-test-home-{worker}-"))
+    os.environ["HOME"] = home
+    atexit.register(shutil.rmtree, home, True)
+    return home
 
 
 # --------------------------------------------------------------------------- #

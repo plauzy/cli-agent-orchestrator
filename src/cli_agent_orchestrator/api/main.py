@@ -3338,7 +3338,7 @@ async def agui_resume_interrupt(
         decision_enum = ApprovalDecision(body.decision)
     except ValueError:  # pragma: no cover - validate_decision 422s bad values first
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail=f"Invalid decision: {body.decision}",
         )
 
@@ -3350,7 +3350,7 @@ async def agui_resume_interrupt(
         )
     except ValueError as e:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail=str(e),
         )
     except DeliveryError as e:
@@ -4561,7 +4561,7 @@ async def install_agent_plugin(
         # server fault: return the full report so the panel can render every
         # finding rather than a bare error string.
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail=_with_untrusted_warning(outcome.to_dict()),
         )
     return _with_untrusted_warning(outcome.to_dict())
@@ -7759,14 +7759,14 @@ def _script_root(value: Optional[str]) -> str:
     root = os.path.realpath(value if value is not None else os.getcwd())
     if not os.path.isdir(root):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail="working_directory must name an existing directory",
         )
     try:
         return resolve_and_validate_path(root, description="working_directory")
     except ValueError:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail="working_directory must not be a blocked system directory",
         ) from None
 
@@ -10200,7 +10200,7 @@ async def export_graph_endpoint(
     hit = secret_gate.scan_json_for_secrets(view.to_dict())
     if hit is not None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail=f"export rejected: secret pattern '{hit}' detected",
         )
 
