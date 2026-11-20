@@ -128,16 +128,9 @@ Runs **all tests** in `test/` (excluding provider integration tests), plus secur
 - **Security scan**: Trivy vulnerability scanner (CRITICAL/HIGH)
 - **Dependency review**: License and vulnerability checks on PRs
 
-### Provider-Specific Workflows (path-triggered)
-Each provider has a dedicated workflow that runs only when its files change:
+### Provider tests
 
-| Workflow | Tests | Trigger Paths |
-|---|---|---|
-| `test-codex-provider.yml` | `test_codex_provider_unit.py` | `providers/codex.py`, `test/providers/**` |
-| `test-claude-code-provider.yml` | `test_claude_code_unit.py` | `providers/claude_code.py`, `test/providers/**` |
-| `test-kiro-cli-provider.yml` | `test_kiro_cli_unit.py` | `providers/kiro_cli.py`, `test/providers/**` |
-
-Each includes unit tests (Python 3.11/3.12) and code quality checks (black, isort, mypy).
+There is no separate workflow per provider. `ci.yml` runs every provider's unit tests in its `Unit Tests` matrix on every PR, so a provider change gets the same checks as any other change. For a fast loop on one provider, run its tests locally, for example `uv run pytest test/providers/test_codex_*.py`.
 
 ## Writing New Tests
 

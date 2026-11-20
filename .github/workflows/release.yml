@@ -43,6 +43,8 @@ jobs:
   preflight:
     if: github.repository == 'awslabs/cli-agent-orchestrator'
     runs-on: ubuntu-latest
+    # Bounds a hung step; GitHub's default is 360 min. No recent successful run to size from.
+    timeout-minutes: 15
     permissions:
       actions: read
       contents: read
@@ -87,6 +89,8 @@ jobs:
       github.repository == 'awslabs/cli-agent-orchestrator' &&
       needs.preflight.outputs.should_release == 'true'
     runs-on: ubuntu-latest
+    # Bounds a hung step. Slowest recent successful run: 0.3 min; GitHub's default is 360.
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:

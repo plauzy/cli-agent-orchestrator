@@ -50,6 +50,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Bounds a hung step. Slowest recent successful run: 0.8 min; GitHub's default is 360.
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -87,6 +89,10 @@ jobs:
       github.event_name == 'push' &&
       (github.repository == 'awslabs/cli-agent-orchestrator' || vars.DEPLOY_DOCS_PAGES == 'true')
     runs-on: ubuntu-latest
+    # Bounds a hung step. Slowest recent successful run: 0.3 min (2 runs), but
+    # actions/deploy-pages can itself wait up to about 10 min for the deployment,
+    # so this is 20 to leave it room; GitHub's default is 360.
+    timeout-minutes: 20
     permissions:
       pages: write
       id-token: write
