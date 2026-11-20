@@ -26,6 +26,13 @@ permissions:
 env:
   UV_LOCKED: "1"
 
+# Supersede only obsolete pull-request heads: a new push to the same PR cancels the
+# run it made stale. Push, schedule and manual runs get a unique group (run_id), so
+# they are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   simulator:
     name: Factory simulator

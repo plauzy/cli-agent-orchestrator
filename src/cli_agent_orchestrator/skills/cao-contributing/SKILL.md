@@ -145,10 +145,9 @@ failure states, and the required-status rollout after the workflow lands.
 
 ### Other workflows that gate a PR
 
-`ci.yml` is not the only workflow on a pull request: secret scanning, cargo-deny, the
-per-provider suites, the two robotics examples, the docs site and zizmor gate too, and none of
-them tolerates a failure. The full table, with the local command for each and the warning that
-two checks can share a name, is in
+`ci.yml` is not the only workflow on a pull request: secret scanning, cargo-deny, the two
+robotics examples, the docs site and zizmor gate too, and none of them tolerates a failure.
+The full table, with the local command for each, is in
 [`references/pr-gating-workflows.md`](references/pr-gating-workflows.md).
 
 ## Testing gotchas

@@ -135,6 +135,8 @@ jobs:
   web-build:
     name: Web UI Build
     runs-on: ubuntu-latest
+    # Bounds a hung step. Slowest recent successful run: 1.7 min; GitHub's default is 360.
+    timeout-minutes: 15
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -234,6 +236,8 @@ jobs:
   aidlc-portfolio-example:
     name: AI-DLC Portfolio Example
     runs-on: ubuntu-latest
+    # Bounds a hung step. Slowest recent successful run: 0.8 min; GitHub's default is 360.
+    timeout-minutes: 10
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -334,6 +338,8 @@ jobs:
     name: Coverage ratchet
     needs: [test, cao-mcp-apps]
     runs-on: ubuntu-latest
+    # Bounds a hung step. Slowest recent successful run: 0.3 min; GitHub's default is 360.
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -403,6 +409,8 @@ jobs:
   lint:
     name: Code Quality
     runs-on: ubuntu-latest
+    # Bounds a hung step. Slowest recent successful run: 1.8 min; GitHub's default is 360.
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -1089,6 +1097,8 @@ jobs:
   security:
     name: Security Scan
     runs-on: ubuntu-latest
+    # Bounds a hung step. Slowest recent successful run: 0.7 min; GitHub's default is 360.
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -1173,6 +1183,8 @@ jobs:
   dependency-review:
     name: Dependency Review
     runs-on: ubuntu-latest
+    # Bounds a hung step. Slowest recent successful run: 0.2 min; GitHub's default is 360.
+    timeout-minutes: 10
     if: github.event_name == 'pull_request' && github.repository == 'awslabs/cli-agent-orchestrator'
 
     steps:
@@ -1213,6 +1225,8 @@ jobs:
     name: CI gate (advisory)
     if: ${{ always() }}
     runs-on: ubuntu-latest
+    # Bounds a hung step. A summary job over `needs`; it runs for seconds.
+    timeout-minutes: 5
     needs:
       - test
       - web-build
