@@ -168,12 +168,11 @@ provider override while keeping the same sequence.
 - [HTTP API and PTY WebSocket](docs/api.md): route-family overview and terminal
   streaming contract.
 - [Agent plugins](docs/agent-plugins.md): installing portable Agent Plugins
-  1.0.0 packages, and CAO's own operator and contributor packages. Every
-  surface — the CLI, TUI, web panel, and the `/plugins*` HTTP routes — is built
-  but **gated off by default** pending a naming decision. Set
-  `CAO_AGENT_PLUGINS_ENABLED` to open it; until then the routes answer `404`,
-  exactly as an unregistered path would. CAO's own packages also install without
-  that gate from the repository's marketplace catalogs:
+  1.0.0 packages, and CAO's own operator and contributor packages. `cao plugin` and
+  the `/plugins*` HTTP routes are on by default; set `CAO_AGENT_PLUGINS_ENABLED=0`
+  to close them, after which the routes answer `404`, exactly as an unregistered
+  path would. The web panel tab and the TUI rows are still gated off. CAO's own
+  packages also install without that gate from the repository's marketplace catalogs:
   `/plugin marketplace add awslabs/cli-agent-orchestrator` in Claude Code, or
   `codex plugin marketplace add awslabs/cli-agent-orchestrator` in Codex
   ([details](docs/agent-plugins.md#install-from-the-marketplace)).

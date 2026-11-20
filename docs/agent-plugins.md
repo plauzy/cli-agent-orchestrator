@@ -86,8 +86,8 @@ than merely unimplemented.
 > agent plugins. That retracts a roadmap item, because `docs/plugins.md` had
 > promised `cao plugin list / info / enable / disable` for *event* plugins;
 > event plugins get `cao event-plugin …` if that surface is built. Deciding the
-> verb did not ship it. The surface is still gated; see the "built but not
-> shipped" note further down this section.
+> verb did not ship it; graduation does (#1393). See the note further down this
+> section for what is on by default and how to switch it off.
 
 ```bash
 # Install from a local directory
@@ -163,21 +163,31 @@ The same operations are available over the HTTP API — `GET/POST /plugins`,
 **Plugins** tab.
 
 > [!NOTE]
-> The whole management surface is **built but not shipped**. Requirement 16.5
-> forbade it reaching end users while **M1** was open. M1 is now decided, but
-> shipping is a separate maintainer decision, graduation, tracked in
-> [#1244](https://github.com/awslabs/cli-agent-orchestrator/issues/1244). Until
-> then the surface is off by default and refuses to execute: the `cao plugin` command group and all four
-> HTTP routes are gated on the `CAO_AGENT_PLUGINS_ENABLED` environment variable
-> (`1`/`true`/`yes`), the routes returning 404 and the command group erroring out
-> without it. The web **Plugins** tab is additionally gated off at build time by
-> `PLUGINS_TAB_ENABLED` in `web/src/featureFlags.ts`, and the four TUI rows are
-> `Policy::Hidden` and filtered out of the command palette entirely. To try the
-> surface before it graduates, export the variable:
+> The command group and the four HTTP routes graduate with
+> [#1393](https://github.com/awslabs/cli-agent-orchestrator/issues/1393). They
+> share one execution gate, the `CAO_AGENT_PLUGINS_ENABLED` environment variable,
+> and the gate is **on by default**: `cao plugin` is listed in `cao --help` and runs,
+> and the routes answer. The criteria set in #1393 are that the verb (**M1**) and
+> the event-plugin skill rename (**M4**) are settled
+> ([#1244](https://github.com/awslabs/cli-agent-orchestrator/issues/1244)), that a
+> release carries the `cao plugin validate` Agent Skills limit warnings
+> ([#1236](https://github.com/awslabs/cli-agent-orchestrator/pull/1236)), and that a
+> maintainer reviews the install path, because plugins are untrusted content. This
+> note is accurate once a release carries all three.
+>
+> Plugins are untrusted content, so the gate stays as a kill switch. Set the variable to
+> `0`, `false`, `no` or `off` to close the surface again: the routes return 404, as an
+> unregistered path would, and every `cao plugin` subcommand refuses. Unset, empty and
+> any other value leave it open. The value is read on every call, so exporting it into a
+> running shell takes effect without a restart.
 >
 > ```bash
-> export CAO_AGENT_PLUGINS_ENABLED=1
+> export CAO_AGENT_PLUGINS_ENABLED=0   # close the surface
 > ```
+>
+> Two surfaces did **not** graduate with the gate. The web **Plugins** tab is still
+> gated off at build time by `PLUGINS_TAB_ENABLED` in `web/src/featureFlags.ts`, and the
+> four TUI rows are `Policy::Hidden` and filtered out of the command palette entirely.
 >
 > Authorization is separate from that gate and still applies once it is open:
 > reads need `cao:read` or better, and install, validate and remove need
@@ -606,7 +616,7 @@ failing CI on any drift.
 
 The repository root carries a marketplace catalog for each client that can add a
 repository as a marketplace, so the four packages above install without
-cloning anything or enabling `CAO_AGENT_PLUGINS_ENABLED`:
+cloning anything or going through `cao plugin`:
 
 ```sh
 # Claude Code
@@ -818,7 +828,7 @@ At the commit that added the package, this exits `0` and ends with
 advisory is the listing of the manifest's description beside the skills that
 would load, which the audit prints whenever it reads a manifest, for a reader to
 compare. On the same
-package, `CAO_AGENT_PLUGINS_ENABLED=1 cao plugin validate
+package, `cao plugin validate
 ./agent-plugin/cao-agent-plugin-lifecycle --json` reports `"loadable": true` and
 no findings, exit `0`.
 

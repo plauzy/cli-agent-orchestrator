@@ -88,9 +88,8 @@ fail() { echo "$MARK FAIL: $*" >&2; exit 1; }
 rel()  { printf '%s' "${1/$CAO_HOME_DIR/\$CAO_HOME}"; }
 
 hdr "=== CAO Agent Plugins — dog-food $([ "$LIVE_MODE" = 1 ] && echo '(live)' || echo '(offline)') ==="
-hdr "Note: the 'cao plugin' surface is gated off by default (maintainer gate M1):"
-hdr "      absent from 'cao --help', and it refuses to run without"
-hdr "      CAO_AGENT_PLUGINS_ENABLED=1, which this run exports."
+hdr "Note: the 'cao plugin' surface is on by default; CAO_AGENT_PLUGINS_ENABLED=0 closes it."
+hdr "      This run exports CAO_AGENT_PLUGINS_ENABLED=1 so it also works on older releases."
 hdr "Isolated scratch (no real home, no secrets): $SCRATCH"
 
 # ── step 1: validate ─────────────────────────────────────────────────────────

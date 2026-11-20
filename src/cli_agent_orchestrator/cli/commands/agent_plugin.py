@@ -131,29 +131,27 @@ def _echo_affected(affected: List[AffectedSession]) -> None:
     )
 
 
-# Two separate gates, doing two different jobs. ``hidden=True`` keeps the verb out
-# of ``cao --help`` until the surface graduates (#1244); the group callback below
-# is the *execution* gate, because hiding help text leaves dispatch untouched and
-# every subcommand still ran.
-# Click has no built-in "disabled group", so the callback — which Click invokes
-# before any subcommand — is the mechanism. When the surface graduates, ``hidden`` flips and
-# the gate's default flips; they are independent decisions.
-@click.group("plugin", hidden=True)
+# The group callback is the *execution* gate. Click invokes it before any subcommand,
+# and it is the only way to refuse a whole group, since ``hidden=True`` suppresses help
+# text and leaves dispatch untouched. The surface graduated (#1393), so the gate is
+# default-on and the verb is listed in ``cao --help``; ``CAO_AGENT_PLUGINS_ENABLED=0``
+# closes it again. The verb is decision M1, recorded by the issue author in #573. The
+# docstring below is what ``cao plugin --help`` prints, so it stays free of repo paths and
+# issue numbers (test/cli/test_help_content.py).
+@click.group("plugin")
 def agent_plugin() -> None:
     """Manage agent plugins (Agent Plugins 1.0.0).
 
-    Not to be confused with CAO's event-plugin system (see docs/plugins.md),
-    which reacts to CAO lifecycle events and is managed separately.
+    Not to be confused with CAO's event-plugin system, which reacts to CAO
+    lifecycle events and is managed separately.
 
-    Hidden from ``cao --help`` and refusing to execute unless
-    ``CAO_AGENT_PLUGINS_ENABLED`` is set, pending graduation (#1244). The verb is
-    decision M1, recorded by the issue author in #573.
+    Set CAO_AGENT_PLUGINS_ENABLED=0 (or false, no, off) to disable this command
+    group and the matching HTTP routes.
     """
     if not agent_plugins_surface_enabled():
         raise click.ClickException(
-            "The agent plugin surface is not released yet (pending graduation, "
-            "#1244; the verb is decision M1, recorded by the issue author in #573). "
-            "Set CAO_AGENT_PLUGINS_ENABLED=1 to enable it."
+            "The agent plugin surface is disabled by CAO_AGENT_PLUGINS_ENABLED. "
+            "Unset it, or set it to 1, to enable it."
         )
 
 

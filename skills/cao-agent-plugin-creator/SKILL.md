@@ -264,18 +264,23 @@ validator's registry hook refuses every remote retrieval (`_refuse_retrieval` in
 
 ## Check the package with CAO's validator
 
-The `cao plugin` commands are behind a release gate. **`CAO_AGENT_PLUGINS_ENABLED`
-must be set to a truthy value**: CAO strips the value and lowercases it, then
-compares it against `1`, `true` and `yes`, so `TRUE` and ` yes ` both work
-(`src/cli_agent_orchestrator/agent_plugins/gate.py`). Set it inline, on the
-command, rather than exporting it into your shell:
+The `cao plugin` commands were behind a release gate until graduation (#1393). In a
+release that includes graduation the gate is on by default and
+`CAO_AGENT_PLUGINS_ENABLED` only matters when it is set to `0`, `false`, `no` or
+`off`, which makes every `cao plugin` command refuse. In an older release the
+variable **must be set to a truthy value** (`1`, `true` or `yes`, stripped and
+lowercased) or the commands refuse
+(`src/cli_agent_orchestrator/agent_plugins/gate.py`). Setting it to `1` inline works
+on both, so the commands below keep it. Set it on the command rather than exporting
+it into your shell:
 
 ```bash
 CAO_AGENT_PLUGINS_ENABLED=1 cao plugin validate ./my-package
 ```
 
-**With `CAO_AGENT_PLUGINS_ENABLED` unset, `cao plugin validate` exits 1, prints a
-refusal on stderr, and emits no JSON at all, even with `--json`.** It has not looked at your package.
+**When the gate is closed (an older release with the variable unset, or any release
+with it set to `0`), `cao plugin validate` exits 1, prints a refusal on stderr, and
+emits no JSON at all, even with `--json`.** It has not looked at your package.
 That exit 1 is not a conformance result, so do not conclude the package is broken
 from it.
 
