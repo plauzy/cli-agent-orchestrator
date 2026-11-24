@@ -1186,6 +1186,140 @@ def test_cancelled_create_rollback_keeps_the_row_when_provider_cleanup_is_deferr
     assert session_lock._session_locks == {}
 
 
+def test_single_terminal_delete_cannot_slip_between_create_row_and_registration(
+    real_db, runtime, monkeypatch
+):
+    """#1468 -- ``delete_terminal`` must not run between a create's row write and
+    its FIFO reader / provider registration.
+
+    The create commits its row first, so the id is visible before the reader and
+    the provider exist. A ``delete_terminal`` in that gap stopped nothing,
+    dropped the row and returned; the create then registered both for a row that
+    was gone. The create is paused in ``fifo_manager.create_reader`` (no load, no
+    sleeps). The referee lets it go once the delete has either finished (the bug)
+    or is waiting on the lifecycle lock (the fix). Afterwards nothing of the
+    terminal may be left in either store.
+    """
+    backend = FakeTmuxBackend()
+    set_backend(backend)
+    name = "cao-race-1468"
+
+    reader_reached = threading.Event()
+    reader_release = threading.Event()
+    created_ids: List[str] = []
+    delete_started = threading.Event()
+    delete_finished = threading.Event()
+
+    def _paused_create_reader(terminal_id, **kwargs):
+        created_ids.append(terminal_id)
+        reader_reached.set()
+        assert reader_release.wait(DEADLOCK_TIMEOUT), "reader gate never released"
+        runtime.fifo_readers.add(terminal_id)
+
+    monkeypatch.setattr(terminal_service.fifo_manager, "create_reader", _paused_create_reader)
+
+    def _waiters(session):
+        with session_lock._registry_guard:
+            entry = session_lock._session_locks.get(session)
+        return 0 if entry is None else entry[1]
+
+    def _create():
+        return _create_in_thread(name)
+
+    def _delete():
+        assert reader_reached.wait(DEADLOCK_TIMEOUT), "create never reached registration"
+        delete_started.set()
+        try:
+            return terminal_service.delete_terminal(created_ids[0], end_reason="deleted")
+        finally:
+            delete_finished.set()
+
+    def _referee():
+        try:
+            assert delete_started.wait(DEADLOCK_TIMEOUT), "delete thread never started"
+            deadline = time.monotonic() + DEADLOCK_TIMEOUT
+            while not delete_finished.wait(0.005):
+                if _waiters(name) >= 2:
+                    break
+                assert time.monotonic() < deadline, "delete neither finished nor blocked"
+        finally:
+            reader_release.set()
+
+    create_result, delete_result, referee_result = _run_threads([_create, _delete, _referee])
+
+    assert create_result[0] == "ok", f"create failed: {create_result[1]!r}"
+    assert referee_result[0] == "ok", f"referee failed: {referee_result[1]!r}"
+    assert delete_result[0] == "ok", f"delete failed: {delete_result[1]!r}"
+    tid = created_ids[0]
+    assert database.get_terminal_metadata(tid) is None
+    assert runtime.is_fully_gone(
+        tid
+    ), "a single-terminal delete ran between the create's row write and its registration"
+    assert session_lock._session_locks == {}
+
+
+class TestDeleteTerminalTakesTheLifecycleLock:
+    """#1468: the lock-and-re-read wrapper around the single-terminal teardown."""
+
+    @pytest.fixture
+    def seam(self, monkeypatch):
+        rows = {"dt000001": {"id": "dt000001", "tmux_session": "cao-dt"}}
+        inner_calls = []
+
+        def _inner(terminal_id, registry=None, *, end_reason):
+            entry = session_lock._session_locks.get("cao-dt")
+            inner_calls.append((terminal_id, end_reason, entry is not None and entry[0].locked()))
+            rows.pop(terminal_id, None)
+            return True
+
+        monkeypatch.setattr(terminal_service, "get_terminal_metadata", lambda tid: rows.get(tid))
+        monkeypatch.setattr(terminal_service, "_delete_terminal_locked", _inner)
+        return rows, inner_calls
+
+    def test_the_teardown_runs_under_the_session_lock(self, seam):
+        _, inner_calls = seam
+        assert terminal_service.delete_terminal("dt000001", end_reason="deleted") is True
+        assert inner_calls == [("dt000001", "deleted", True)]
+        assert session_lock._session_locks == {}
+
+    def test_a_row_removed_while_waiting_is_not_torn_down_twice(self, seam):
+        """The row is re-read under the lock. If a session teardown (or another
+        delete) removed it while this delete waited, the remover did the whole
+        teardown: return True, the outcome callers treat as done (False would
+        make them retry), and do not run a second teardown."""
+        rows, inner_calls = seam
+        result = {}
+        with session_lock.session_lifecycle_lock("cao-dt"):
+            worker = threading.Thread(
+                target=lambda: result.setdefault(
+                    "r", terminal_service.delete_terminal("dt000001", end_reason="deleted")
+                ),
+                daemon=True,
+            )
+            worker.start()
+            _wait_until_lock_contended("cao-dt")
+            rows.clear()  # the holder removes the row, then releases
+        worker.join(DEADLOCK_TIMEOUT)
+        assert not worker.is_alive()
+        assert result == {"r": True}
+        assert inner_calls == []
+        assert session_lock._session_locks == {}
+
+    @pytest.mark.parametrize(
+        "row", [None, {"id": "dt000001", "tmux_session": None}], ids=["no-row", "no-session"]
+    )
+    def test_no_row_or_no_session_falls_through_to_the_old_teardown(self, seam, row):
+        """Nothing to lock, so nothing a create can race with: the unlocked
+        teardown runs as before this change (it still cleans any runtime left)."""
+        rows, inner_calls = seam
+        rows.clear()
+        if row is not None:
+            rows["dt000001"] = row
+        assert terminal_service.delete_terminal("dt000001", end_reason="deleted") is True
+        assert inner_calls == [("dt000001", "deleted", False)]
+        assert session_lock._session_locks == {}
+
+
 class OverlapDetectingBackend(FakeTmuxBackend):
     """Detects two teardowns of the same name inside their critical sections.
 

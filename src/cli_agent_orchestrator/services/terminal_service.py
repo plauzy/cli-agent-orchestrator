@@ -7551,9 +7551,43 @@ def delete_terminal(
     have always run. Session teardown does NOT use this -- it interleaves its own
     tmux kill-confirmation between them (see ``services/session_service.py``).
 
+    Runs under ``session_lifecycle_lock`` for the terminal's session (#1468), as
+    ``delete_session`` does. A create commits its row inside that lock and
+    registers its FIFO reader and provider before releasing it, so a delete that
+    takes the lock waits for those registrations and then tears them down,
+    instead of dropping the row while the create is still registering. The row
+    is re-read once the lock is held: a session teardown or another delete may
+    have removed it while this one waited.
+
+    The lock is not reentrant. A caller that already holds it for this session
+    must call ``_delete_terminal_locked`` instead. Synchronous and blocking on a
+    ``threading.Lock``: async callers run it through ``asyncio.to_thread``.
+
     Returns False when the teardown was deferred (see
     ``dismantle_terminal_runtime``), leaving the row in place for a retry.
     ``end_reason`` is passed through to ``delete_terminal_row``.
+    """
+    row = get_terminal_metadata(terminal_id)
+    session_name = row.get("tmux_session") if row else None
+    if not session_name:
+        # No row (or no session to lock): nothing a create can be racing with.
+        # The unlocked teardown keeps the old behaviour for this case.
+        return _delete_terminal_locked(terminal_id, registry, end_reason=end_reason)
+    with session_lifecycle_lock(str(session_name)):
+        if get_terminal_metadata(terminal_id) is None:
+            # Removed while this delete waited for the lock; the remover did
+            # the whole teardown.
+            return True
+        return _delete_terminal_locked(terminal_id, registry, end_reason=end_reason)
+
+
+def _delete_terminal_locked(
+    terminal_id: str, registry: PluginRegistry | None = None, *, end_reason: str
+) -> bool:
+    """``delete_terminal``'s teardown, for a caller that already holds the lock.
+
+    The caller must hold ``session_lifecycle_lock`` for the terminal's session
+    (or know there is no row to race with); this function takes no lock.
     """
     # Tell any caller waiting on this worker before teardown starts. Imported
     # here because delegation_callback_service imports this module.
