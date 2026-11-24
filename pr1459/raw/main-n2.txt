@@ -1,0 +1,3 @@
+rc=1
+.                                                                        [100%]======== Decision state changed under startup CAO home: decisions.halt =========
+============================== 1 passed in 7.17s ===============================

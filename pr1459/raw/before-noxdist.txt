@@ -1,0 +1,4 @@
+rc=3
+INTERNALERROR>     raise PluginValidationError(
+INTERNALERROR> pluggy._manager.PluginValidationError: unknown hook 'pytest_testnodedown' in plugin <test._must_run.MustRunGate object at 0x106c8cb90>
+============================ no tests ran in 0.22s =============================
