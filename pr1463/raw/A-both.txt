@@ -1,0 +1,23 @@
+$ cd /work   # both
+run 01/20  passed  
+    1 passed, 4 warnings in 101.20s (0:01:41)
+run 02/20  passed  
+run 03/20  passed  
+run 04/20  passed  
+run 05/20  passed  
+run 06/20  passed  
+run 07/20  passed  
+run 08/20  passed  
+run 09/20  passed  
+run 10/20  passed  
+run 11/20  passed  
+run 12/20  passed  
+run 13/20  passed  
+run 14/20  passed  
+run 15/20  passed  
+run 16/20  passed  
+run 17/20  passed  
+run 18/20  passed  
+run 19/20  passed  
+run 20/20  passed  
+RESULT both: 0 / 20 failed

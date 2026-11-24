@@ -1,0 +1,23 @@
+$ cd /work   # both-commits
+run 01/20  passed  
+    1 passed, 2 warnings in 122.99s (0:02:02)
+run 02/20  passed  
+run 03/20  passed  
+run 04/20  passed  
+run 05/20  passed  
+run 06/20  passed  
+run 07/20  passed  
+run 08/20  passed  
+run 09/20  passed  
+run 10/20  passed  
+run 11/20  passed  
+run 12/20  passed  
+run 13/20  passed  
+run 14/20  passed  
+run 15/20  passed  
+run 16/20  passed  
+run 17/20  passed  
+run 18/20  passed  
+run 19/20  passed  
+run 20/20  passed  
+RESULT both-commits: 0 / 20 failed

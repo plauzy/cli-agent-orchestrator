@@ -1,0 +1,28 @@
+$ cd /work   # main
+run 01/20  FAILED  AssertionError: a same-name teardown ran between the create's lock release and its registration
+            assert create_result[0] == "ok", f"create failed: {create_result[1]!r}"
+            assert referee_result[0] == "ok", f"referee failed: {referee_result[1]!r}"
+            assert teardown_result[0] == "ok", f"teardown failed: {teardown_result[1]!r}"
+    E       AssertionError: a same-name teardown ran between the create's lock release and its registration
+    E       assert False
+    E        +  where False = is_fully_gone('50adca79')
+run 02/20  FAILED  AssertionError: a same-name teardown ran between the create's lock release and its registration
+run 03/20  FAILED  AssertionError: a same-name teardown ran between the create's lock release and its registration
+run 04/20  FAILED  AssertionError: a same-name teardown ran between the create's lock release and its registration
+run 05/20  FAILED  AssertionError: a same-name teardown ran between the create's lock release and its registration
+run 06/20  FAILED  AssertionError: a same-name teardown ran between the create's lock release and its registration
+run 07/20  FAILED  AssertionError: a same-name teardown ran between the create's lock release and its registration
+run 08/20  FAILED  AssertionError: a same-name teardown ran between the create's lock release and its registration
+run 09/20  FAILED  AssertionError: a same-name teardown ran between the create's lock release and its registration
+run 10/20  FAILED  AssertionError: a same-name teardown ran between the create's lock release and its registration
+run 11/20  FAILED  AssertionError: a same-name teardown ran between the create's lock release and its registration
+run 12/20  FAILED  AssertionError: a same-name teardown ran between the create's lock release and its registration
+run 13/20  FAILED  AssertionError: a same-name teardown ran between the create's lock release and its registration
+run 14/20  FAILED  AssertionError: a same-name teardown ran between the create's lock release and its registration
+run 15/20  FAILED  AssertionError: a same-name teardown ran between the create's lock release and its registration
+run 16/20  FAILED  AssertionError: a same-name teardown ran between the create's lock release and its registration
+run 17/20  FAILED  AssertionError: a same-name teardown ran between the create's lock release and its registration
+run 18/20  FAILED  AssertionError: a same-name teardown ran between the create's lock release and its registration
+run 19/20  FAILED  AssertionError: a same-name teardown ran between the create's lock release and its registration
+run 20/20  FAILED  AssertionError: a same-name teardown ran between the create's lock release and its registration
+RESULT main: 20 / 20 failed

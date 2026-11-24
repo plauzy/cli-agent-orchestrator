@@ -1,0 +1,28 @@
+$ cd /work   # commit1-only
+run 01/20  FAILED  AssertionError: a single-terminal delete ran between the create's row write and its registration
+            assert create_result[0] == "ok", f"create failed: {create_result[1]!r}"
+            assert referee_result[0] == "ok", f"referee failed: {referee_result[1]!r}"
+            assert delete_result[0] == "ok", f"delete failed: {delete_result[1]!r}"
+    E       AssertionError: a single-terminal delete ran between the create's row write and its registration
+    E       assert False
+    E        +  where False = is_fully_gone('91aa53bc')
+run 02/20  FAILED  AssertionError: a single-terminal delete ran between the create's row write and its registration
+run 03/20  FAILED  AssertionError: a single-terminal delete ran between the create's row write and its registration
+run 04/20  FAILED  AssertionError: a single-terminal delete ran between the create's row write and its registration
+run 05/20  FAILED  AssertionError: a single-terminal delete ran between the create's row write and its registration
+run 06/20  FAILED  AssertionError: a single-terminal delete ran between the create's row write and its registration
+run 07/20  FAILED  AssertionError: a single-terminal delete ran between the create's row write and its registration
+run 08/20  FAILED  AssertionError: a single-terminal delete ran between the create's row write and its registration
+run 09/20  FAILED  AssertionError: a single-terminal delete ran between the create's row write and its registration
+run 10/20  FAILED  AssertionError: a single-terminal delete ran between the create's row write and its registration
+run 11/20  FAILED  AssertionError: a single-terminal delete ran between the create's row write and its registration
+run 12/20  FAILED  AssertionError: a single-terminal delete ran between the create's row write and its registration
+run 13/20  FAILED  AssertionError: a single-terminal delete ran between the create's row write and its registration
+run 14/20  FAILED  AssertionError: a single-terminal delete ran between the create's row write and its registration
+run 15/20  FAILED  AssertionError: a single-terminal delete ran between the create's row write and its registration
+run 16/20  FAILED  AssertionError: a single-terminal delete ran between the create's row write and its registration
+run 17/20  FAILED  AssertionError: a single-terminal delete ran between the create's row write and its registration
+run 18/20  FAILED  AssertionError: a single-terminal delete ran between the create's row write and its registration
+run 19/20  FAILED  AssertionError: a single-terminal delete ran between the create's row write and its registration
+run 20/20  FAILED  AssertionError: a single-terminal delete ran between the create's row write and its registration
+RESULT commit1-only: 20 / 20 failed
